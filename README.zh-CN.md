@@ -1,201 +1,155 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
+  <img src="assets/banner.png" alt="Hermes 多用户 Web 服务" width="100%">
 </p>
 
-# Hermes Agent ☤
+# Hermes 多用户 Web 服务
 
 <p align="center">
-  <a href="https://hermes-agent.nousresearch.com/docs/"><img src="https://img.shields.io/badge/Docs-hermes--agent.nousresearch.com-FFD700?style=for-the-badge" alt="Documentation"></a>
-  <a href="https://discord.gg/NousResearch"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/NousResearch/hermes-agent/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://nousresearch.com"><img src="https://img.shields.io/badge/Built%20by-Nous%20Research-blueviolet?style=for-the-badge" alt="Built by Nous Research"></a>
+  <a href="https://github.com/SeerBench/hermes-multiuser-web-service/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Upstream-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Upstream: Hermes Agent"></a>
   <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-lightgrey?style=for-the-badge" alt="English"></a>
 </p>
 
-**由 [Nous Research](https://nousresearch.com) 构建的自进化 AI 代理。** 它是唯一内置学习闭环的智能代理——从经验中创建技能，在使用中改进技能，主动持久化知识，搜索过往对话，并在跨会话中逐步构建对你的深度理解。可以在 $5 的 VPS 上运行，也可以在 GPU 集群上运行，或者使用几乎零成本的 Serverless 基础设施。它不绑定你的笔记本——你可以在 Telegram 上与它对话，而它在云端 VM 上工作。
+本仓库是 [Nous Research 的 Hermes Agent](https://github.com/NousResearch/hermes-agent) 的分叉，在 Agent 核心之上增加了**可自托管的多用户 Web 聊天服务**。单后端进程、每用户账号、每用户文件系统沙箱、每用户 30 天滚动 token 配额、SSE 浏览器 SPA。其余部分——Agent 主循环、技能系统、记忆、工具、模型提供商、网关适配器——全部来自上游。
 
-支持任意模型——[Nous Portal](https://portal.nousresearch.com)、[OpenRouter](https://openrouter.ai)（200+ 模型）、[NVIDIA NIM](https://build.nvidia.com)（Nemotron）、[小米 MiMo](https://platform.xiaomimimo.com)、[z.ai/GLM](https://z.ai)、[Kimi/Moonshot](https://platform.moonshot.ai)、[MiniMax](https://www.minimax.io)、[Hugging Face](https://huggingface.co)、OpenAI，或自定义端点。使用 `hermes model` 即可切换——无需改代码，无锁定。
-
-<table>
-<tr><td><b>真正的终端界面</b></td><td>完整的 TUI，支持多行编辑、斜杠命令自动补全、对话历史、中断重定向和流式工具输出。</td></tr>
-<tr><td><b>随你所在</b></td><td>Telegram、Discord、Slack、WhatsApp、Signal 和 CLI——全部从单个网关进程运行。语音备忘录转写、跨平台对话连续性。</td></tr>
-<tr><td><b>闭环学习</b></td><td>代理管理记忆并定期自我提醒。复杂任务后自动创建技能。技能在使用中自我改进。FTS5 会话搜索配合 LLM 摘要实现跨会话回溯。<a href="https://github.com/plastic-labs/honcho">Honcho</a> 辩证式用户建模。兼容 <a href="https://agentskills.io">agentskills.io</a> 开放标准。</td></tr>
-<tr><td><b>定时自动化</b></td><td>内置 cron 调度器，支持向任何平台投递。日报、夜间备份、周审计——全部用自然语言描述，无人值守运行。</td></tr>
-<tr><td><b>委派与并行</b></td><td>生成隔离子代理处理并行工作流。编写 Python 脚本通过 RPC 调用工具，将多步管道压缩为零上下文开销的轮次。</td></tr>
-<tr><td><b>随处运行</b></td><td>六种终端后端——本地、Docker、SSH、Daytona、Singularity 和 Modal。Daytona 和 Modal 提供 Serverless 持久化——代理环境空闲时休眠、按需唤醒，空闲期间几乎零成本。$5 VPS 或 GPU 集群都能跑。</td></tr>
-<tr><td><b>研究就绪</b></td><td>批量轨迹生成、轨迹压缩——用于训练下一代工具调用模型。</td></tr>
-</table>
+> 上游 Hermes 是单用户 CLI/即时通讯 Agent。本分叉保留这一形态不变，在原有 Telegram / Discord / Slack / api_server 适配器旁边并列加入一个 `web_chat` 网关平台。
 
 ---
 
-## 快速安装
+## 本分叉新增的内容
+
+所有新代码位于 `gateway/web/` 和 `gateway/platforms/web_chat.py` 之内，该范围之外的文件不做修改。
+
+| 组件 | 文件 | 作用 |
+|---|---|---|
+| 用户账号 | `gateway/web/users.py` | SQLite `web_users.db`——Argon2id 密码、API 密钥（`hermes_sk_…`）、浏览器会话（`hermes_ws_…`）、滚动 token 配额 |
+| 鉴权中间件 | `gateway/web/auth.py` | Cookie + Bearer 两种凭据；把 `user_id` 绑定到请求 |
+| 每用户沙箱 | `gateway/web/sandbox.py` | 用 ContextVar 隔离每请求的 workspace 和 `HERMES_HOME` |
+| 配额闸门 | `gateway/web/quota.py` | 请求前 429 拦截，请求后记录 token，输出 `X-Quota-*` 响应头 |
+| Agent 运行器 | `gateway/web/chat_runner.py` | 在 executor 线程内启动 `AIAgent`；与 `api_server.py` 平行实现而非改写 |
+| 沙箱化文件工具 | `gateway/web/tools/sandboxed_file_operations.py` | `web_file_read/write/patch/search`——用 `confine_path()` 包装上游文件工具 |
+| HTTP/SSE 适配器 | `gateway/platforms/web_chat.py` | `/api/auth/*`、`/api/keys`、`/api/conversations`、`/api/usage`、`/api/chat`（SSE） |
+
+`state.db` 在用户间共享，但通过会话写入层新增的 `user_id` 列实现隔离。记忆（`MEMORY.md`、`USER.md`、Honcho 缓存）则完全隔离——所有记忆 provider 都通过 `get_hermes_home()` 寻路，而沙箱会在每个请求里覆写 `HERMES_HOME`。
+
+---
+
+## 与上游 Hermes 的兼容策略
+
+Hermes Agent 是一个迭代很快的项目。本分叉的设计目标是**长期都能干净地 rebase 到每一次上游发布**。具体做法：
+
+- **子包隔离。** 所有多用户代码都在 `gateway/web/` 包内。仅 `import gateway.web` 不会触碰 Hermes 的其它部分，外部布线零改动。
+- **镜像而非改写。** `chat_runner.py` 是 `api_server.py` Agent 工厂的并列实现，不是它的重构。用约 150 行代码的重复换取与上游编辑频率最高的文件之间零冲突。
+- **包装而非分叉。** 沙箱化文件工具直接 `import` 并调用 `tools/file_tools.py` 的函数，只在外层加一个 `confine_path()` 校验。上游对文件工具的任何改动都自动生效。
+- **走 toolset 而非改核心。** 新工具（`web_file_*`）通过 `toolsets.py` 里专设的 `hermes-web-chat` toolset 注册——这是子包之外唯一的一处编辑。
+- **可选依赖、按需安装。** `argon2-cffi` 放在 `[web-chat]` extra 之后，不跑 Web 服务的用户完全不会被强制安装此依赖。
+- **不动承重文件。** `run_agent.py`、`cli.py`、`gateway/run.py`、`hermes_cli/main.py` 保持原样。即便这是一个分叉而非插件，仍然遵守 `CLAUDE.md` 关于「插件不得修改核心」的红线。
+
+`gateway/web/` 之外仅有的改动有三处：（1）`toolsets.py` 加一个 toolset 条目，（2）`SessionDB` 的写路径加一列 `user_id`（提交 `2ce65f980`），（3）网关平台枚举里登记 `web_chat`。每处都很小且自包含，即便上游重写了对应文件，也能手动或借助 `git rerere` 重新落地。
+
+实际维护循环就是：`git fetch upstream && git rebase upstream/main`。
+
+---
+
+## 适用场景
+
+| 场景 | 是否合适 |
+|---|---|
+| 给家人/小团队自托管 Hermes，并希望有带登录的浏览器界面 | 合适——主要用例 |
+| 给班级、实验室、学习小组提供私有 Agent 服务，并按用户限流 | 合适——每用户配额 + 沙箱已具备 |
+| 在 Hermes 上做 SaaS 形态的 demo | 合适——多用户面已经摆好 |
+| 单人个人 CLI / Telegram bot | 不合适——直接用上游 Hermes，本分叉带来的运维负担对你是多余的 |
+| 给外部客户端提供 OpenAI 兼容 API | 不合适——请继续用上游 `api_server` 适配器；本分叉的 `/api/chat` 是为 SPA 调优的 SSE，并非 OpenAI 兼容协议 |
+| 生产级多租户 SaaS（计费、SSO、RBAC） | 暂不合适——配额仅为 30 天滚动 token，没有计费，也没有团队/组织模型 |
+
+---
+
+## 硬件需求（单机自部署，云端 LLM）
+
+下表假设 LLM 推理走云端（Nous Portal、OpenRouter、OpenAI、Anthropic 等），本机只跑网关进程和每用户 workspace。
+
+|  | CPU | 内存 | 磁盘 |
+|---|---|---|---|
+| **最低** | 2 vCPU | 4 GB | 10 GB |
+| **推荐** | 4 vCPU | 8 GB | 50 GB |
+
+补充说明：
+
+- **CPU。** 聊天链路本身是 I/O 密集（大头是 LLM）。CPU 主要消耗在 SSE 流推送、Argon2id 密码校验（每次约 50 ms）、以及用户触发的本地工具（搜索、文件操作、代码执行）。
+- **内存。** Python 进程空载常驻约 300–500 MB；每路并发 Agent 任务再加 50–150 MB，具体看上下文长度和模型。8 GB 内存能舒服地承载 10–20 路并发会话。
+- **磁盘。** 代码 + venv 约 2 GB。每用户数据——`web_workspaces/<user_id>/`、会话表行、记忆文件——会随使用增长。50 GB 足够数十名活跃用户用上一年。
+- **网络。** 带宽主要被流式 token 占用（一般每轮 50–200 KB）。100 Mbit/s 足以撑起 50+ 路并发流。
+- **本地 LLM。** 不在本 README 讨论范围内。如果自托管模型，GPU 大小依模型卡而定；只要推理服务通过网络访问，网关本机仍可维持上面的硬件规模。
+
+---
+
+## 快速开始
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+git clone https://github.com/SeerBench/hermes-multiuser-web-service.git
+cd hermes-multiuser-web-service
+./setup-hermes.sh                              # 创建 .venv 并安装 .[all,dev]
+source .venv/bin/activate
+uv pip install -e ".[web-chat]"                # 额外装上 argon2-cffi
 ```
 
-支持 Linux、macOS、WSL2 和 Android (Termux)。安装程序会自动处理平台特定的配置。
-
-> **Android / Termux：** 已测试的手动安装路径请参考 [Termux 指南](https://hermes-agent.nousresearch.com/docs/getting-started/termux)。在 Termux 上，Hermes 会安装精选的 `.[termux]` 扩展，因为完整的 `.[all]` 扩展会拉取 Android 不兼容的语音依赖。
->
-> **Windows：** 原生 Windows 不受支持。请安装 [WSL2](https://learn.microsoft.com/zh-cn/windows/wsl/install) 并运行上述命令。
-
-安装后：
+在 `gateway/config.py` 里启用 `web_chat` 平台，并把 LLM 凭据写入 `~/.hermes/.env`，然后：
 
 ```bash
-source ~/.bashrc    # 重新加载 shell（或: source ~/.zshrc）
-hermes              # 开始对话！
+hermes gateway start
 ```
 
----
-
-## 快速入门
-
-```bash
-hermes              # 交互式 CLI — 开始对话
-hermes model        # 选择 LLM 提供商和模型
-hermes tools        # 配置启用的工具
-hermes config set   # 设置单个配置项
-hermes gateway      # 启动消息网关（Telegram、Discord 等）
-hermes setup        # 运行完整设置向导（一次性配置所有内容）
-hermes claw migrate # 从 OpenClaw 迁移（如果来自 OpenClaw）
-hermes update       # 更新到最新版本
-hermes doctor       # 诊断问题
-```
-
-📖 **[完整文档 →](https://hermes-agent.nousresearch.com/docs/)**
+Web 服务监听平台配置块里的端口。用浏览器打开，注册第一个账号，**当场记下创建时只显示一次的 API 密钥**。后续用户可通过同一注册接口加入，或通过 `UserStore` 由管理员侧带外开通。
 
 ---
 
-## 省去到处收集 API Key — Nous Portal
+## HTTP 接口
 
-Hermes 始终允许你使用任意服务商，这点不会改变。但如果你不想为模型、网页搜索、图像生成、TTS、云浏览器分别去申请五个不同的 API Key，**[Nous Portal](https://portal.nousresearch.com)** 用一个订阅就能覆盖全部：
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/auth/register` | 创建用户 + 首个 API 密钥 + 会话 cookie |
+| `POST` | `/api/auth/login` | 校验密码、下发 cookie |
+| `POST` | `/api/auth/logout` | 失效 cookie |
+| `GET`  | `/api/keys` | 列出当前用户的 API 密钥（不含明文） |
+| `POST` | `/api/keys` | 签发新密钥——明文**仅返回一次** |
+| `DELETE` | `/api/keys/{key_id}` | 吊销密钥 |
+| `GET`  | `/api/conversations` | 列出当前用户的会话 |
+| `GET`  | `/api/usage` | 查看配额当前状态 |
+| `POST` | `/api/chat` | Agent 响应的 SSE 流 |
+| `GET`  | `/api/healthz` | 公开的健康探针 |
 
-- **300+ 模型** — 用 `/model <name>` 随时切换
-- **Tool Gateway** — 网页搜索（Firecrawl）、图像生成（FAL）、文本转语音（OpenAI）、云浏览器（Browser Use），全部通过订阅托管。无需额外注册任何账户。
-
-全新安装时一条命令即可：
-
-```bash
-hermes setup --portal
-```
-
-它会通过 OAuth 登录、把 Nous 设为推理服务商，并启用 Tool Gateway。随时用 `hermes portal status` 查看路由状态。完整说明见 [Tool Gateway 文档](https://hermes-agent.nousresearch.com/docs/user-guide/features/tool-gateway)。
-
-你随时可以按工具单独切回自己的 API Key — Gateway 是按工具粒度生效的，不是一刀切。
-
----
-
-## CLI 与消息平台 快速对照
-
-Hermes 有两种入口：用 `hermes` 启动终端 UI，或运行网关从 Telegram、Discord、Slack、WhatsApp、Signal 或 Email 与之对话。进入对话后，许多斜杠命令在两种界面中通用。
-
-| 操作 | CLI | 消息平台 |
-|------|-----|----------|
-| 开始对话 | `hermes` | 运行 `hermes gateway setup` + `hermes gateway start`，然后给机器人发消息 |
-| 开始新对话 | `/new` 或 `/reset` | `/new` 或 `/reset` |
-| 更换模型 | `/model [provider:model]` | `/model [provider:model]` |
-| 设置人格 | `/personality [name]` | `/personality [name]` |
-| 重试或撤销上一轮 | `/retry`、`/undo` | `/retry`、`/undo` |
-| 压缩上下文 / 查看用量 | `/compress`、`/usage`、`/insights [--days N]` | `/compress`、`/usage`、`/insights [days]` |
-| 浏览技能 | `/skills` 或 `/<skill-name>` | `/skills` 或 `/<skill-name>` |
-| 中断当前工作 | `Ctrl+C` 或发送新消息 | `/stop` 或发送新消息 |
-| 平台特定状态 | `/platforms` | `/status`、`/sethome` |
-
-完整命令列表请参阅 [CLI 指南](https://hermes-agent.nousresearch.com/docs/user-guide/cli) 和 [消息网关指南](https://hermes-agent.nousresearch.com/docs/user-guide/messaging)。
+SSE 事件类型：`token`、`tool_start`、`tool_end`、`reasoning`、`done`、`error`。每个 `done` 帧携带 `session_id`、`usage` 和汇总后的 `quota`——无需另开接口轮询。
 
 ---
 
-## 文档
+## 安全模型
 
-所有文档位于 **[hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/)**：
+- **密码。** 由 `argon2-cffi` 提供的 Argon2id 哈希；不存明文，哈希也不可反推。
+- **API 密钥 / Web 会话。** 创建时仅返回一次；数据库只存 `sha256(明文)`。即便库被拖走，已签发的密钥也无法被重建。
+- **文件系统沙箱。** `web_file_*` 工具的每一个路径参数都会被 resolve，逸出 `$HERMES_HOME/web_workspaces/<user_id>/` 即被拒绝。沙箱在用户上下文之外被调用会直接抛错——**不存在「没沙箱也能跑」的降级路径**。
+- **Toolset 白名单。** `hermes-web-chat` toolset 默认**不**包含 `terminal`、`code_execution`、`browser`。要重新启用请按部署环境单独评估威胁模型。
+- **LLM 凭据。** 在启动时从 `config.yaml` / `~/.hermes/.env` 读取一次，全部用户共用。按用户的成本归因依赖配额计数器，而非每用户独立的 provider key。
 
-| 章节 | 内容 |
-|------|------|
-| [快速开始](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart) | 安装 → 设置 → 2 分钟内开始首次对话 |
-| [CLI 使用](https://hermes-agent.nousresearch.com/docs/user-guide/cli) | 命令、快捷键、人格、会话 |
-| [配置](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) | 配置文件、提供商、模型、所有选项 |
-| [消息网关](https://hermes-agent.nousresearch.com/docs/user-guide/messaging) | Telegram、Discord、Slack、WhatsApp、Signal、Home Assistant |
-| [安全](https://hermes-agent.nousresearch.com/docs/user-guide/security) | 命令审批、DM 配对、容器隔离 |
-| [工具与工具集](https://hermes-agent.nousresearch.com/docs/user-guide/features/tools) | 40+ 工具、工具集系统、终端后端 |
-| [技能系统](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills) | 过程记忆、技能中心、创建技能 |
-| [记忆](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory) | 持久记忆、用户画像、最佳实践 |
-| [MCP 集成](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) | 连接任意 MCP 服务器扩展能力 |
-| [定时调度](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron) | 定时任务与平台投递 |
-| [上下文文件](https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files) | 影响每次对话的项目上下文 |
-| [架构](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture) | 项目结构、代理循环、关键类 |
-| [贡献](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) | 开发设置、PR 流程、代码风格 |
-| [CLI 参考](https://hermes-agent.nousresearch.com/docs/reference/cli-commands) | 所有命令和标志 |
-| [环境变量](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) | 完整环境变量参考 |
+网关本身预期跑在 TLS 终结反向代理（nginx、Caddy、Traefik）后面，监听端口只跑明文 HTTP。
 
 ---
 
-## 从 OpenClaw 迁移
+## 项目状态
 
-如果你来自 OpenClaw，Hermes 可以自动导入你的设置、记忆、技能和 API 密钥。
+早期阶段。控制面（账号、密钥、配额、沙箱）已就位，对应测试在 `tests/gateway/` 下。React SPA 外壳仍是占位实现——SSE 协议已稳定，但前端仍很简陋。备份与管理工具目前只是脚本 + SQL，独立的管理 CLI 不在当前范围。
 
-**首次安装时：** 安装向导（`hermes setup`）会自动检测 `~/.openclaw` 并在配置开始前提供迁移选项。
-
-**安装后任意时间：**
-
-```bash
-hermes claw migrate              # 交互式迁移（完整预设）
-hermes claw migrate --dry-run    # 预览将要迁移的内容
-hermes claw migrate --preset user-data   # 仅迁移用户数据，不含密钥
-hermes claw migrate --overwrite  # 覆盖已有冲突
-```
-
-导入内容：
-- **SOUL.md** — 人格文件
-- **记忆** — MEMORY.md 和 USER.md 条目
-- **技能** — 用户创建的技能 → `~/.hermes/skills/openclaw-imports/`
-- **命令白名单** — 审批模式
-- **消息设置** — 平台配置、允许用户、工作目录
-- **API 密钥** — 白名单中的密钥（Telegram、OpenRouter、OpenAI、Anthropic、ElevenLabs）
-- **TTS 资产** — 工作区音频文件
-- **工作区指令** — AGENTS.md（使用 `--workspace-target`）
-
-使用 `hermes claw migrate --help` 查看所有选项，或使用 `openclaw-migration` 技能进行交互式代理引导迁移（含干运行预览）。
+跟踪上游变化时，重点关注本分叉触碰过的路径：`gateway/run.py`、`gateway/platforms/api_server.py`、`tools/file_tools.py`、`toolsets.py`。其中任意一个若被大幅重写，本仓库的镜像文件可能需要做对应的同步编辑。
 
 ---
 
-## 贡献
+## 致谢
 
-欢迎贡献！请参阅 [贡献指南](https://hermes-agent.nousresearch.com/docs/developer-guide/contributing) 了解开发设置、代码风格和 PR 流程。
+上游 Agent 及绝大多数代码：[Nous Research / Hermes Agent](https://github.com/NousResearch/hermes-agent)，MIT 许可。本分叉在其之上加了多用户 Web 服务层，并继承 MIT 许可。
 
-贡献者快速开始——克隆并使用 `setup-hermes.sh`：
-
-```bash
-git clone https://github.com/NousResearch/hermes-agent.git
-cd hermes-agent
-./setup-hermes.sh     # 安装 uv、创建 venv、安装 .[all]、创建符号链接 ~/.local/bin/hermes
-./hermes              # 自动检测 venv，无需先 source
-```
-
-手动安装（等效于上述命令）：
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uv venv venv --python 3.11
-source venv/bin/activate
-uv pip install -e ".[all,dev]"
-python -m pytest tests/ -q
-```
-
----
-
-## 社区
-
-- 💬 [Discord](https://discord.gg/NousResearch)
-- 📚 [技能中心](https://agentskills.io)
-- 🐛 [问题反馈](https://github.com/NousResearch/hermes-agent/issues)
-- 💡 [讨论区](https://github.com/NousResearch/hermes-agent/discussions)
-- 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — 社区微信桥接：在同一微信账号上运行 Hermes Agent 和 OpenClaw。
+更深层的工程细节请看：`AGENTS.md`（约 1100 行）上游工程指南、`CONTRIBUTING.md`（约 1300 行）上游贡献规范、`CLAUDE.md` 本仓库在 Claude Code 下的工作指引。
 
 ---
 
 ## 许可证
 
-MIT — 详见 [LICENSE](LICENSE)。
-
-由 [Nous Research](https://nousresearch.com) 构建。
+MIT——见 [LICENSE](LICENSE)。
