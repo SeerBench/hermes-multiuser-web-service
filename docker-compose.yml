@@ -42,6 +42,17 @@ services:
       # uncomment BOTH lines (API_SERVER_KEY is mandatory for auth):
       # - API_SERVER_HOST=0.0.0.0
       # - API_SERVER_KEY=${API_SERVER_KEY}
+      #
+      # Multi-user web chat platform (port 8643).  Enable in
+      # ~/.hermes/config.yaml under platforms.web_chat.enabled: true.
+      # If binding the gateway on a public interface, set
+      # cookie_secure: true in config.yaml so the session cookie is
+      # only sent over HTTPS — front the gateway with a TLS proxy.
+      # The [web-chat] pip extra (argon2-cffi) is required and is
+      # part of the standard image build.
+      # - WEB_CHAT_HOST=127.0.0.1
+      # - WEB_CHAT_PORT=8643
+      # - WEB_CHAT_MAX_CONCURRENT_AGENTS=12
       # Microsoft Teams — uncomment and fill in to enable Teams gateway.
       # Register your bot at https://dev.botframework.com/ to get these values.
       # - TEAMS_CLIENT_ID=${TEAMS_CLIENT_ID}
