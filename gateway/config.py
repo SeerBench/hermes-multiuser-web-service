@@ -127,6 +127,7 @@ class Platform(Enum):
     BLUEBUBBLES = "bluebubbles"
     QQBOT = "qqbot"
     YUANBAO = "yuanbao"
+    WEB_CHAT = "web_chat"
     @classmethod
     def _missing_(cls, value):
         """Accept unknown platform names only for known plugin adapters.
@@ -423,6 +424,7 @@ _PLATFORM_CONNECTED_CHECKERS: dict[Platform, Callable[[PlatformConfig], bool]] =
     Platform.EMAIL: lambda cfg: bool(cfg.extra.get("address")),
     Platform.SMS: lambda cfg: bool(os.getenv("TWILIO_ACCOUNT_SID")),
     Platform.API_SERVER: lambda cfg: True,
+    Platform.WEB_CHAT: lambda cfg: True,  # auth handled per-request by middleware
     Platform.WEBHOOK: lambda cfg: True,
     Platform.MSGRAPH_WEBHOOK: lambda cfg: bool(
         str(cfg.extra.get("client_state") or "").strip()

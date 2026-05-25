@@ -357,6 +357,34 @@ TOOLSETS = {
         "includes": []
     },
 
+    "hermes-web-chat": {
+        "description": (
+            "Multi-user web chat platform — conservative whitelist for the "
+            "shared-process per-user model. Excludes any tool that touches "
+            "the host filesystem or runs code: no terminal, no process, no "
+            "code_execution, no browser_*, no file operations. Sandboxed "
+            "file tools (web_file_*) will be added when gateway/web/tools/ "
+            "ships in stage 5."
+        ),
+        "tools": [
+            # Web research — outbound HTTP only, no local FS / process.
+            "web_search", "web_extract",
+            # Vision + image generation (no FS writes by default).
+            "vision_analyze", "image_generate",
+            # Skills (read-only metadata + invocation).
+            "skills_list", "skill_view", "skill_manage",
+            # Planning + memory — both go through HERMES_HOME and are
+            # automatically scoped to the per-user workspace by the
+            # set_hermes_home_override contextvar set in
+            # gateway/web/sandbox.enter_user_context.
+            "todo", "memory",
+            # Cross-session recall, filtered by user_id at the SessionDB
+            # query layer (stage-1 fix).
+            "session_search",
+        ],
+        "includes": []
+    },
+
     "hermes-api-server": {
         "description": "OpenAI-compatible API server — full agent tools accessible via HTTP (no interactive UI tools like clarify or send_message)",
         "tools": [

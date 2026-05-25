@@ -6240,6 +6240,16 @@ class GatewayRunner:
                 return None
             return APIServerAdapter(config)
 
+        elif platform == Platform.WEB_CHAT:
+            from gateway.platforms.web_chat import WebChatAdapter, check_web_chat_requirements
+            if not check_web_chat_requirements():
+                logger.warning(
+                    "Web Chat: aiohttp and/or argon2-cffi not installed — "
+                    "install the [web-chat] extra to enable"
+                )
+                return None
+            return WebChatAdapter(config)
+
         elif platform == Platform.WEBHOOK:
             from gateway.platforms.webhook import WebhookAdapter, check_webhook_requirements
             if not check_webhook_requirements():
