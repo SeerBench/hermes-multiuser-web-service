@@ -361,10 +361,10 @@ TOOLSETS = {
         "description": (
             "Multi-user web chat platform — conservative whitelist for the "
             "shared-process per-user model. Excludes any tool that touches "
-            "the host filesystem or runs code: no terminal, no process, no "
-            "code_execution, no browser_*, no file operations. Sandboxed "
-            "file tools (web_file_*) will be added when gateway/web/tools/ "
-            "ships in stage 5."
+            "the host shell or runs code: no terminal, no process, no "
+            "code_execution, no browser_*. File operations go through the "
+            "sandboxed web_file_* variants which strictly confine paths "
+            "to the per-user workspace."
         ),
         "tools": [
             # Web research — outbound HTTP only, no local FS / process.
@@ -381,6 +381,12 @@ TOOLSETS = {
             # Cross-session recall, filtered by user_id at the SessionDB
             # query layer (stage-1 fix).
             "session_search",
+            # Sandboxed file operations — registered by
+            # gateway/web/tools/sandboxed_file_operations on web_chat
+            # platform start.  All paths are confined to the user's
+            # workspace via gateway.web.sandbox.confine_path.
+            "web_file_read", "web_file_write", "web_file_patch",
+            "web_file_search",
         ],
         "includes": []
     },

@@ -221,6 +221,13 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
         try:
+            # Importing this package registers the sandboxed file tools
+            # (web_file_read / web_file_write / web_file_patch /
+            # web_file_search) via side effect.  Done here, not at
+            # module top, so adapters that aren't enabled don't pay
+            # the import cost.
+            import gateway.web.tools  # noqa: F401
+
             self._user_store = UserStore()  # default path under HERMES_HOME
             self._quota = QuotaGate(self._user_store)
             self._session_db = self._ensure_session_db()
