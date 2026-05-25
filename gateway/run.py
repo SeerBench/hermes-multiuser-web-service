@@ -12870,6 +12870,7 @@ class GatewayRunner:
                 session_id=new_session_id,
                 source=source.platform.value if source.platform else "gateway",
                 model=(self.config.get("model", {}) or {}).get("default") if isinstance(self.config, dict) else None,
+                user_id=source.user_id,
                 parent_session_id=parent_session_id,
             )
         except Exception as e:
