@@ -709,10 +709,19 @@ class WebChatAdapter(BasePlatformAdapter):
                     quota_after = self._user_store.check_quota(user_id)
 
                 effective_session_id = result.get("session_id", session_id)
-                _push("done", {
-                    "session_id": effective_session_id,
-                    "usage": usage,
-                    "quota": quota_after,
+                # Push the terminal "done" event directly (we're on the
+                # main event loop here, not a worker thread).  The
+                # _push() helper schedules via call_soon_threadsafe,
+                # which would race with the sentinel queued immediately
+                # after it — the writer could see the sentinel first
+                # and exit before the done event is delivered.
+                event_queue.put_nowait({
+                    "event": "done",
+                    "data": {
+                        "session_id": effective_session_id,
+                        "usage": usage,
+                        "quota": quota_after,
+                    },
                 })
 
                 # Sentinel — tells the writer to flush and exit cleanly.
