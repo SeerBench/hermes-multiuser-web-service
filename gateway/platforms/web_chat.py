@@ -342,8 +342,22 @@ class WebChatAdapter(BasePlatformAdapter):
         app.router.add_get("/api/conversations", self._handle_list_conversations)
         app.router.add_get("/api/usage", self._handle_usage)
         app.router.add_post("/api/chat", self._handle_chat)
-        # SPA shell + static assets — placeholder until stage 6.
-        app.router.add_get("/", self._handle_spa_shell)
+        # SPA shell + static assets.  If the SPA has been built (web-chat/
+        # → gateway/web/_static/), serve that bundle; otherwise fall back
+        # to the inline placeholder so the gateway still answers GET / .
+        from pathlib import Path as _Path
+        static_dir = _Path(__file__).resolve().parent.parent / "web" / "_static"
+        index_html = static_dir / "index.html"
+        if index_html.is_file():
+            # Mount Vite's hashed assets and the catch-all SPA shell.
+            assets_dir = static_dir / "assets"
+            if assets_dir.is_dir():
+                app.router.add_static("/assets/", path=str(assets_dir), name="spa_assets")
+            self._spa_index_path = index_html
+            app.router.add_get("/", self._handle_spa_index)
+        else:
+            self._spa_index_path = None
+            app.router.add_get("/", self._handle_spa_shell)
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -763,6 +777,23 @@ class WebChatAdapter(BasePlatformAdapter):
             return
 
     # ── SPA shell (placeholder until stage 6) ─────────────────────────
+
+    async def _handle_spa_index(self, request: "web.Request") -> "web.Response":
+        """Serve the built SPA's index.html.
+
+        Vite output uses hashed asset filenames (`/assets/index-XYZ.js`),
+        so the index.html is cacheable as long as the SPA hasn't been
+        rebuilt — but we send no-cache anyway because re-deploys
+        regenerate this file on the same path.
+        """
+        if self._spa_index_path is None or not self._spa_index_path.is_file():
+            # Was set at startup, but the file disappeared — fall back.
+            return await self._handle_spa_shell(request)
+        return web.Response(
+            body=self._spa_index_path.read_bytes(),
+            content_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     async def _handle_spa_shell(self, request: "web.Request") -> "web.Response":
         """Serve the SPA index.
