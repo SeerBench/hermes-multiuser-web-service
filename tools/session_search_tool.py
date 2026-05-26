@@ -107,13 +107,19 @@ def _shape_message(m: Dict[str, Any], anchor_id: Optional[int] = None) -> Dict[s
     return {k: v for k, v in entry.items() if v is not None or k in ("content",)}
 
 
-def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
-    """Return metadata for the most recent sessions (no LLM calls, no FTS5)."""
+def _list_recent_sessions(db, limit: int, current_session_id: str = None, user_id: str = None) -> str:
+    """Return metadata for the most recent sessions (no LLM calls, no FTS5).
+
+    ``user_id`` scopes results to a single user when set (web_chat multi-user
+    isolation).  ``None`` preserves single-user / upstream behaviour where the
+    SessionDB is implicitly per-user.
+    """
     try:
         sessions = db.list_sessions_rich(
             limit=limit + 5,
             exclude_sources=list(_HIDDEN_SESSION_SOURCES),
             order_by_last_active=True,
+            user_id=user_id,
         )  # fetch extra so we can skip current
 
         current_root = _resolve_to_parent(db, current_session_id) if current_session_id else None
@@ -156,13 +162,24 @@ def _scroll(
     around_message_id: int,
     window: int = 5,
     current_session_id: str = None,
+    user_id: str = None,
 ) -> str:
     """Scroll shape: return a window of messages centered on an anchor.
 
     No FTS5, no bookends — just the slice. The discovery shape's lineage
     fixup is preserved: if the anchor doesn't live in the named session
     but does live in a child session in the same lineage, rebind silently.
+
+    ``user_id`` (server-injected) gates which sessions can be opened — a
+    request for a session owned by a different user surfaces the same
+    "session_id not found" error as a truly missing id, so existence is
+    not leaked across tenants.
     """
+    def _owned_by_user(meta: Dict[str, Any]) -> bool:
+        if user_id is None:
+            return True
+        owner = meta.get("user_id")
+        return owner is not None and str(owner) == str(user_id)
     if not isinstance(session_id, str) or not session_id.strip():
         return tool_error("scroll requires session_id", success=False)
     session_id = session_id.strip()
@@ -191,13 +208,16 @@ def _scroll(
                 success=False,
             )
 
-    # Session existence check
+    # Session existence + ownership check.  When ``user_id`` is set,
+    # treat a foreign-owned session as if it did not exist — surfacing
+    # the same "not found" error preserves the security property that
+    # tenants cannot probe for session_ids belonging to other users.
     try:
         session_meta = db.get_session(session_id) or {}
     except Exception as e:
         logging.debug("get_session failed for %s: %s", session_id, e, exc_info=True)
         session_meta = {}
-    if not session_meta:
+    if not session_meta or not _owned_by_user(session_meta):
         return tool_error(f"session_id not found: {session_id}", success=False)
 
     # Fetch the window
@@ -230,22 +250,27 @@ def _scroll(
             a_root = _resolve_to_parent(db, session_id)
             o_root = _resolve_to_parent(db, owning)
             if a_root and o_root and a_root == o_root:
+                # Re-check ownership on the rebind target before exposing
+                # any of its messages.  Lineage roots cross tenant boundaries
+                # very rarely, but a defensive check keeps the invariant tight.
                 try:
-                    rebind_view = db.get_messages_around(owning, around_message_id, window=window)
-                    messages = rebind_view.get("window") or []
-                    if messages:
-                        view = rebind_view
-                        rebind_warning = (
-                            f"around_message_id {around_message_id} lives in {owning} "
-                            f"(child of {session_id}); rebound transparently"
-                        )
-                        try:
-                            session_meta = db.get_session(owning) or session_meta
-                        except Exception:
-                            pass
-                        session_id = owning
-                except Exception as e:
-                    logging.debug("rebind get_messages_around failed: %s", e, exc_info=True)
+                    owning_meta = db.get_session(owning) or {}
+                except Exception:
+                    owning_meta = {}
+                if owning_meta and _owned_by_user(owning_meta):
+                    try:
+                        rebind_view = db.get_messages_around(owning, around_message_id, window=window)
+                        messages = rebind_view.get("window") or []
+                        if messages:
+                            view = rebind_view
+                            rebind_warning = (
+                                f"around_message_id {around_message_id} lives in {owning} "
+                                f"(child of {session_id}); rebound transparently"
+                            )
+                            session_meta = owning_meta
+                            session_id = owning
+                    except Exception as e:
+                        logging.debug("rebind get_messages_around failed: %s", e, exc_info=True)
 
     if not messages:
         return tool_error(
@@ -281,8 +306,13 @@ def _discover(
     limit: int,
     sort: Optional[str],
     current_session_id: str = None,
+    user_id: str = None,
 ) -> str:
-    """Discovery shape: FTS5 + anchored window + bookends per hit. Single call."""
+    """Discovery shape: FTS5 + anchored window + bookends per hit. Single call.
+
+    ``user_id`` scopes the FTS5 search to a single user when set; ``None``
+    preserves upstream behaviour.
+    """
     role_list = role_filter if role_filter else ["user", "assistant"]
 
     try:
@@ -293,6 +323,7 @@ def _discover(
             limit=50,  # widen so dedup-by-lineage can find distinct sessions
             offset=0,
             sort=sort,
+            user_id=user_id,
         )
     except Exception as e:
         logging.error("FTS5 search failed: %s", e, exc_info=True)
@@ -387,6 +418,8 @@ def session_search(
     window: int = 5,
     # Discovery shape
     sort: str = None,
+    # Multi-tenant scoping (server-injected, not exposed in the tool schema).
+    user_id: str = None,
 ) -> str:
     """Single-shape tool. Mode inferred from which args are set.
 
@@ -396,6 +429,10 @@ def session_search(
 
     Scroll wins over discovery when both are set — the agent has explicitly
     asked for a slice of a known session.
+
+    ``user_id`` is server-side context (never user-supplied via the tool
+    schema) — when set, restricts every shape to sessions owned by that
+    user.  ``None`` preserves upstream single-user behaviour.
     """
     if db is None:
         try:
@@ -414,6 +451,7 @@ def session_search(
             around_message_id=around_message_id,
             window=window,
             current_session_id=current_session_id,
+            user_id=user_id,
         )
 
     # Limit clamp [1, 10]
@@ -426,7 +464,7 @@ def session_search(
 
     # Browse shape: no query → recent sessions.
     if not query or not isinstance(query, str) or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id)
+        return _list_recent_sessions(db, limit, current_session_id, user_id=user_id)
 
     # Parse role_filter
     role_list: Optional[List[str]] = None
@@ -447,6 +485,7 @@ def session_search(
         limit=limit,
         sort=sort_norm,
         current_session_id=current_session_id,
+        user_id=user_id,
     )
 
 
@@ -596,6 +635,9 @@ registry.register(
         sort=args.get("sort"),
         db=kw.get("db"),
         current_session_id=kw.get("current_session_id"),
+        # Server-side scoping; never sourced from ``args`` so the LLM cannot
+        # spoof another tenant's user_id.
+        user_id=kw.get("user_id"),
     ),
     check_fn=check_session_search_requirements,
     emoji="🔍",

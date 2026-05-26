@@ -399,3 +399,105 @@ class TestShapePrecedence:
         _seed_modpack_sessions(db)
         result = json.loads(session_search(query=None, db=db))  # type: ignore
         assert result["mode"] == "browse"
+
+
+# =========================================================================
+# Multi-tenant user_id scoping (web_chat isolation)
+# =========================================================================
+
+def _seed_per_user_sessions(db):
+    """Two users with disjoint sessions on the same FTS5 keyword."""
+    now = int(time.time())
+    db.create_session("alice_s", source="web_chat", user_id="u_alice")
+    db._conn.execute("UPDATE sessions SET started_at = ?, title = ? WHERE id = ?",
+                     (now - 200, "Alice's docker work", "alice_s"))
+    db.append_message("alice_s", role="user", content="docker compose for alice")
+    db.append_message("alice_s", role="assistant", content="alice docker stack is up")
+
+    db.create_session("bob_s", source="web_chat", user_id="u_bob")
+    db._conn.execute("UPDATE sessions SET started_at = ?, title = ? WHERE id = ?",
+                     (now - 100, "Bob's docker work", "bob_s"))
+    db.append_message("bob_s", role="user", content="docker swarm for bob")
+    db.append_message("bob_s", role="assistant", content="bob docker stack is up")
+    db._conn.commit()
+
+
+class TestUserIdIsolation:
+    """End-to-end user_id propagation through session_search.
+
+    Companion to tests/hermes_state/test_user_id_filtering.py, which tests
+    the SessionDB query layer.  These tests catch regressions where the
+    tool entry point forgets to thread user_id down to the DB.
+    """
+
+    def test_browse_filters_by_user_id(self, db):
+        _seed_per_user_sessions(db)
+        alice = json.loads(session_search(db=db, user_id="u_alice"))
+        bob = json.loads(session_search(db=db, user_id="u_bob"))
+        alice_ids = {r["session_id"] for r in alice["results"]}
+        bob_ids = {r["session_id"] for r in bob["results"]}
+        assert alice_ids == {"alice_s"}
+        assert bob_ids == {"bob_s"}
+
+    def test_browse_with_user_id_none_returns_everything(self, db):
+        """Default path (no user_id) preserves single-tenant behaviour."""
+        _seed_per_user_sessions(db)
+        result = json.loads(session_search(db=db))
+        ids = {r["session_id"] for r in result["results"]}
+        assert ids == {"alice_s", "bob_s"}
+
+    def test_discovery_filters_by_user_id(self, db):
+        _seed_per_user_sessions(db)
+        alice = json.loads(session_search(query="docker", db=db, user_id="u_alice"))
+        bob = json.loads(session_search(query="docker", db=db, user_id="u_bob"))
+        assert {r["session_id"] for r in alice["results"]} == {"alice_s"}
+        assert {r["session_id"] for r in bob["results"]} == {"bob_s"}
+
+    def test_scroll_rejects_foreign_session(self, db):
+        """Bob cannot scroll into Alice's session even with a valid anchor."""
+        _seed_per_user_sessions(db)
+        bob_anchor_mid = db._conn.execute(
+            "SELECT id FROM messages WHERE session_id = 'alice_s' LIMIT 1"
+        ).fetchone()[0]
+        result = json.loads(session_search(
+            session_id="alice_s",
+            around_message_id=bob_anchor_mid,
+            db=db,
+            user_id="u_bob",
+        ))
+        # Surfaced as "not found" rather than a permission error — existence
+        # of cross-tenant session ids must not be probable.
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
+
+    def test_scroll_allows_own_session(self, db):
+        """Sanity check: with the correct user_id, scroll still works."""
+        _seed_per_user_sessions(db)
+        mid = db._conn.execute(
+            "SELECT id FROM messages WHERE session_id = 'alice_s' LIMIT 1"
+        ).fetchone()[0]
+        result = json.loads(session_search(
+            session_id="alice_s",
+            around_message_id=mid,
+            db=db,
+            user_id="u_alice",
+        ))
+        assert result["success"] is True
+        assert result["mode"] == "scroll"
+
+    def test_registry_handler_ignores_user_id_in_args(self, db):
+        """The LLM cannot spoof user_id via the tool args — handler only reads kw."""
+        from tools.registry import registry
+
+        _seed_per_user_sessions(db)
+        entry = registry.get_entry("session_search")
+        assert entry is not None
+        # Pretend the LLM tried to pass user_id="u_alice" through args.
+        result = json.loads(entry.handler(
+            {"user_id": "u_alice"},  # ignored by the handler
+            db=db,
+            current_session_id=None,
+            user_id="u_bob",  # server-injected scope wins
+        ))
+        ids = {r["session_id"] for r in result["results"]}
+        assert ids == {"bob_s"}

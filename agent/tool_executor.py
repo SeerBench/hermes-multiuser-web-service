@@ -623,6 +623,11 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     sort=function_args.get("sort"),
                     db=session_db,
                     current_session_id=agent.session_id,
+                    # Multi-tenant scope: web_chat sets ``agent._user_id`` so
+                    # FTS5 / list_sessions_rich filter on it.  Single-user
+                    # platforms (CLI, api_server) leave it ``None`` and keep
+                    # upstream behaviour.
+                    user_id=getattr(agent, "_user_id", None),
                 )
             tool_duration = time.time() - tool_start_time
             if agent._should_emit_quiet_tool_messages():

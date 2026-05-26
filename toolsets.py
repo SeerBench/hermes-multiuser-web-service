@@ -364,22 +364,31 @@ TOOLSETS = {
             "the host shell or runs code: no terminal, no process, no "
             "code_execution, no browser_*. File operations go through the "
             "sandboxed web_file_* variants which strictly confine paths "
-            "to the per-user workspace."
+            "to the per-user workspace.  ``skill_manage`` is intentionally "
+            "absent: ``tools/skills_tool.py`` caches ``SKILLS_DIR`` at "
+            "import time, so any write would land in the process-global "
+            "``~/.hermes/skills/`` and bleed across tenants.  Web users "
+            "get read-only access (``skills_list``, ``skill_view``) to the "
+            "operator-curated skill library; an operator wanting to ship "
+            "a new skill does so out-of-band."
         ),
         "tools": [
             # Web research — outbound HTTP only, no local FS / process.
             "web_search", "web_extract",
             # Vision + image generation (no FS writes by default).
             "vision_analyze", "image_generate",
-            # Skills (read-only metadata + invocation).
-            "skills_list", "skill_view", "skill_manage",
+            # Skills — read-only.  ``skill_manage`` is excluded on purpose;
+            # see the toolset description above.
+            "skills_list", "skill_view",
             # Planning + memory — both go through HERMES_HOME and are
             # automatically scoped to the per-user workspace by the
             # set_hermes_home_override contextvar set in
             # gateway/web/sandbox.enter_user_context.
             "todo", "memory",
-            # Cross-session recall, filtered by user_id at the SessionDB
-            # query layer (stage-1 fix).
+            # Cross-session recall, filtered by user_id end-to-end:
+            # tool_executor.py injects ``agent._user_id`` into the
+            # session_search call, which threads it through to
+            # SessionDB.search_messages / list_sessions_rich (stage-1 fix).
             "session_search",
             # Sandboxed file operations — registered by
             # gateway/web/tools/sandboxed_file_operations on web_chat
