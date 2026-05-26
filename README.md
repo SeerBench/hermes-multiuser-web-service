@@ -1,155 +1,306 @@
 <p align="center">
-  <img src="assets/banner.png" alt="Hermes Multi-User Web Service" width="100%">
+  <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-blue?style=for-the-badge" alt="English"></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="中文"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Upstream-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Upstream: Hermes Agent"></a>
 </p>
 
 # Hermes Multi-User Web Service
 
-<p align="center">
-  <a href="https://github.com/SeerBench/hermes-multiuser-web-service/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Upstream-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Upstream: Hermes Agent"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
-</p>
+**A self-hosted, multi-tenant chat service built on top of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent).** One Python process serves any number of users with isolated accounts, conversations, memory, filesystem workspaces, and per-user token quotas. Browser SPA over Server-Sent Events. Designed for a 2-core / 4 GB VPS to start, scales linearly until SQLite or the upstream LLM rate limit decides otherwise.
 
-A fork of [Nous Research's Hermes Agent](https://github.com/NousResearch/hermes-agent) that adds a **multi-user, self-hostable web chat service** on top of the agent core. Single backend process, per-user accounts, per-user filesystem sandbox, per-user 30-day token quota, browser SPA over SSE. Everything else — the agent loop, skills, memory, tools, model providers, gateway adapters — comes straight from upstream.
+This is a **fork** of upstream Hermes, not a re-implementation. The agent loop, skill system, memory provider stack, model-provider plugins, and 25+ gateway adapters all come directly from upstream — untouched. What we add is a single new platform adapter (`web_chat`) and the multi-tenant primitives that go with it, packaged so `git pull upstream main` stays merge-conflict-free in perpetuity.
 
-> Upstream Hermes is a single-user CLI/messaging agent. This fork keeps that intact and adds a parallel `web_chat` gateway platform alongside the existing Telegram / Discord / Slack / api_server adapters.
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Browser SPA  ──cookie or Bearer──▶  gateway:8643                │
+│                                          │                       │
+│                                          ▼                       │
+│  per-request:  auth → user_id → enter_user_context(user_id)      │
+│                                          │                       │
+│         ┌────────────────────────────────┘                       │
+│         ▼                                                        │
+│  AIAgent (upstream Hermes) inside loop.run_in_executor           │
+│         │                                                        │
+│         ├─ tools: web_search, memory, todo, skills, web_file_*   │
+│         └─ upstream LLM (one shared key, per-user metered)       │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## What this fork adds
+## Why this fork exists
 
-All new code lives under `gateway/web/` and `gateway/platforms/web_chat.py`. Nothing outside that surface is modified.
+Upstream Hermes Agent is a brilliant single-user CLI and single-tenant gateway. It does **not** ship a multi-user web product because that was never the upstream's goal. But the agent core — tools, skills, memory, model routing, sandboxed terminal backends — is exactly what you want for a self-hosted "ChatGPT-but-with-real-tools" service for a small team, a family, a community, or a research group. So this fork adds:
 
-| Component | File | Purpose |
+- **Per-user accounts** (email + password, Argon2id hashed) and **API keys** (`hermes_sk_...`, sha-256 stored)
+- **Per-user conversations** (session DB filtered on `user_id`) and **memory** (`MEMORY.md`, `USER.md`, every memory provider's cache — all isolated)
+- **Per-user filesystem workspaces** at `$HERMES_HOME/web_workspaces/<user_id>/`
+- **Per-user token quota** (rolling 30-day window, auto-reset, configurable per user)
+- A new gateway **HTTP adapter** (`gateway/platforms/web_chat.py`) on port 8643 with cookie + Bearer auth and SSE streaming
+- A minimal **React SPA** (`web-chat/`) — 66 KB gzipped JS, no UI framework, no router library, no state-management lib
+- **Sandboxed file tools** (`web_file_*`) that mirror upstream `read_file` / `write_file` / `patch` / `search_files` but reject any path that escapes the user's workspace
+
+Everything else stays untouched. If upstream ships a new tool, a new skill, a new memory provider, a new model provider — you get it for free on the next `git pull upstream main`.
+
+---
+
+## Upstream compatibility — the core design decision
+
+This is the single most important thing about the project. We hold to a strict rule:
+
+> **Pay code duplication and verbosity if it means upstream files don't get touched.**
+
+The forks that die are the ones that quietly rewrite half of upstream and then can't merge anything for six months. We refuse to be one of those. Concretely:
+
+| Strategy | Where we use it | Why it works |
 |---|---|---|
-| User accounts | `gateway/web/users.py` | SQLite `web_users.db` — Argon2id passwords, API keys (`hermes_sk_…`), browser sessions (`hermes_ws_…`), rolling token quota |
-| Auth middleware | `gateway/web/auth.py` | Cookie + Bearer; binds `user_id` to the request |
-| Per-user sandbox | `gateway/web/sandbox.py` | ContextVar-scoped workspace + `HERMES_HOME` override per request |
-| Quota gate | `gateway/web/quota.py` | Preflight 429, post-flight token recording, `X-Quota-*` headers |
-| Agent runner | `gateway/web/chat_runner.py` | Spawns `AIAgent` inside an executor; mirrors `api_server.py` without touching it |
-| Sandboxed file tools | `gateway/web/tools/sandboxed_file_operations.py` | `web_file_read/write/patch/search` — wrap upstream file tools with `confine_path()` |
-| HTTP/SSE adapter | `gateway/platforms/web_chat.py` | `/api/auth/*`, `/api/keys`, `/api/conversations`, `/api/usage`, `/api/chat` (SSE) |
+| **Sub-package isolation** | All multi-tenant code lives under `gateway/web/` (new directory), `gateway/platforms/web_chat.py` (new file), and `web-chat/` (new directory). | These paths don't exist upstream, so `git pull` never touches them. Conflict probability: 0. |
+| **Mirror, not refactor** | `WebChatAgentRunner` (`gateway/web/chat_runner.py`) is a ~150-LOC parallel to `gateway/platforms/api_server.py`'s `_create_agent` / `_run_agent`. We don't refactor api_server.py to share code with us. | api_server.py is the most-edited gateway file upstream. Any shared module would be a permanent merge-conflict source. The duplication is paid once. |
+| **Wrap, not fork** | `web_file_read` / `web_file_write` / `web_file_patch` / `web_file_search` call the upstream `read_file_tool` / `write_file_tool` / etc. via their public function signatures, prefixed by a `confine_path` check. We don't fork `tools/file_operations.py` (~2k LOC) or `tools/file_tools.py`. | Upstream is free to refactor tool internals. Only the public function names matter to us, and those have been stable for many releases. |
+| **Surgical bug-fixes** in upstream files | Four small B-class edits: `run_agent.py:517` and `agent/conversation_compression.py:391` (1 line each — propagate `user_id` to SessionDB writes); `gateway/run.py:12869` (1 line — pass `user_id` through the `/branch` command) and a 10-line `elif Platform.WEB_CHAT` branch in `_create_adapter`; plus `user_id` parameter additions on two `hermes_state.py` query methods. All are pure bug fixes or additive parameters; default behavior unchanged. | These are real multi-tenant bugs — `agent._user_id` was being set in init but then hard-coded to `None` in `_ensure_db_session`. They're slated to be offered back to upstream as a PR. Until then, four conflict points that resolve in seconds. |
+| **Opt-in extra** | `argon2-cffi` is in `[web-chat]` extras, not core. Installs without the extra fail loudly at adapter startup with a clear pip hint. | Doesn't bloat the upstream base install for users who never run the web service. |
 
-`state.db` is shared across users but isolated by a `user_id` column added at the session-write layer. Memory (`MEMORY.md`, `USER.md`, Honcho cache) is fully isolated because every memory provider reads `get_hermes_home()`, and the sandbox rebinds `HERMES_HOME` per request.
+**Files we deliberately did not touch**, even when it would have been simpler:
 
----
+```
+gateway/platforms/api_server.py    0 lines changed
+tools/file_operations.py           0 lines changed
+tools/file_tools.py                0 lines changed
+tools/terminal_tool.py             0 lines changed
+agent/memory_manager.py            0 lines changed
+cli.py                             0 lines changed
+hermes_cli/main.py                 0 lines changed
+```
 
-## Compatibility with upstream Hermes
+Memory isolation is achieved without touching `memory_manager.py` by overriding `HERMES_HOME` via a ContextVar — every memory provider already reads `get_hermes_home()`, so the override propagates everywhere automatically.
 
-Hermes Agent is a fast-moving project. This fork is designed to **rebase cleanly on every upstream release**, indefinitely. The strategy:
-
-- **Sub-package isolation.** All multi-user code lives under `gateway/web/`. Importing the package does not touch the rest of Hermes; nothing outside is rewired.
-- **Mirror, don't modify.** `chat_runner.py` is a parallel implementation of `api_server.py`'s agent factory, not a refactor of it. ~150 LOC of duplication in exchange for zero merge conflicts against the most-edited file in upstream.
-- **Wrap, don't fork.** Sandboxed file tools import and call `tools/file_tools.py` functions as-is and only add a `confine_path()` guard. Upstream changes to file tools land for free.
-- **Toolset, not core, registration.** New tools (`web_file_*`) are added to a dedicated `hermes-web-chat` toolset in `toolsets.py` — the only edit outside the sub-package.
-- **Optional dependency, opt-in extra.** `argon2-cffi` is behind the `[web-chat]` extra; nothing forces this dep on users who never run the web service.
-- **No edits to load-bearing files.** `run_agent.py`, `cli.py`, `gateway/run.py`, `hermes_cli/main.py` are untouched. The `CLAUDE.md` ground rule that plugins must not modify core is honored here even though this is a fork, not a plugin.
-
-The only changes outside `gateway/web/` are: (1) one toolset entry in `toolsets.py`, (2) a `user_id` column threaded through `SessionDB` writes (commit `2ce65f980`), (3) `web_chat` registered in the gateway platform enum. Each is a small, well-contained patch designed to be re-applied by hand or via `git rerere` if upstream rewrites the file.
-
-In practice, `git fetch upstream && git rebase upstream/main` is the maintenance loop.
+Maintenance loop: `git fetch upstream && git rebase upstream/main`. Conflicts, when they happen, are confined to the four named patches.
 
 ---
 
-## When to use this fork
+## Is this fork for you?
 
-| Scenario | Fit |
+| Use case | Fit |
 |---|---|
-| Self-host Hermes for your family / a small team and want a browser UI with login | Yes — primary use case |
-| Run a private agent service for a class, lab, or study group with usage caps | Yes — per-user quota + sandbox |
-| Build a SaaS-shaped demo on top of Hermes | Yes — multi-user surface is there |
-| Single-user personal CLI / Telegram bot | No — upstream Hermes is better; this fork adds operational weight you don't need |
-| OpenAI-compatible API for external clients | No — keep using upstream's `api_server` adapter; this fork's `/api/chat` is SSE-only and tuned for the SPA |
-| Production multi-tenant SaaS with billing, SSO, RBAC | Not yet — quota is rolling-30d tokens only, no billing, no team/org model |
+| **Self-host a chat service for a small team / community / family** with isolated accounts, conversations, and per-user usage tracking | ✅ Core use case — this *is* the project |
+| **Replace OpenAI / Claude / etc. as "personal AI for N people" on a $5–$50 VPS** with a cloud LLM key the host pays for | ✅ Designed for this — single shared upstream credential, per-user metered with quota |
+| **Run an internal tool inside a company** behind a reverse proxy (auth-gated network + per-user accounts as defense in depth) | ✅ Good fit; combine with TLS + SSO at the proxy layer |
+| **Lab / study group / classroom shared agent** with per-user history, memory, and usage caps | ✅ Quota system was sized for exactly this |
+| **A SaaS product with paid plans, billing integrations, multi-region** | ⚠️ Not out of scope, but you'll add a lot — Stripe / Postgres / Redis / k8s. The `web_users.db` control plane is a *starting point*, not a finished product |
+| **Single-person CLI / local development tool** | ❌ Use upstream Hermes directly. `hermes` and `hermes dashboard` give you that without the multi-tenant overhead |
+| **OpenAI-compatible API for external apps** (Open WebUI, LibreChat, OpenAI SDKs) | ❌ Use upstream's `api_server` platform (port 8642) — still works unmodified |
+| **Untrusted users running arbitrary terminal commands** | ❌ Wrong tool — see "Security model". The web sandbox defends against accidental path traversal, not kernel exploits |
 
 ---
 
-## Hardware requirements (single-machine self-deploy, cloud LLM)
+## Hardware sizing
 
-These figures assume LLM inference runs on a cloud provider (Nous Portal, OpenRouter, OpenAI, Anthropic, etc.) — the box hosts only the gateway process and per-user workspaces.
+Numbers assume the upstream LLM is **cloud-hosted** (Nous Portal, OpenRouter, OpenAI, Anthropic, etc. — not a local model). The bottleneck shifts depending on box size:
 
-|  | CPU | RAM | Disk |
-|---|---|---|---|
-| **Minimum** | 2 vCPU | 4 GB | 10 GB |
-| **Recommended** | 4 vCPU | 8 GB | 50 GB |
+| Tier | RAM | CPU | Concurrent active agents | SPA users online | First bottleneck |
+|---|---|---|---|---|---|
+| **2c / 4 GB** | 4 GB | 2 vCPU | 10–15 | 80–150 | upstream LLM rate limit |
+| **4c / 8 GB** ⭐ | 8 GB | 4 vCPU | 25–40 | 200–300 | upstream LLM + SQLite >5 RPS |
+| **8c / 16 GB** | 16 GB | 8 vCPU | 60–100 | 500–1000 | SQLite — migrate to Postgres |
+| Larger | — | — | — | — | not a single-box deployment — Postgres + Redis + multi-worker |
 
-Notes:
+Disk: ~2 GB for the venv + code, then per-user data grows with use. 50 GB is comfortable for dozens of active users for a year.
 
-- **CPU.** The gateway is I/O-bound for chat (the LLM does the work). CPU is spent on SSE streaming, Argon2id password verification (~50 ms each), and any locally-executed tools the user invokes (search, file ops, code execution).
-- **RAM.** ~300–500 MB resident for the Python process at idle; each concurrent agent run adds ~50–150 MB depending on context size and model. 8 GB comfortably handles 10–20 concurrent sessions.
-- **Disk.** Code + venv ≈ 2 GB. Per-user data — `web_workspaces/<user_id>/`, session DB rows, memory files — grows with use. 50 GB sustains dozens of active users for a year of real use.
-- **Network.** Bandwidth is dominated by streamed tokens (typically 50–200 KB per turn). 100 Mbit/s is enough for 50+ concurrent streams.
-- **Local LLMs.** Out of scope for this README. If you self-host the model, GPU sizing follows the model card — the gateway box itself can stay on the figures above as long as it talks to the inference server over the network.
+**Active** = "in the middle of an agent loop right now". A user reading the assistant's reply or typing the next message is *online* but not active. Typical chat usage has a 1:5 to 1:10 active-to-online ratio.
+
+Practical observations:
+
+- **The first ceiling you hit on a small VPS is the upstream LLM rate limit**, not your hardware. OpenRouter's typical 60–500 RPM per key is the real cap on concurrent agents, not CPU.
+- **Context compression** in the agent loop is a momentary CPU spike that briefly doubles RSS. Multiple users compressing simultaneously can OOM a 4 GB box if you don't cap concurrency. `WEB_CHAT_MAX_CONCURRENT_AGENTS` (default 12) is the safety valve.
+- **SQLite is fine until ~5 RPS sustained**. WAL + jitter retry handles bursts. If you need more, the migration to Postgres is mostly schema-equivalent (no application-level joins to rewrite).
 
 ---
 
-## Quickstart
+## Quick start
 
 ```bash
+# 1. Clone + base install
 git clone https://github.com/SeerBench/hermes-multiuser-web-service.git
 cd hermes-multiuser-web-service
-./setup-hermes.sh                              # uv venv, installs .[all,dev]
+./setup-hermes.sh                                 # uv venv + .[all,dev]
 source .venv/bin/activate
-uv pip install -e ".[web-chat]"                # adds argon2-cffi
+uv pip install -e ".[web-chat]"                   # adds argon2-cffi
+
+# 2. Set the upstream LLM key
+echo "OPENROUTER_API_KEY=sk-or-v1-..." >> ~/.hermes/.env
+# (or NOUS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY — any provider Hermes supports)
+
+# 3. Enable the platform — add to ~/.hermes/config.yaml:
+cat >> ~/.hermes/config.yaml <<'YAML'
+platforms:
+  web_chat:
+    enabled: true
+    extra:
+      host: 127.0.0.1
+      port: 8643
+      max_concurrent_agents: 12
+      cookie_secure: false             # set true in production (HTTPS)
+      cookie_ttl_seconds: 604800       # 7 days
+YAML
+
+# 4. Build the SPA (one-time, ~50 MB node_modules)
+cd web-chat && npm install && npm run build && cd ..
+
+# 5. Run
+hermes gateway run
 ```
 
-Configure the gateway to enable the `web_chat` platform (see `gateway/config.py`), put your LLM credentials in `~/.hermes/.env`, then:
+Open `http://127.0.0.1:8643/` in a browser, register an account, copy the one-time API key shown at registration, start chatting.
 
-```bash
-hermes gateway start
-```
-
-The web service listens on the port configured in the platform block. Point a browser at it, register the first account, copy the API key shown once at creation. Subsequent users register through the same endpoint or are provisioned out-of-band via `UserStore`.
+For production deployment: front the gateway with TLS (Caddy / nginx / Traefik), set `cookie_secure: true`, only then change `host: 0.0.0.0` — the adapter **refuses to start** if you skip TLS on a non-loopback bind. Full checklist in [`docs/user-guide/web-chat.md`](docs/user-guide/web-chat.md).
 
 ---
 
 ## HTTP surface
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/auth/register` | Create user + initial API key + session cookie |
-| `POST` | `/api/auth/login` | Verify password, set cookie |
-| `POST` | `/api/auth/logout` | Expire cookie |
-| `GET`  | `/api/keys` | List user's API keys (no plaintext) |
-| `POST` | `/api/keys` | Sign new key — plaintext returned **once** |
-| `DELETE` | `/api/keys/{key_id}` | Revoke key |
-| `GET`  | `/api/conversations` | List user's sessions |
-| `GET`  | `/api/usage` | Current quota state |
-| `POST` | `/api/chat` | SSE stream of agent response |
-| `GET`  | `/api/healthz` | Public health probe |
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | none | create account + initial API key + cookie |
+| `POST` | `/api/auth/login` | none | verify password, set cookie |
+| `POST` | `/api/auth/logout` | cookie | expire cookie + delete server-side row |
+| `GET`  | `/api/keys` | yes | list user's keys (prefix only, no plaintext) |
+| `POST` | `/api/keys` | yes | sign a new key — plaintext returned **once** |
+| `DELETE` | `/api/keys/{key_id}` | yes | revoke a key |
+| `GET`  | `/api/conversations` | yes | list user's sessions, filtered by `user_id` |
+| `GET`  | `/api/usage` | yes | current quota state |
+| `POST` | `/api/chat` | yes | **SSE stream** of agent response |
+| `GET`  | `/api/healthz` | none | liveness probe |
+| `GET`  | `/static/*` | none | SPA assets |
+| `GET`  | `/` | none | SPA shell |
 
-SSE events: `token`, `tool_start`, `tool_end`, `reasoning`, `done`, `error`. Each `done` frame carries `session_id`, `usage`, and rolled-up `quota` state — no separate poll required.
+### SSE event protocol (`POST /api/chat`)
+
+| event | payload | when |
+|---|---|---|
+| `token` | `{"text": "..."}` | streaming assistant token |
+| `tool_start` | `{"tool": "...", "preview": "..."}` | tool call begins |
+| `tool_end` | `{"tool": "...", "duration": 1.2, "error": false}` | tool call returns |
+| `reasoning` | `{"text": "..."}` | model reasoning (provider-dependent) |
+| `done` | `{"session_id": "...", "usage": {...}, "quota": {...}}` | terminal frame |
+| `error` | `{"message": "...", "code": "..."}` | fatal mid-stream error |
+
+`X-Quota-Used` / `X-Quota-Limit` / `X-Quota-Remaining` headers attach to every chat response so the SPA renders the meter without an extra poll. Aborting the SSE connection (`AbortController.abort()`) propagates to the server, which calls `agent.interrupt()` — **partial token usage is still recorded** against the user's quota in a `finally` block.
 
 ---
 
 ## Security model
 
-- **Passwords.** Argon2id via `argon2-cffi`. No plaintext stored, no recoverable hash.
-- **API keys / web sessions.** Returned once at creation; stored as `sha256(plaintext)`. Compromised keys cannot be reconstructed from the DB.
-- **Filesystem sandbox.** Every path argument to `web_file_*` tools is resolved and rejected if it escapes `$HERMES_HOME/web_workspaces/<user_id>/`. The sandbox raises if invoked outside a user context — there is no "no sandbox" fallback.
-- **Toolset whitelist.** The `hermes-web-chat` toolset deliberately excludes `terminal`, `code_execution`, and `browser` by default. Re-enable per-deployment only with a clear threat model.
-- **LLM credentials.** Read once from `config.yaml` / `~/.hermes/.env` and shared across users. Per-user cost attribution is via the quota counter, not separate provider keys.
+**What's isolated by design:**
 
-The gateway is intended to sit behind a TLS-terminating reverse proxy (nginx, Caddy, Traefik). It speaks plain HTTP on the listener port.
+- **Conversations** — `sessions.user_id` filter on every `list_sessions_rich` / `search_messages` call.
+- **Memory** — `enter_user_context` rebinds `HERMES_HOME` via ContextVar; `MemoryManager` and every provider read `get_hermes_home()` and write under `web_workspaces/<user_id>/memories/`. Zero-touch — no agent-internal code modified.
+- **Filesystem (tools)** — `web_file_*` route every path through `confine_path` which rejects anything outside the user's workspace. V4A multi-file patches are **refused outright** because their inner file paths can't be inspected without parsing the V4A format.
+- **Quota** — separate `web_users.db` row per user, rolling 30-day window, auto-reset on first request past the window (no cron needed).
+- **Passwords** — Argon2id (OWASP 2024 parameters: t=2, m=64 MiB, p=2), auto-rehash on parameter changes, constant-ish-time verify (always runs the hasher even on unknown email to avoid timing leak).
+- **API keys** — `sha256(plaintext)` stored, never the plaintext; revocation flag checked on every verify.
+- **Cookie sessions** — `HttpOnly` + `SameSite=Lax` + optional `Secure`; server-side row in `web_sessions` enables instant revocation (logout invalidates the row, not just the cookie).
 
----
+**What's NOT isolated** (deliberate scope decisions):
 
-## Project status
-
-Early. The control plane (accounts, keys, quota, sandbox) is in place and covered by tests under `tests/gateway/`. The React SPA shell is a placeholder — the SSE protocol is stable but the frontend is minimal. Backup and admin tooling are scripts-and-SQL today; a proper admin CLI is not in scope yet.
-
-Track upstream changes via `git log upstream/main` against the paths this fork touches — `gateway/run.py`, `gateway/platforms/api_server.py`, `tools/file_tools.py`, `toolsets.py`. If any of those see a significant rewrite, the mirror files here may need an equivalent edit.
-
----
-
-## Credits
-
-Upstream agent and the vast majority of code: [Nous Research / Hermes Agent](https://github.com/NousResearch/hermes-agent), MIT-licensed. This fork adds the multi-user web service layer and inherits the same MIT license.
-
-See `AGENTS.md` (~1100 lines) for the upstream engineering guide, `CONTRIBUTING.md` (~1300 lines) for upstream contribution rules, and `CLAUDE.md` for orientation when working in this repo with Claude Code.
+- **OS-level shell.** The default toolset excludes `terminal`, `process`, `code_execution`, `browser_*`, `computer_use`. If you grant `terminal_enabled = 1` for a specific user (admin SQL), that user effectively gets shell access as the gateway process user. For truly untrusted users, run upstream's `TERMINAL_ENV_TYPE=docker` backend (one container per user) — outside the multi-tenant scope this fork ships with.
+- **Kernel exploits.** `confine_path` is a Python-layer guard against path traversal, not a defense against a compromised CPython or a kernel CVE.
+- **Upstream $-cost overruns.** The token quota counts what the *agent* sees. Real $-cost depends on the upstream provider's model pricing and prompt-cache hit rate — cap usage at the provider's dashboard too.
 
 ---
 
-## License
+## Testing & quality
 
-MIT — see [LICENSE](LICENSE).
+This fork ships with **162 automated tests** across 9 files, all passing:
+
+| Layer | File | Cases |
+|---|---|---|
+| User-id isolation in SessionDB | `tests/hermes_state/test_user_id_filtering.py` | 12 |
+| UserStore (accounts / keys / quota) | `tests/gateway/test_web_users.py` | 32 |
+| Sandbox + workspace contextvars | `tests/gateway/test_web_sandbox.py` | 14 |
+| Quota gate | `tests/gateway/test_web_quota.py` | 9 |
+| Auth middleware | `tests/gateway/test_web_auth_middleware.py` | 18 |
+| Chat runner (AIAgent factory) | `tests/gateway/test_web_chat_runner.py` | 18 |
+| HTTP adapter | `tests/gateway/test_web_chat_adapter.py` | 25 |
+| Sandboxed `web_file_*` tools | `tests/gateway/test_web_sandboxed_file_tools.py` | 21 |
+| End-to-end integration | `tests/gateway/test_web_chat_platform.py` | 13 |
+
+Plus a standalone smoke test that boots a real `aiohttp` server on an ephemeral port and walks every endpoint (`/api/healthz` → SPA shell → register → list keys → SSE chat with token / tool_start / tool_end / done frames → quota → workspace verification on disk → cross-user → Bearer auth → 429 over-quota → logout). All 11 checks pass against real TCP sockets with real cookie handling.
+
+The most load-bearing test is **`test_concurrent_requests_dont_swap_user_contexts`** — two simultaneous chat requests from Alice and Bob (each with their own Bearer token) must end up with their own `user_id` reaching the runner. This is the test that proves the multi-user contract: ContextVars are asyncio-task-local, not threadlocal, so one user's request can't leak into another's workspace under concurrent load.
+
+Run with the project test wrapper:
+
+```bash
+scripts/run_tests.sh tests/gateway/test_web_*.py tests/hermes_state/test_user_id_filtering.py
+```
+
+---
+
+## Repository layout
+
+```
+.
+├── gateway/
+│   ├── platforms/web_chat.py        HTTP adapter — auth + routes + SSE
+│   └── web/                         ← all multi-tenant code lives here
+│       ├── users.py                 UserStore (Argon2id + quota + keys + sessions)
+│       ├── auth.py                  cookie + Bearer middleware
+│       ├── sandbox.py               enter_user_context / confine_path
+│       ├── quota.py                 HTTP-aware quota gate
+│       ├── chat_runner.py           AIAgent factory (mirror of api_server)
+│       └── tools/
+│           ├── __init__.py          (side-effect register on import)
+│           └── sandboxed_file_operations.py     web_file_* tools
+│
+├── web-chat/                        ← React SPA → builds to gateway/web/_static/
+│   ├── src/
+│   │   ├── App.tsx                  hash router + auth gate + nav
+│   │   ├── api.ts                   typed fetch wrappers + SSE async generator
+│   │   ├── main.tsx                 React entrypoint
+│   │   ├── styles.css               single global stylesheet (dark + light)
+│   │   ├── pages/{Auth,Chat,Settings}Page.tsx
+│   │   └── components/{QuotaBadge,ConversationList,ToolEvent}.tsx
+│   ├── package.json                 react 19 + vite 7 + ts 5
+│   ├── vite.config.ts               proxies /api → :8643 in dev
+│   └── README.md                    SPA dev notes
+│
+├── tests/
+│   ├── hermes_state/test_user_id_filtering.py
+│   └── gateway/test_web_*.py        9 test files, 162 cases
+│
+├── docs/user-guide/web-chat.md      operator guide
+│
+└── (everything else from upstream Hermes Agent, untouched)
+```
+
+---
+
+## Roadmap
+
+In rough order of useful next steps:
+
+- [ ] **Admin CLI** — replace direct-SQLite admin tasks with `hermes web-chat user list / disable / quota / grant-terminal`
+- [ ] **GET /api/conversations/{id}** to load transcript history (SPA can switch sessions but doesn't fetch history yet)
+- [ ] **Password reset flow** — currently admin issues reset tokens via SQL
+- [ ] **Plugin-hook proposal to upstream** — `register_gateway_platform()` on `PluginManager` so this whole fork can be re-published as a standalone plugin and the four B-class edits dissolve
+- [ ] **Optional Postgres backend** for `web_users.db` when single-box SQLite tops out
+- [ ] **OAuth / SSO** at the proxy layer for company deployments
+- [ ] **OS-level per-user sandbox** wired through upstream's existing Docker terminal backend
+
+The user-id propagation fixes from stage 1 (commit `2ce65f980`) are intended to be offered back to upstream as a PR — they're real bugs in the shared `user_id`-column infrastructure, with no behavioral change for existing single-user callers.
+
+---
+
+## Acknowledgements & license
+
+- **Upstream**: [Nous Research / hermes-agent](https://github.com/NousResearch/hermes-agent) — the entire agent loop, skill system, memory stack, tool registry, 25+ gateway platforms, model-provider plugins, and CLI come from there. The fork is a thin operational layer on top of that work.
+- **License**: MIT, matching upstream — see [`LICENSE`](LICENSE).
+
+Further reading:
+
+- [`docs/user-guide/web-chat.md`](docs/user-guide/web-chat.md) — operator-focused guide (setup, HTTP surface, capacity, production checklist, admin tasks via SQL).
+- [`web-chat/README.md`](web-chat/README.md) — SPA development notes.
+- For upstream agent behavior (skills, memory, tools, model routing), see [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs/) — everything there applies here too, unmodified.
+- [`AGENTS.md`](AGENTS.md) (~1100 lines) is the upstream engineering guide — canonical for anything below the multi-user layer.
+- [`CLAUDE.md`](CLAUDE.md) is the orientation file for working in this repo with [Claude Code](https://claude.com/claude-code).
