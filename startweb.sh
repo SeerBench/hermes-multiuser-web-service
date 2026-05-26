@@ -81,17 +81,39 @@ done
 PORT="${PORT_OVERRIDE:-$DEFAULT_PORT}"
 
 # ── 1. Venv ─────────────────────────────────────────────────────────────────
-if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
-    warn ".venv not found at $SCRIPT_DIR/.venv — running setup-hermes.sh first"
+# Probe ``.venv``, then ``venv``, then the shared system venv — matches the
+# fallback chain in ``scripts/run_tests.sh``.  ``setup-hermes.sh`` currently
+# creates ``venv/`` (no leading dot); other tooling sometimes finds
+# ``.venv/``.  Either layout works as long as ``bin/activate`` is present.
+find_venv() {
+    for candidate in "$SCRIPT_DIR/.venv" "$SCRIPT_DIR/venv" "$HOME/.hermes/hermes-agent/venv"; do
+        if [[ -f "$candidate/bin/activate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+VENV_PATH="$(find_venv || true)"
+
+if [[ -z "$VENV_PATH" ]]; then
+    warn "no venv found at .venv/ or venv/ — running setup-hermes.sh first"
     if [[ ! -x "$SCRIPT_DIR/setup-hermes.sh" ]]; then
         err "setup-hermes.sh missing or not executable"
         exit 1
     fi
     "$SCRIPT_DIR/setup-hermes.sh"
-    # Verify setup actually created the venv — setup-hermes.sh can succeed
-    # silently and skip venv creation if it detects an unusual environment.
-    if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
-        err "setup-hermes.sh ran but $SCRIPT_DIR/.venv/bin/activate is still missing"
+
+    # Verify setup actually created a venv — setup-hermes.sh can be
+    # interrupted (e.g. the user answering 'n' to the wizard prompt is
+    # fine and shouldn't fail the script).  Re-probe both names.
+    VENV_PATH="$(find_venv || true)"
+    if [[ -z "$VENV_PATH" ]]; then
+        err "setup-hermes.sh ran but no venv/bin/activate exists under $SCRIPT_DIR"
+        err "  expected one of:"
+        err "    $SCRIPT_DIR/.venv/bin/activate"
+        err "    $SCRIPT_DIR/venv/bin/activate"
         err "  inspect setup-hermes.sh output above, or create the venv manually:"
         err "    uv venv .venv --python 3.11"
         err "    source .venv/bin/activate"
@@ -99,9 +121,10 @@ if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
         exit 1
     fi
 fi
+
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/.venv/bin/activate"
-ok ".venv active: $(python -V 2>&1)"
+source "$VENV_PATH/bin/activate"
+ok "venv active: $(python -V 2>&1)  ($(basename "$VENV_PATH")/)"
 
 # ── 2. [web-chat] extra ─────────────────────────────────────────────────────
 if ! python -c "import argon2" 2>/dev/null; then
