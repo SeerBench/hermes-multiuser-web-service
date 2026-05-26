@@ -28,7 +28,11 @@
 set -euo pipefail
 
 # ── Repo root ───────────────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ``pwd -P`` resolves symlinks so we always anchor at the real on-disk path.
+# Matters when the repo is reached via a symlinked working tree (e.g. a
+# Conductor / WSL alias path) — otherwise ``.venv`` lookups land in the
+# alias namespace and miss the actual venv built under the canonical path.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$SCRIPT_DIR"
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -78,12 +82,22 @@ PORT="${PORT_OVERRIDE:-$DEFAULT_PORT}"
 
 # ── 1. Venv ─────────────────────────────────────────────────────────────────
 if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
-    warn ".venv not found — running setup-hermes.sh first"
+    warn ".venv not found at $SCRIPT_DIR/.venv — running setup-hermes.sh first"
     if [[ ! -x "$SCRIPT_DIR/setup-hermes.sh" ]]; then
         err "setup-hermes.sh missing or not executable"
         exit 1
     fi
     "$SCRIPT_DIR/setup-hermes.sh"
+    # Verify setup actually created the venv — setup-hermes.sh can succeed
+    # silently and skip venv creation if it detects an unusual environment.
+    if [[ ! -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+        err "setup-hermes.sh ran but $SCRIPT_DIR/.venv/bin/activate is still missing"
+        err "  inspect setup-hermes.sh output above, or create the venv manually:"
+        err "    uv venv .venv --python 3.11"
+        err "    source .venv/bin/activate"
+        err "    uv pip install -e \".[all,dev,web-chat]\""
+        exit 1
+    fi
 fi
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/.venv/bin/activate"
@@ -165,10 +179,13 @@ fi
 mkdir -p "$HERMES_HOME"
 
 # Python writes the YAML to avoid shell-quoting and YAML-edge-case bugs.
-# We import ruamel.yaml (already in core deps) for round-trip safety —
-# it preserves comments and key order if config.yaml already exists.
-python - "$CONFIG_YAML" "$HOST" "$PORT" <<'PYEOF'
-import sys
+# Idempotent: the script reads the existing config, computes the would-be-new
+# content in memory, and only touches the file when something actually
+# changes — repeated runs print "unchanged" with no disk write.
+# ruamel.yaml round-trips comments + key order; PyYAML fallback is a minimal
+# shim for the unusual case where ruamel isn't installed.
+CONFIG_STATUS="$(python - "$CONFIG_YAML" "$HOST" "$PORT" <<'PYEOF'
+import io, sys
 from pathlib import Path
 
 config_path = Path(sys.argv[1])
@@ -181,15 +198,14 @@ try:
     yaml.preserve_quotes = True
 except ImportError:
     import yaml as _yaml
-    class YAML:  # minimal shim if ruamel isn't there for some reason
+    class YAML:
         def load(self, s): return _yaml.safe_load(s) or {}
         def dump(self, data, stream): _yaml.safe_dump(data, stream, sort_keys=False)
     yaml = YAML()
 
-if config_path.exists():
-    data = yaml.load(config_path.read_text(encoding="utf-8")) or {}
-else:
-    data = {}
+existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+data = yaml.load(existing_text) if existing_text else {}
+data = data or {}
 
 platforms = data.setdefault("platforms", {})
 web_chat = platforms.setdefault("web_chat", {})
@@ -198,21 +214,30 @@ extra = web_chat.setdefault("extra", {})
 extra["host"] = host
 extra["port"] = port
 extra["max_concurrent_agents"] = extra.get("max_concurrent_agents", 12)
-extra["cookie_secure"] = False        # plain HTTP under Tailscale / loopback
+extra["cookie_secure"] = False           # plain HTTP under Tailscale / loopback
 extra["cookie_ttl_seconds"] = extra.get("cookie_ttl_seconds", 604800)
-extra["allow_insecure_bind"] = True   # testing escape hatch — opts out of
-                                       # the "non-loopback + !cookie_secure
-                                       # refuses to start" guard
+extra["allow_insecure_bind"] = True      # opt-out of "non-loopback + !cookie_secure → refuse"
 
-# Write atomically so a partial write can't leave config.yaml truncated.
-tmp = config_path.with_suffix(".yaml.tmp")
-with tmp.open("w", encoding="utf-8") as f:
-    yaml.dump(data, f)
-tmp.replace(config_path)
-print(f"wrote {config_path}")
+buf = io.StringIO()
+yaml.dump(data, buf)
+new_text = buf.getvalue()
+
+if new_text == existing_text:
+    print("unchanged")
+else:
+    # Atomic write so a Ctrl-C mid-write can't truncate config.yaml.
+    tmp = config_path.with_suffix(".yaml.tmp")
+    tmp.write_text(new_text, encoding="utf-8")
+    tmp.replace(config_path)
+    print("written")
 PYEOF
+)"
 
-ok "config.yaml updated → platforms.web_chat.enabled=true, host=$HOST, port=$PORT"
+if [[ "$CONFIG_STATUS" == "unchanged" ]]; then
+    ok "config.yaml already configured for host=$HOST port=$PORT — unchanged"
+else
+    ok "config.yaml written → platforms.web_chat.enabled=true, host=$HOST, port=$PORT"
+fi
 
 # ── 6. LLM key sanity check ─────────────────────────────────────────────────
 if [[ -f "$ENV_FILE" ]] && grep -qE '^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|NOUS_API_KEY|GROQ_API_KEY|XAI_API_KEY)=.+' "$ENV_FILE"; then
