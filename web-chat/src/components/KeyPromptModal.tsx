@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError, auth } from '../api'
+import { useT } from '../i18n'
+import type { Translator } from '../i18n'
 
 type Props = {
   // Why the modal opened.  Drives the heading copy so the user knows
@@ -21,6 +23,7 @@ type Props = {
  * server's `code` field into user-facing messages.
  */
 export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
+  const t = useT()
   const [apiKey, setApiKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,11 +53,11 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
       onSuccess(user_id)
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(messageForCode(err.code, err.status))
+        setError(messageForCode(err.code, err.status, t))
       } else if (err instanceof Error) {
         setError(err.message)
       } else {
-        setError('Login failed.')
+        setError(t('keymodal.error.generic', { status: 0 }))
       }
     } finally {
       setSubmitting(false)
@@ -63,12 +66,12 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
 
   const heading =
     reason === 'session-expired'
-      ? 'Session expired'
-      : 'Sign in with your API key'
+      ? t('keymodal.heading.expired')
+      : t('keymodal.heading.first')
   const subline =
     reason === 'session-expired'
-      ? 'Your session is no longer valid. Paste your API key to continue.'
-      : 'Paste the API key your administrator issued from the new-api gateway.'
+      ? t('keymodal.sub.expired')
+      : t('keymodal.sub.first')
 
   return (
     <div className="keymodal-backdrop" role="dialog" aria-modal="true">
@@ -77,7 +80,7 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
         <p className="keymodal-sub">{subline}</p>
 
         <label>
-          <span>API key</span>
+          <span>{t('keymodal.label.apikey')}</span>
           <input
             ref={inputRef}
             type="password"
@@ -100,21 +103,18 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
             onClick={onCancel}
             disabled={submitting}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="submit"
             className="keymodal-primary"
             disabled={submitting || !apiKey.trim()}
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? t('keymodal.submitting') : t('keymodal.submit')}
           </button>
         </div>
 
-        <p className="keymodal-help">
-          Don't have a key yet? Ask your administrator. Keys are issued
-          and billed through the upstream gateway, not here.
-        </p>
+        <p className="keymodal-help">{t('keymodal.help')}</p>
       </form>
     </div>
   )
@@ -123,17 +123,18 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
 function messageForCode(
   code: string | undefined,
   status: number,
+  t: Translator,
 ): string {
   switch (code) {
     case 'invalid_key':
-      return 'That API key was rejected by the upstream gateway. Check it for typos or ask your admin for a new one.'
+      return t('keymodal.error.invalid_key')
     case 'upstream_unreachable':
-      return 'The upstream gateway is unreachable right now. Try again in a moment.'
+      return t('keymodal.error.upstream_unreachable')
     case 'misconfigured':
-      return 'The server can\'t reach the configured upstream URL. Ask your administrator to check the new-api configuration.'
+      return t('keymodal.error.misconfigured')
     case 'missing_api_key':
-      return 'Please paste your API key.'
+      return t('keymodal.error.missing_api_key')
     default:
-      return `Login failed (HTTP ${status}).`
+      return t('keymodal.error.generic', { status })
   }
 }

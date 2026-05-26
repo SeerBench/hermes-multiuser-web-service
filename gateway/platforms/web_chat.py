@@ -91,6 +91,8 @@ from gateway.web.key_storage import KeyVault, KeyVaultError
 from gateway.web.sandbox import enter_user_context
 from gateway.web.upstream_key import derive_user_id, enter_upstream_key
 from gateway.web.upstream_validator import validate_key_against_upstream
+from gateway.web.web_commands import dispatch as dispatch_command
+from gateway.web.web_commands import list_commands as list_web_commands
 from gateway.web.users import (
     InvalidCredentialsError,
     UserStore,
@@ -112,6 +114,22 @@ _DEFAULT_COOKIE_TTL_SECONDS = 7 * 24 * 3600
 # Conversation listing default
 _LIST_CONVERSATIONS_DEFAULT_LIMIT = 50
 _LIST_CONVERSATIONS_MAX_LIMIT = 200
+
+# SSE payload safety cap. Tool args/results can be large (e.g. a 50KB
+# search result, a full file's contents). We truncate the *preview* the
+# user sees in the UI so the SSE stream stays bounded; the full record
+# remains in the SessionDB and is recoverable via
+# ``GET /api/conversations/:id``.
+_SSE_PAYLOAD_TRUNCATE_BYTES = 4096
+
+
+def _truncate_for_sse(text: str, limit: int = _SSE_PAYLOAD_TRUNCATE_BYTES) -> str:
+    """Trim a payload string to ``limit`` chars, appending an ellipsis marker."""
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n…[truncated {len(text) - limit} chars]"
 
 
 def check_web_chat_requirements() -> bool:
@@ -379,6 +397,12 @@ class WebChatAdapter(BasePlatformAdapter):
         app.router.add_post("/api/auth/logout", self._handle_logout)
         app.router.add_get("/api/me", self._handle_me)
         app.router.add_get("/api/conversations", self._handle_list_conversations)
+        app.router.add_get(
+            "/api/conversations/{conversation_id}",
+            self._handle_get_conversation,
+        )
+        app.router.add_get("/api/commands", self._handle_list_commands)
+        app.router.add_post("/api/command", self._handle_run_command)
         app.router.add_post("/api/chat", self._handle_chat)
         # SPA shell + static assets.
         from pathlib import Path as _Path
@@ -588,6 +612,132 @@ class WebChatAdapter(BasePlatformAdapter):
         ]
         return web.json_response({"conversations": projected})
 
+    async def _handle_get_conversation(self, request: "web.Request") -> "web.Response":
+        """Return the full message history for one conversation.
+
+        The SPA calls this when the user clicks a sidebar entry so the
+        transcript view can rehydrate.  Hard per-user isolation: a
+        session owned by a different user is treated as not-found so
+        we don't leak even the existence of someone else's session_id.
+        """
+        user_id = get_request_user_id(request)
+        cid = (request.match_info.get("conversation_id") or "").strip()
+        if not cid:
+            return self._json_error("conversation id required")
+
+        db = self._ensure_session_db()
+        if db is None:
+            return self._json_error(
+                "database unavailable", status=503, code="db_unavailable",
+            )
+
+        try:
+            session = db.get_session(cid)
+        except Exception as exc:
+            logger.error(
+                "[%s] get_session failed for %s: %s",
+                self.name, cid, exc, exc_info=True,
+            )
+            return self._json_error("conversation unavailable", status=500)
+
+        if not session or session.get("user_id") != user_id:
+            return self._json_error("not found", status=404, code="not_found")
+
+        try:
+            rows = db.get_messages(cid)
+        except Exception as exc:
+            logger.error(
+                "[%s] get_messages failed for %s: %s",
+                self.name, cid, exc, exc_info=True,
+            )
+            return self._json_error("conversation unavailable", status=500)
+
+        messages = []
+        for r in rows:
+            role = r.get("role")
+            if role not in ("user", "assistant", "tool", "system"):
+                continue
+            messages.append({
+                "id": r.get("id"),
+                "role": role,
+                "content": r.get("content"),
+                "tool_calls": r.get("tool_calls") or [],
+                "tool_call_id": r.get("tool_call_id"),
+                "tool_name": r.get("tool_name"),
+                "reasoning": r.get("reasoning") or r.get("reasoning_content") or None,
+                "timestamp": r.get("timestamp"),
+            })
+
+        return web.json_response({
+            "id": session.get("id"),
+            "title": session.get("title"),
+            "started_at": session.get("started_at"),
+            "last_active": session.get("last_active"),
+            "messages": messages,
+        })
+
+    # ── /api/commands & /api/command ──────────────────────────────────
+
+    async def _handle_list_commands(self, request: "web.Request") -> "web.Response":
+        """Return the catalog of slash commands available in this UI.
+
+        Auth middleware has already verified the cookie, so we don't
+        need to consult ``user_id`` for the listing — the catalog is the
+        same for every user.
+        """
+        _ = get_request_user_id(request)  # ensure-authenticated side-effect
+        try:
+            cmds = list_web_commands()
+        except Exception as exc:
+            logger.error("[%s] list_web_commands failed: %s", self.name, exc, exc_info=True)
+            return self._json_error("command catalog unavailable", status=500)
+        return web.json_response({"commands": cmds})
+
+    async def _handle_run_command(self, request: "web.Request") -> "web.Response":
+        """Execute a single slash command and return the result.
+
+        Body shape: ``{command: str, args?: str, session_id?: str}``.
+        Response shape: ``{ok: bool, message: str, side_effects?: dict}``
+        plus an HTTP status that mirrors the dispatcher's classification
+        (400 for bad request, 405 for unsupported, 500 for DB errors,
+        200 otherwise).
+        """
+        user_id = get_request_user_id(request)
+        try:
+            body = await request.json()
+        except Exception:
+            return self._json_error("invalid JSON")
+        name = (body.get("command") or "").strip()
+        args = body.get("args") or ""
+        session_id = body.get("session_id") or None
+        if not name:
+            return self._json_error("command required")
+
+        db = self._ensure_session_db()
+        if db is None:
+            return self._json_error(
+                "database unavailable", status=503, code="db_unavailable",
+            )
+
+        try:
+            result = dispatch_command(
+                name, args, user_id=user_id, session_id=session_id, db=db,
+            )
+        except Exception as exc:
+            logger.error(
+                "[%s] dispatch_command(%s) failed: %s",
+                self.name, name, exc, exc_info=True,
+            )
+            return self._json_error("command execution failed", status=500)
+
+        payload: Dict[str, Any] = {
+            "ok": result.ok,
+            "message": result.message,
+        }
+        if result.side_effects:
+            payload["side_effects"] = result.side_effects
+        return web.json_response(payload, status=result.status)
+
     # ── /api/chat ──────────────────────────────────────────────────────
 
     async def _handle_chat(self, request: "web.Request") -> "web.StreamResponse":
@@ -642,19 +792,75 @@ class WebChatAdapter(BasePlatformAdapter):
             except Exception:
                 pass  # best-effort — SSE consumer may have disconnected
 
+        # Per-request bookkeeping so tool_end events can compute duration
+        # from tool_start without relying on the agent passing it through.
+        # Keyed by tool_call_id when available, else by tool name.
+        tool_start_times: Dict[str, float] = {}
+
         def stream_delta_cb(text: str, **_kwargs) -> None:
             if text:
                 _push("token", {"text": text})
 
-        def tool_start_cb(name: str, preview: str = None, **_kwargs) -> None:
-            _push("tool_start", {"tool": name, "preview": preview or ""})
-
-        def tool_complete_cb(name: str, **kwargs) -> None:
-            _push("tool_end", {
+        def tool_start_cb(tool_call_id, name, args=None, *_, **_kwargs) -> None:
+            # The AIAgent calls ``agent.tool_start_callback(tc.id, name, args)``
+            # with three positional args — see ``agent/tool_executor.py``.
+            # Earlier revisions of this adapter had a 2-positional signature
+            # and silently swallowed the TypeError, dropping every tool
+            # event.  Match the real shape so the SPA actually sees them.
+            try:
+                args_str = json.dumps(args, ensure_ascii=False, default=str)
+            except Exception:
+                args_str = str(args)
+            tool_start_times[str(tool_call_id)] = time.time()
+            preview = _truncate_for_sse(args_str, 280)
+            _push("tool_start", {
+                "id": str(tool_call_id) if tool_call_id is not None else None,
                 "tool": name,
-                "duration": round(float(kwargs.get("duration", 0)), 3),
-                "error": bool(kwargs.get("is_error", False)),
+                "preview": preview,
+                "args": _truncate_for_sse(args_str),
             })
+
+        def tool_complete_cb(tool_call_id, name, args, function_result, *_, **_kwargs) -> None:
+            # AIAgent calls 4-positional:
+            #   ``tool_complete_callback(tc.id, name, args, function_result)``
+            start = tool_start_times.pop(str(tool_call_id), None)
+            duration = round(time.time() - start, 3) if start is not None else 0.0
+            # Detect tool errors by inspecting the result shape.  Tools
+            # signal failure either by returning a dict with an ``error``
+            # key, by being a string starting with the conventional
+            # ``Error:`` prefix used across the codebase, or by being None.
+            error = False
+            try:
+                if function_result is None:
+                    error = True
+                elif isinstance(function_result, dict) and "error" in function_result:
+                    error = True
+                elif isinstance(function_result, str) and function_result.startswith(("Error:", "❌")):
+                    error = True
+            except Exception:
+                pass
+            try:
+                if isinstance(function_result, str):
+                    result_str = function_result
+                else:
+                    result_str = json.dumps(function_result, ensure_ascii=False, default=str)
+            except Exception:
+                result_str = str(function_result)
+            _push("tool_end", {
+                "id": str(tool_call_id) if tool_call_id is not None else None,
+                "tool": name,
+                "duration": duration,
+                "error": error,
+                "result_preview": _truncate_for_sse(result_str),
+            })
+
+        def reasoning_cb(text: str, **_kwargs) -> None:
+            # AIAgent calls ``self.reasoning_callback(text)`` — see
+            # ``run_agent.py::_fire_reasoning_delta``.  Stream chunks of
+            # the model's reasoning trace into the SPA so the user can
+            # see what the agent was thinking between tool calls.
+            if text:
+                _push("reasoning", {"text": text})
 
         agent_ref: List[Any] = [None]
 
@@ -678,6 +884,7 @@ class WebChatAdapter(BasePlatformAdapter):
                         stream_delta_callback=stream_delta_cb,
                         tool_start_callback=tool_start_cb,
                         tool_complete_callback=tool_complete_cb,
+                        reasoning_callback=reasoning_cb,
                         agent_ref=agent_ref,
                         gateway_session_key=gateway_session_key,
                     )

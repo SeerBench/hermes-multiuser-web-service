@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { LocaleProvider, useT } from './i18n'
+import { LanguageToggle } from './components/LanguageToggle'
 
 type Route = 'chat' | 'settings'
 
@@ -13,7 +15,8 @@ function goto(route: Route) {
   window.location.hash = `#/${route}`
 }
 
-export function App() {
+function AppShell() {
+  const t = useT()
   const [route, setRoute] = useState<Route>(parseRoute())
   // Bump this on logout so child pages remount with fresh state.
   const [pageKey, setPageKey] = useState(0)
@@ -23,6 +26,10 @@ export function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
+
+  useEffect(() => {
+    document.title = t('app.title')
+  }, [t])
 
   // Sign-out from SettingsPage navigates back to chat and bumps pageKey
   // so any in-memory state (transcript, conversation list cache) is
@@ -35,22 +42,23 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1 className="app-title">Hermes Web Chat</h1>
+        <h1 className="app-title">{t('app.title')}</h1>
         <nav className="app-nav">
           <button
             type="button"
             className={route === 'chat' ? 'nav-active' : ''}
             onClick={() => goto('chat')}
           >
-            Chat
+            {t('nav.chat')}
           </button>
           <button
             type="button"
             className={route === 'settings' ? 'nav-active' : ''}
             onClick={() => goto('settings')}
           >
-            Settings
+            {t('nav.settings')}
           </button>
+          <LanguageToggle compact />
         </nav>
       </header>
       <main className="app-main">
@@ -60,5 +68,13 @@ export function App() {
         )}
       </main>
     </div>
+  )
+}
+
+export function App() {
+  return (
+    <LocaleProvider>
+      <AppShell />
+    </LocaleProvider>
   )
 }

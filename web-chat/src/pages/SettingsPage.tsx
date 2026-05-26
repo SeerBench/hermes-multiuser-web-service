@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, auth } from '../api'
 import type { User } from '../api'
+import { LanguageToggle } from '../components/LanguageToggle'
+import { useT } from '../i18n'
 
 type Props = {
   onLoggedOut: () => void
 }
 
 export function SettingsPage({ onLoggedOut }: Props) {
+  const t = useT()
   const [me, setMe] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -22,12 +25,12 @@ export function SettingsPage({ onLoggedOut }: Props) {
       if (err instanceof ApiError && err.status === 401) {
         setMe(null)
       } else {
-        setError(err instanceof Error ? err.message : 'failed to load settings')
+        setError(err instanceof Error ? err.message : t('settings.error.generic'))
       }
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     void load()
@@ -48,25 +51,25 @@ export function SettingsPage({ onLoggedOut }: Props) {
   return (
     <div className="settings-page">
       <section className="settings-block">
-        <h2>Account</h2>
+        <h2>{t('settings.account.title')}</h2>
         {loading ? (
-          <p>Loading…</p>
+          <p>{t('common.loading')}</p>
         ) : me ? (
           <>
             <table className="settings-account">
               <tbody>
                 <tr>
-                  <th>User ID</th>
+                  <th>{t('settings.account.user_id')}</th>
                   <td>
                     <code>{me.user_id}</code>
                   </td>
                 </tr>
                 <tr>
-                  <th>First seen</th>
+                  <th>{t('settings.account.first_seen')}</th>
                   <td>{new Date(me.created_at * 1000).toLocaleString()}</td>
                 </tr>
                 <tr>
-                  <th>Last seen</th>
+                  <th>{t('settings.account.last_seen')}</th>
                   <td>{new Date(me.last_seen_at * 1000).toLocaleString()}</td>
                 </tr>
               </tbody>
@@ -77,26 +80,27 @@ export function SettingsPage({ onLoggedOut }: Props) {
               onClick={logout}
               disabled={loggingOut}
             >
-              {loggingOut ? '…' : 'Sign out'}
+              {loggingOut ? t('settings.signout.busy') : t('settings.signout')}
             </button>
           </>
         ) : (
-          <p>
-            Not signed in. Return to <a href="#/chat">chat</a> and send a message
-            to sign in with your API key.
-          </p>
+          <p>{t('settings.not_signed_in')}</p>
         )}
       </section>
 
       <section className="settings-block">
-        <h2>About this service</h2>
-        <p className="settings-help">
-          Authentication and billing are handled by the upstream
-          new-api gateway. Your API key was issued by your administrator;
-          to request more capacity or a new key, contact them directly.
-          This interface only stores the cookie session — your key is
-          encrypted at rest and never displayed back.
-        </p>
+        <h2>{t('settings.preferences.title')}</h2>
+        <div className="settings-pref-row">
+          <span className="settings-pref-label">
+            {t('settings.preferences.language')}
+          </span>
+          <LanguageToggle />
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <h2>{t('settings.about.title')}</h2>
+        <p className="settings-help">{t('settings.about.body')}</p>
       </section>
 
       {error && <p className="settings-error">{error}</p>}

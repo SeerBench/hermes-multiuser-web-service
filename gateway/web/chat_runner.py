@@ -83,6 +83,7 @@ class WebChatAgentRunner:
         tool_progress_callback: Optional[Callable] = None,
         tool_start_callback: Optional[Callable] = None,
         tool_complete_callback: Optional[Callable] = None,
+        reasoning_callback: Optional[Callable] = None,
         gateway_session_key: Optional[str] = None,
     ) -> Any:
         """Construct an AIAgent for a single web_chat request.
@@ -144,6 +145,7 @@ class WebChatAgentRunner:
             tool_progress_callback=tool_progress_callback,
             tool_start_callback=tool_start_callback,
             tool_complete_callback=tool_complete_callback,
+            reasoning_callback=reasoning_callback,
             session_db=self._session_db,
             fallback_model=fallback_model,
             reasoning_config=reasoning_config,
@@ -165,6 +167,7 @@ class WebChatAgentRunner:
         tool_progress_callback: Optional[Callable] = None,
         tool_start_callback: Optional[Callable] = None,
         tool_complete_callback: Optional[Callable] = None,
+        reasoning_callback: Optional[Callable] = None,
         agent_ref: Optional[list] = None,
         gateway_session_key: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int]]:
@@ -204,6 +207,7 @@ class WebChatAgentRunner:
                 tool_progress_callback=tool_progress_callback,
                 tool_start_callback=tool_start_callback,
                 tool_complete_callback=tool_complete_callback,
+                reasoning_callback=reasoning_callback,
                 gateway_session_key=gateway_session_key,
             )
             if agent_ref is not None:

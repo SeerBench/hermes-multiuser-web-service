@@ -34,11 +34,74 @@ export type ChatMessage = {
 
 export type ChatEvent =
   | { type: 'token'; text: string }
-  | { type: 'tool_start'; tool: string; preview: string }
-  | { type: 'tool_end'; tool: string; duration: number; error: boolean }
+  | {
+      type: 'tool_start'
+      id: string | null
+      tool: string
+      preview: string
+      args: string
+    }
+  | {
+      type: 'tool_end'
+      id: string | null
+      tool: string
+      duration: number
+      error: boolean
+      result_preview: string
+    }
   | { type: 'reasoning'; text: string }
   | { type: 'done'; session_id: string; usage: Record<string, number> }
   | { type: 'error'; message: string; code?: string }
+
+// ── Stored messages (returned by GET /api/conversations/:id) ────────────
+
+export type ServerMessage = {
+  id: number | null
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string | null
+  tool_calls: ServerToolCall[]
+  tool_call_id: string | null
+  tool_name: string | null
+  reasoning: string | null
+  timestamp: number | null
+}
+
+export type ServerToolCall = {
+  id?: string
+  type?: string
+  function?: { name?: string; arguments?: string }
+  // Defensive: some providers store tool calls in flat form.
+  name?: string
+  arguments?: string | Record<string, unknown>
+}
+
+export type ConversationDetail = {
+  id: string
+  title: string | null
+  started_at: number
+  last_active: number
+  messages: ServerMessage[]
+}
+
+// ── Slash command catalog + dispatch ────────────────────────────────────
+
+export type CommandSpec = {
+  name: string
+  description: string
+  description_i18n?: { en: string; zh: string }
+  category: string
+  args_hint: string
+  aliases: string[]
+  subcommands: string[]
+  client_only: boolean
+  supported: boolean
+}
+
+export type CommandResult = {
+  ok: boolean
+  message: string
+  side_effects?: Record<string, unknown>
+}
 
 // ── Low-level fetch wrapper ──────────────────────────────────────────────
 
@@ -97,6 +160,24 @@ export const conversations = {
     request<{ conversations: ConversationSummary[] }>(
       `/api/conversations?limit=${limit}&offset=${offset}`,
     ).then((r) => r.conversations),
+  get: (id: string) =>
+    request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
+}
+
+// ── Commands ────────────────────────────────────────────────────────────
+
+export const commands = {
+  list: () =>
+    request<{ commands: CommandSpec[] }>(`/api/commands`).then((r) => r.commands),
+  run: (name: string, args = '', session_id?: string | null) =>
+    request<CommandResult>(`/api/command`, {
+      method: 'POST',
+      body: JSON.stringify({
+        command: name,
+        args,
+        session_id: session_id ?? null,
+      }),
+    }),
 }
 
 // ── Chat (SSE stream) ───────────────────────────────────────────────────
@@ -214,15 +295,19 @@ function parseSseFrame(frame: string): ChatEvent | null {
     case 'tool_start':
       return {
         type: 'tool_start',
+        id: data.id == null ? null : String(data.id),
         tool: String(data.tool ?? ''),
         preview: String(data.preview ?? ''),
+        args: String(data.args ?? ''),
       }
     case 'tool_end':
       return {
         type: 'tool_end',
+        id: data.id == null ? null : String(data.id),
         tool: String(data.tool ?? ''),
         duration: Number(data.duration ?? 0),
         error: Boolean(data.error),
+        result_preview: String(data.result_preview ?? ''),
       }
     case 'reasoning':
       return { type: 'reasoning', text: String(data.text ?? '') }
