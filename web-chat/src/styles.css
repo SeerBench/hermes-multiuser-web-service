@@ -148,18 +148,21 @@ code {
   display: flex;
 }
 
-/* ── Auth ─────────────────────────────────────────────────────────── */
+/* ── Key prompt modal ─────────────────────────────────────────────── */
 
-.auth-wrap {
+.keymodal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
   display: grid;
   place-items: center;
-  height: 100%;
   padding: 24px;
+  z-index: 100;
 }
 
-.auth-card {
+.keymodal-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 420px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -167,20 +170,26 @@ code {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
 }
 
-.auth-card h1 {
+.keymodal-card h1 {
   margin: 0;
   font-size: 20px;
 }
 
-.auth-sub {
+.keymodal-sub,
+.keymodal-help {
   margin: 0;
   color: var(--fg-dim);
   font-size: 13px;
 }
 
-.auth-card label {
+.keymodal-help {
+  margin-top: 4px;
+}
+
+.keymodal-card label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -188,72 +197,53 @@ code {
   color: var(--fg-dim);
 }
 
-.auth-card input {
+.keymodal-card input {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+  font-family: var(--font-mono, monospace);
 }
 
-.auth-card input:focus {
+.keymodal-card input:focus {
   outline: none;
   border-color: var(--accent);
 }
 
-.auth-error {
+.keymodal-error {
   color: var(--danger);
   font-size: 13px;
   margin: 0;
 }
 
-.auth-primary,
-.auth-secondary {
+.keymodal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.keymodal-primary,
+.keymodal-secondary {
   padding: 9px 14px;
   border-radius: var(--radius);
   border: 1px solid transparent;
   font-weight: 500;
 }
 
-.auth-primary {
+.keymodal-primary {
   background: var(--accent);
   color: var(--accent-fg);
 }
 
-.auth-primary:disabled {
+.keymodal-primary:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.auth-secondary {
+.keymodal-secondary {
   background: transparent;
   color: var(--fg);
   border-color: var(--border);
-}
-
-.auth-switch {
-  margin: 0;
-  text-align: center;
-  font-size: 13px;
-  color: var(--fg-dim);
-}
-
-.link {
-  background: none;
-  border: none;
-  color: var(--accent);
-  padding: 0;
-  text-decoration: underline;
-  font-size: inherit;
-}
-
-.auth-key {
-  display: block;
-  padding: 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  word-break: break-all;
-  font-size: 13px;
 }
 
 /* ── Chat page ─────────────────────────────────────────────────────── */
@@ -509,104 +499,38 @@ code {
   margin: 0 0 14px 0;
 }
 
-.settings-quota,
-.settings-keys {
+.settings-account {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  margin-bottom: 14px;
 }
 
-.settings-quota th,
-.settings-quota td,
-.settings-keys th,
-.settings-keys td {
+.settings-account th,
+.settings-account td {
   text-align: left;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
 }
 
-.settings-quota th {
+.settings-account th {
   color: var(--fg-dim);
   font-weight: 500;
   width: 140px;
 }
 
-.settings-keys th {
-  color: var(--fg-dim);
-  font-weight: 500;
-}
-
-.settings-primary {
-  padding: 8px 14px;
-  margin: 4px 0 14px 0;
-  background: var(--accent);
-  color: var(--accent-fg);
-  border: none;
-  border-radius: var(--radius);
-}
-
 .settings-danger {
-  padding: 4px 10px;
+  padding: 8px 14px;
   background: transparent;
   color: var(--danger);
   border: 1px solid var(--danger);
   border-radius: var(--radius);
-  font-size: 12px;
-}
-
-.settings-revoked {
-  color: var(--fg-faint);
+  font-weight: 500;
 }
 
 .settings-error {
   color: var(--danger);
   font-size: 13px;
-}
-
-.settings-new-key {
-  margin: 0 0 14px 0;
-  padding: 12px;
-  background: var(--bg);
-  border: 1px solid var(--warn);
-  border-radius: var(--radius);
-}
-
-.settings-new-key code {
-  display: block;
-  margin: 8px 0;
-  word-break: break-all;
-  font-size: 12px;
-}
-
-.settings-new-key-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* ── Quota badge ───────────────────────────────────────────────────── */
-
-.quota-badge {
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  letter-spacing: 0.3px;
-  border: 1px solid var(--border);
-  color: var(--fg-dim);
-}
-
-.badge-ok {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok), transparent 70%);
-}
-
-.badge-warn {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn), transparent 70%);
-}
-
-.badge-over {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger), transparent 70%);
 }
 
 /* ── Responsive ──────────────────────────────────────────────────── */

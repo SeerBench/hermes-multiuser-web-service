@@ -1,10 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, auth, usage as usageApi } from './api'
-import type { Quota, User } from './api'
-import { AuthPage } from './pages/AuthPage'
+import { useEffect, useState } from 'react'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { QuotaBadge } from './components/QuotaBadge'
 
 type Route = 'chat' | 'settings'
 
@@ -18,35 +14,9 @@ function goto(route: Route) {
 }
 
 export function App() {
-  const [user, setUser] = useState<User | null>(null)
-  const [quota, setQuota] = useState<Quota | null>(null)
-  const [authChecked, setAuthChecked] = useState(false)
   const [route, setRoute] = useState<Route>(parseRoute())
-
-  // Probe authentication by hitting /api/usage; 401 → show login.
-  useEffect(() => {
-    let cancelled = false
-    usageApi
-      .get()
-      .then((q) => {
-        if (!cancelled) {
-          setQuota(q)
-          // We have a session — derive a placeholder user object.
-          // The server's /api/usage doesn't include email today, so
-          // we keep email blank until login/register hands it back.
-          setUser((u) => u ?? { user_id: '', email: '' })
-        }
-      })
-      .catch(() => {
-        // 401 or other — leave user null.
-      })
-      .finally(() => {
-        if (!cancelled) setAuthChecked(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // Bump this on logout so child pages remount with fresh state.
+  const [pageKey, setPageKey] = useState(0)
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseRoute())
@@ -54,45 +24,12 @@ export function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  const refreshQuota = useCallback(async () => {
-    try {
-      const q = await usageApi.get()
-      setQuota(q)
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) setUser(null)
-    }
-  }, [])
-
-  const handleAuthed = useCallback(
-    (u: User, initialQuota?: Quota) => {
-      setUser(u)
-      if (initialQuota) setQuota(initialQuota)
-      void refreshQuota()
-    },
-    [refreshQuota],
-  )
-
-  const handleLogout = useCallback(async () => {
-    try {
-      await auth.logout()
-    } catch {
-      // ignore — we want to clear UI state regardless
-    }
-    setUser(null)
-    setQuota(null)
+  // Sign-out from SettingsPage navigates back to chat and bumps pageKey
+  // so any in-memory state (transcript, conversation list cache) is
+  // discarded and the next chat attempt re-triggers the key prompt.
+  const handleLoggedOut = () => {
+    setPageKey((n) => n + 1)
     goto('chat')
-  }, [])
-
-  if (!authChecked) {
-    return (
-      <div className="app-splash">
-        <p>Loading…</p>
-      </div>
-    )
-  }
-
-  if (!user) {
-    return <AuthPage onAuthed={handleAuthed} />
   }
 
   return (
@@ -114,15 +51,13 @@ export function App() {
           >
             Settings
           </button>
-          {quota && <QuotaBadge quota={quota} />}
-          <button type="button" onClick={handleLogout} className="nav-logout">
-            Logout
-          </button>
         </nav>
       </header>
       <main className="app-main">
-        {route === 'chat' && <ChatPage onQuotaUpdate={setQuota} />}
-        {route === 'settings' && <SettingsPage />}
+        {route === 'chat' && <ChatPage key={`chat-${pageKey}`} />}
+        {route === 'settings' && (
+          <SettingsPage key={`settings-${pageKey}`} onLoggedOut={handleLoggedOut} />
+        )}
       </main>
     </div>
   )

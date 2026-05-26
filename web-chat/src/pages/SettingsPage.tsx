@@ -1,179 +1,102 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, keys, usage as usageApi } from '../api'
-import type { ApiKey, Quota } from '../api'
+import { ApiError, auth } from '../api'
+import type { User } from '../api'
 
-export function SettingsPage() {
-  const [keyList, setKeyList] = useState<ApiKey[] | null>(null)
-  const [quota, setQuota] = useState<Quota | null>(null)
+type Props = {
+  onLoggedOut: () => void
+}
+
+export function SettingsPage({ onLoggedOut }: Props) {
+  const [me, setMe] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [newKey, setNewKey] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
 
-  const reload = useCallback(async () => {
+  const load = useCallback(async () => {
+    setLoading(true)
     setError(null)
     try {
-      const [k, q] = await Promise.all([keys.list(), usageApi.get()])
-      setKeyList(k)
-      setQuota(q)
+      const u = await auth.me()
+      setMe(u)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'failed to load settings')
+      if (err instanceof ApiError && err.status === 401) {
+        setMe(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'failed to load settings')
+      }
+    } finally {
+      setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    void load()
+  }, [load])
 
-  const createKey = async () => {
-    setCreating(true)
-    setError(null)
+  const logout = async () => {
+    setLoggingOut(true)
     try {
-      const result = await keys.create()
-      setNewKey(result.api_key)
-      await reload()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'failed to create key')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const revoke = async (keyId: string) => {
-    if (!confirm('Revoke this key? Existing clients using it will start failing.')) return
-    setError(null)
-    try {
-      await keys.revoke(keyId)
-      await reload()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'failed to revoke key')
-    }
-  }
-
-  const copyKey = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
+      await auth.logout()
     } catch {
-      // ignore — user can select manually
+      // ignore — clear UI state regardless
     }
+    setMe(null)
+    setLoggingOut(false)
+    onLoggedOut()
   }
 
   return (
     <div className="settings-page">
       <section className="settings-block">
-        <h2>Usage</h2>
-        {quota ? (
-          <table className="settings-quota">
-            <tbody>
-              <tr>
-                <th>Limit</th>
-                <td>{quota.limit.toLocaleString()} tokens</td>
-              </tr>
-              <tr>
-                <th>Used</th>
-                <td>
-                  {quota.used.toLocaleString()} (
-                  {((quota.used / Math.max(1, quota.limit)) * 100).toFixed(1)}%)
-                </td>
-              </tr>
-              <tr>
-                <th>Remaining</th>
-                <td>{quota.remaining.toLocaleString()}</td>
-              </tr>
-              <tr>
-                <th>Window started</th>
-                <td>{new Date(quota.period_start * 1000).toLocaleString()}</td>
-              </tr>
-            </tbody>
-          </table>
-        ) : (
+        <h2>Account</h2>
+        {loading ? (
           <p>Loading…</p>
+        ) : me ? (
+          <>
+            <table className="settings-account">
+              <tbody>
+                <tr>
+                  <th>User ID</th>
+                  <td>
+                    <code>{me.user_id}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <th>First seen</th>
+                  <td>{new Date(me.created_at * 1000).toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <th>Last seen</th>
+                  <td>{new Date(me.last_seen_at * 1000).toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+            <button
+              type="button"
+              className="settings-danger"
+              onClick={logout}
+              disabled={loggingOut}
+            >
+              {loggingOut ? '…' : 'Sign out'}
+            </button>
+          </>
+        ) : (
+          <p>
+            Not signed in. Return to <a href="#/chat">chat</a> and send a message
+            to sign in with your API key.
+          </p>
         )}
       </section>
 
       <section className="settings-block">
-        <h2>API Keys</h2>
+        <h2>About this service</h2>
         <p className="settings-help">
-          Keys here authenticate non-browser clients (curl, scripts, OpenAI-compat
-          libraries) via the <code>Authorization: Bearer …</code> header. The browser
-          itself uses a cookie session and doesn't need a key.
+          Authentication and billing are handled by the upstream
+          new-api gateway. Your API key was issued by your administrator;
+          to request more capacity or a new key, contact them directly.
+          This interface only stores the cookie session — your key is
+          encrypted at rest and never displayed back.
         </p>
-
-        {newKey && (
-          <div className="settings-new-key">
-            <p>
-              <strong>New key — copy it now, we won't show it again.</strong>
-            </p>
-            <code>{newKey}</code>
-            <div className="settings-new-key-actions">
-              <button type="button" onClick={() => copyKey(newKey)}>
-                Copy
-              </button>
-              <button type="button" onClick={() => setNewKey(null)}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
-        <button
-          type="button"
-          className="settings-primary"
-          onClick={createKey}
-          disabled={creating}
-        >
-          {creating ? '…' : 'Create new key'}
-        </button>
-
-        {keyList === null ? (
-          <p>Loading…</p>
-        ) : keyList.length === 0 ? (
-          <p>No keys yet.</p>
-        ) : (
-          <table className="settings-keys">
-            <thead>
-              <tr>
-                <th>Prefix</th>
-                <th>Created</th>
-                <th>Last used</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {keyList.map((k) => (
-                <tr key={k.key_id}>
-                  <td>
-                    <code>{k.key_prefix}…</code>
-                  </td>
-                  <td>{new Date(k.created_at * 1000).toLocaleDateString()}</td>
-                  <td>
-                    {k.last_used_at
-                      ? new Date(k.last_used_at * 1000).toLocaleDateString()
-                      : 'never'}
-                  </td>
-                  <td>
-                    {k.revoked_at ? (
-                      <span className="settings-revoked">revoked</span>
-                    ) : (
-                      'active'
-                    )}
-                  </td>
-                  <td>
-                    {!k.revoked_at && (
-                      <button
-                        type="button"
-                        className="settings-danger"
-                        onClick={() => revoke(k.key_id)}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </section>
 
       {error && <p className="settings-error">{error}</p>}

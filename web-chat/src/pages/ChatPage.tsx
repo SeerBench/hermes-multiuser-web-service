@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
 import { conversations as convosApi, streamChat } from '../api'
-import type { ChatMessage, ConversationSummary, Quota } from '../api'
+import type { ChatMessage, ConversationSummary } from '../api'
 import { ConversationList } from '../components/ConversationList'
+import { KeyPromptModal } from '../components/KeyPromptModal'
 import { ToolEvent } from '../components/ToolEvent'
 
 type Turn = {
@@ -16,20 +17,21 @@ type Turn = {
   errorMessage?: string
 }
 
-type Props = {
-  onQuotaUpdate: (q: Quota) => void
-}
+type KeyModalState =
+  | { open: false }
+  | { open: true; reason: 'first-message' | 'session-expired'; pendingMessage: string }
 
-export function ChatPage({ onQuotaUpdate }: Props) {
+export function ChatPage() {
   const [convos, setConvos] = useState<ConversationSummary[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [keyModal, setKeyModal] = useState<KeyModalState>({ open: false })
   const abortRef = useRef<AbortController | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
 
-  // Initial conversation list.
+  // Initial conversation list — silently empty if not signed in.
   useEffect(() => {
     convosApi
       .list()
@@ -67,13 +69,8 @@ export function ChatPage({ onQuotaUpdate }: Props) {
     setTurns([])
   }, [])
 
-  const submit = useCallback(
-    async (e?: FormEvent) => {
-      e?.preventDefault()
-      const message = input.trim()
-      if (!message || streaming) return
-      setInput('')
-
+  const runMessage = useCallback(
+    async (message: string, historyOverride?: ChatMessage[]) => {
       const userTurn: Turn = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -91,12 +88,14 @@ export function ChatPage({ onQuotaUpdate }: Props) {
       setTurns((prev) => [...prev, userTurn, assistantTurn])
       setStreaming(true)
 
-      const history: ChatMessage[] = []
-      for (const t of turns) {
-        if (t.status === 'done' && t.content) {
-          history.push({ role: t.role, content: t.content })
-        }
-      }
+      // Build history from prior fully-streamed turns, unless an
+      // explicit override is supplied (used by the retry-after-login
+      // path so we don't double-count the in-flight turns).
+      const history: ChatMessage[] =
+        historyOverride ??
+        turns
+          .filter((t) => t.status === 'done' && t.content)
+          .map((t) => ({ role: t.role, content: t.content }))
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -134,7 +133,6 @@ export function ChatPage({ onQuotaUpdate }: Props) {
             )
           } else if (ev.type === 'done') {
             setSessionId(ev.session_id)
-            onQuotaUpdate(ev.quota)
             setTurns((prev) => updateAssistant(prev, (t) => ({ ...t, status: 'done' })))
             // Refresh conversation list lazily so the new session
             // shows up in the sidebar without blocking the UI.
@@ -143,6 +141,21 @@ export function ChatPage({ onQuotaUpdate }: Props) {
               .then(setConvos)
               .catch(() => undefined)
           } else if (ev.type === 'error') {
+            // 401-flavoured errors come back with code unauthorized /
+            // session_expired — pop the modal and stash the message so
+            // we can resend after the user signs in.
+            if (ev.code === 'unauthorized' || ev.code === 'session_expired') {
+              // Drop the two in-flight turns; they'll be re-added on retry.
+              setTurns((prev) => prev.slice(0, -2))
+              setKeyModal({
+                open: true,
+                reason: ev.code === 'session_expired'
+                  ? 'session-expired'
+                  : 'first-message',
+                pendingMessage: message,
+              })
+              return
+            }
             setTurns((prev) =>
               updateAssistant(prev, (t) => ({
                 ...t,
@@ -175,7 +188,18 @@ export function ChatPage({ onQuotaUpdate }: Props) {
         abortRef.current = null
       }
     },
-    [input, streaming, sessionId, turns, onQuotaUpdate],
+    [sessionId, turns],
+  )
+
+  const submit = useCallback(
+    async (e?: FormEvent) => {
+      e?.preventDefault()
+      const message = input.trim()
+      if (!message || streaming) return
+      setInput('')
+      await runMessage(message)
+    },
+    [input, streaming, runMessage],
   )
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -187,6 +211,26 @@ export function ChatPage({ onQuotaUpdate }: Props) {
   }
 
   const stop = () => abortRef.current?.abort()
+
+  // After successful login from the modal, resend the stashed message.
+  const onLoginSuccess = useCallback(() => {
+    setKeyModal((prev) => {
+      if (!prev.open) return prev
+      // Resend the original message; pass an empty history because
+      // we cleared the in-flight turns above.
+      void runMessage(prev.pendingMessage, [])
+      return { open: false }
+    })
+    // Refresh conversation list now that we're signed in.
+    void convosApi
+      .list()
+      .then(setConvos)
+      .catch(() => undefined)
+  }, [runMessage])
+
+  const onLoginCancel = useCallback(() => {
+    setKeyModal({ open: false })
+  }, [])
 
   return (
     <div className="chat-page">
@@ -256,6 +300,14 @@ export function ChatPage({ onQuotaUpdate }: Props) {
           </div>
         </form>
       </section>
+
+      {keyModal.open && (
+        <KeyPromptModal
+          reason={keyModal.reason}
+          onSuccess={onLoginSuccess}
+          onCancel={onLoginCancel}
+        />
+      )}
     </div>
   )
 }
