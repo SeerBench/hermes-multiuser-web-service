@@ -1,8 +1,11 @@
 <p align="center">
-  <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-blue?style=for-the-badge" alt="English"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="中文"></a>
+  <b><a href="README.md">English</a></b> · <a href="README.zh-CN.md">中文</a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Upstream-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Upstream: Hermes Agent"></a>
+  <a href="#screenshots"><img src="https://img.shields.io/badge/See-Screenshots-orange?style=for-the-badge" alt="Screenshots"></a>
 </p>
 
 # Hermes Multi-User Web Service
@@ -26,6 +29,36 @@ This is a **fork** of upstream Hermes, not a re-implementation. The agent loop, 
 │         └─ upstream LLM (one shared key, per-user metered)       │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+<a id="screenshots"></a>
+## Screenshots
+
+The whole UI is one self-contained React SPA — 66 KB gzipped JS, no framework, no router library. These are real screenshots from the end-to-end test that ships with the repo: a real `aiohttp` server bound to a real TCP port, driven through a real browser.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/01-login.png"><img src="assets/screenshots/01-login.png" alt="Sign in / Register" /></a>
+      <p><sub><b>Sign in / Register.</b> Dual-mode form on the same card — click <i>Register</i> to flip. Auto dark/light based on system preference.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/02-api-key-reveal.png"><img src="assets/screenshots/02-api-key-reveal.png" alt="API key reveal" /></a>
+      <p><sub><b>API key reveal.</b> Shown <i>once</i> at registration with a copy-to-clipboard button. The server only stores <code>sha256(plaintext)</code> — there is no way to retrieve a forgotten key, only to revoke and re-issue.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/03-chat-streaming.png"><img src="assets/screenshots/03-chat-streaming.png" alt="Streaming chat with tool events" /></a>
+      <p><sub><b>Streaming chat with tool events.</b> SSE token frames render four characters at a time; tool calls (<code>web_search</code> here) get an inline row with preview + duration. Header badge shows <code>999.8K left</code> quota that updates after each turn.</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/04-settings.png"><img src="assets/screenshots/04-settings.png" alt="Settings — quota and API key management" /></a>
+      <p><sub><b>Settings — quota + API keys.</b> Live quota state pulled from <code>web_users.db</code>; key list shows prefix-only (never plaintext) with one-click revoke. <i>Create new key</i> surfaces a one-shot plaintext panel with copy/dismiss.</sub></p>
+    </td>
+  </tr>
+</table>
 
 ---
 

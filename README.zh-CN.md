@@ -1,8 +1,11 @@
 <p align="center">
-  <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-blue?style=for-the-badge" alt="English"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/语言-中文-red?style=for-the-badge" alt="中文"></a>
+  <a href="README.md">English</a> · <b><a href="README.zh-CN.md">中文</a></b>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/上游-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Upstream: Hermes Agent"></a>
+  <a href="#screenshots"><img src="https://img.shields.io/badge/查看-界面截图-orange?style=for-the-badge" alt="Screenshots"></a>
 </p>
 
 # Hermes 多用户 Web 服务
@@ -26,6 +29,36 @@
 │         └─ 上游 LLM(一个共享 key,按用户计量)                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+<a id="screenshots"></a>
+## 界面截图
+
+整个 UI 是一个自包含的 React SPA —— 66 KB gzipped JS,**不带**框架、**不带** router 库。下面是仓库自带端到端测试的真实截图:真实的 `aiohttp` 服务监听真实 TCP 端口,真实浏览器驱动。
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/01-login.png"><img src="assets/screenshots/01-login.png" alt="登录 / 注册" /></a>
+      <p><sub><b>登录 / 注册。</b>同一张卡片切换两种模式 —— 点 <i>Register</i> 翻面。根据系统偏好自动 dark/light 切换。</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/02-api-key-reveal.png"><img src="assets/screenshots/02-api-key-reveal.png" alt="API key 一次性展示" /></a>
+      <p><sub><b>API key 一次性展示。</b>注册时**只显示一次**,带 copy 按钮。服务端只存 <code>sha256(plaintext)</code> —— 忘了 key 没法找回,只能吊销重发。</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/03-chat-streaming.png"><img src="assets/screenshots/03-chat-streaming.png" alt="SSE 流式对话 + 工具事件" /></a>
+      <p><sub><b>SSE 流式对话 + 工具事件。</b>SSE token 帧 4 字符一组地流出来;工具调用(此处 <code>web_search</code>)inline 显示一行,带 preview + 时长。顶部 badge 显示 <code>999.8K left</code> 配额,每轮对话后实时更新。</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="assets/screenshots/04-settings.png"><img src="assets/screenshots/04-settings.png" alt="设置页 —— 配额和 API key 管理" /></a>
+      <p><sub><b>设置页 —— 配额 + API key。</b>实时配额从 <code>web_users.db</code> 拉取;key 列表只显示前缀(从不显示明文),一键吊销。<i>Create new key</i> 弹出一次性明文面板,带 copy / dismiss。</sub></p>
+    </td>
+  </tr>
+</table>
 
 ---
 
