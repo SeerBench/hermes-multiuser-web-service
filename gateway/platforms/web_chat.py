@@ -182,6 +182,25 @@ class WebChatAdapter(BasePlatformAdapter):
         except (TypeError, ValueError):
             self._cookie_ttl_seconds = _DEFAULT_COOKIE_TTL_SECONDS
 
+        # Testing escape hatch.  By default we refuse to bind a non-loopback
+        # host unless ``cookie_secure: true`` is also set — the cookie
+        # would otherwise travel over plaintext HTTP and be sniffable on
+        # the path.  ``allow_insecure_bind: true`` opts out of that gate.
+        # Intended use:
+        #   - Local LAN / Tailscale testing where the network layer
+        #     already encrypts transit (Tailscale WireGuard does).
+        #   - Behind a TLS-terminating reverse proxy on the same host
+        #     where the gateway binds 0.0.0.0 for the proxy to reach it.
+        # In both cases ``cookie_secure`` stays ``false`` because the
+        # browser sees plain HTTP at the listener — Secure would block
+        # the cookie entirely.
+        self._allow_insecure_bind: bool = bool(
+            extra.get(
+                "allow_insecure_bind",
+                os.getenv("WEB_CHAT_ALLOW_INSECURE_BIND", "0") == "1",
+            )
+        )
+
         # ── Concurrency limit ──
         # Bounded by an asyncio.Semaphore to prevent N concurrent users
         # from all spinning up AIAgent instances at once on a small VPS.
@@ -251,13 +270,35 @@ class WebChatAdapter(BasePlatformAdapter):
 
             # Refuse to bind a non-loopback host without HTTPS + secure
             # cookies, mirroring api_server.py's defensive posture.
-            if self._is_network_accessible(self._host) and not self._cookie_secure:
+            # ``allow_insecure_bind`` opts out for LAN / Tailscale /
+            # behind-reverse-proxy use (see __init__ for the rationale).
+            if (
+                self._is_network_accessible(self._host)
+                and not self._cookie_secure
+                and not self._allow_insecure_bind
+            ):
                 logger.error(
-                    "[%s] refusing to bind %s without cookie_secure=true "
-                    "(would send session cookies over plaintext HTTP)",
+                    "[%s] refusing to bind %s without cookie_secure=true. "
+                    "For LAN / Tailscale / behind-proxy testing, set "
+                    "platforms.web_chat.extra.allow_insecure_bind: true "
+                    "in config.yaml (cookies still travel as plain HTTP — "
+                    "only safe when the network layer encrypts transit).",
                     self.name, self._host,
                 )
                 return False
+            if (
+                self._is_network_accessible(self._host)
+                and not self._cookie_secure
+                and self._allow_insecure_bind
+            ):
+                logger.warning(
+                    "[%s] binding %s with allow_insecure_bind=true — "
+                    "session cookies travel as plain HTTP. Only safe "
+                    "when the underlying network encrypts transit "
+                    "(Tailscale / WireGuard / VPN / local reverse proxy "
+                    "on the same host).",
+                    self.name, self._host,
+                )
 
             # Port conflict — fail fast.
             if self._port_in_use(self._host, self._port):
