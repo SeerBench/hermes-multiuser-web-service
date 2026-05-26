@@ -105,9 +105,19 @@ class WebChatAgentRunner:
             _resolve_gateway_model,
             _resolve_runtime_agent_kwargs,
         )
+        from gateway.web.upstream_key import get_upstream_key
         from hermes_cli.tools_config import _get_platform_tools
 
         runtime_kwargs = _resolve_runtime_agent_kwargs()
+        # BYO-key mode: if the chat handler bound the end-user's upstream
+        # API key into the contextvar, that user-specific key overrides
+        # the globally-configured one so the LLM call is billed to the
+        # right account at the new-api gateway.  When no key is bound
+        # (gateway-spawned agent runs not behind a web_chat request),
+        # the global config wins unchanged.
+        upstream_key = get_upstream_key()
+        if upstream_key:
+            runtime_kwargs = {**runtime_kwargs, "api_key": upstream_key}
         reasoning_config = GatewayRunner._load_reasoning_config()
         model = self._model_name_override or _resolve_gateway_model()
 

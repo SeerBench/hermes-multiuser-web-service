@@ -1828,6 +1828,19 @@ REQUIRED_ENV_VARS = {}
 # Optional environment variables that enhance functionality
 OPTIONAL_ENV_VARS = {
     # ── Provider (handled in provider selection, not shown in checklists) ──
+    "NEW_API_BASE_URL": {
+        "description": (
+            "new-api gateway base URL for the multi-user web_chat platform. "
+            "When set, every gateway-spawned LLM call is routed through this "
+            "OpenAI-compatible upstream and end-user keys (BYO mode) are billed "
+            "against the new-api account they were issued from."
+        ),
+        "prompt": "new-api base URL (e.g. https://your-new-api.example.com)",
+        "url": None,
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
     "NOUS_BASE_URL": {
         "description": "Nous Portal base URL override",
         "prompt": "Nous Portal base URL (leave empty for default)",

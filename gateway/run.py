@@ -1072,7 +1072,7 @@ def _resolve_runtime_agent_kwargs() -> dict:
     except Exception as exc:
         raise RuntimeError(format_runtime_provider_error(exc)) from exc
 
-    return {
+    result = {
         "api_key": runtime.get("api_key"),
         "base_url": runtime.get("base_url"),
         "provider": runtime.get("provider"),
@@ -1081,6 +1081,17 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
     }
+    # web_chat × new-api integration: if NEW_API_BASE_URL is set, route
+    # every gateway-spawned LLM call through that upstream gateway.  The
+    # per-user api_key is injected separately by chat_runner via
+    # gateway.web.upstream_key.get_upstream_key(); here we only override
+    # the URL (and force chat_completions mode, since new-api speaks the
+    # OpenAI-compatible protocol regardless of the configured provider).
+    new_api_url = os.getenv("NEW_API_BASE_URL", "").strip()
+    if new_api_url:
+        result["base_url"] = new_api_url.rstrip("/")
+        result["api_mode"] = "chat_completions"
+    return result
 
 
 def _try_resolve_fallback_provider() -> dict | None:
