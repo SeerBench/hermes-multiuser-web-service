@@ -1,30 +1,35 @@
-"""Cookie + Bearer authentication middleware for ``web_chat``.
+"""Cookie authentication middleware for ``web_chat``.
 
-Two auth surfaces:
+The web_chat platform identifies users by a single cookie
+(``hermes_session``).  Cookies are issued by ``POST /api/auth/login``
+after the user pastes a new-api key and the gateway validates it via
+:mod:`gateway.web.upstream_validator`; the cookie body is a random
+token whose ``sha256`` is the row key in ``web_users.web_sessions``,
+and the row also carries the user's new-api key encrypted under the
+gateway's :class:`gateway.web.key_storage.KeyVault`.
 
-- **Cookie** (``hermes_session``) — issued by ``/api/auth/login`` and
-  ``/api/auth/register``, used by the SPA for normal requests.  TTL is
-  configurable (default 7 days).  Server-side state in
-  ``web_users.web_sessions``; the cookie body itself is a random token
-  whose ``sha256`` is the row key.
-- **Bearer** (``Authorization: Bearer hermes_sk_…``) — for SPA-less
-  consumers (curl, scripts, OpenAI-style clients pointed at web_chat).
-  Issued via ``/api/keys``, stored as ``sha256(plaintext)`` in
-  ``web_users.api_keys``.
+Bearer tokens are intentionally **not** accepted here: the user's
+new-api key is the only credential, and verifying it on every request
+would require a round-trip to the upstream gateway.  Pre-validating
+once at login (and binding the result to a short-lived cookie) is the
+right speed/security trade-off for an interactive web SPA.  Scripted /
+SDK clients should talk to the upstream new-api directly, not through
+this gateway's chat surface.
 
 The middleware:
 
-1. Lets a small whitelist of paths through unauthenticated (SPA entry,
-   static assets, register, login, healthz, OPTIONS preflight).
-2. Tries the cookie first, then the Authorization header.  First valid
-   wins; the resolved ``user_id`` is set on ``request["user_id"]`` so
-   handlers can read it without re-parsing.
-3. Returns ``401 {"error": "unauthorized"}`` on failure.
+1. Lets a small whitelist of paths through unauthenticated (SPA shell,
+   static assets, login, healthz, OPTIONS preflight).
+2. Looks up the cookie in the UserStore.  On hit, exposes both the
+   ``user_id`` and the ciphertext of the user's new-api key on the
+   request object so handlers can lazily decrypt via
+   :func:`get_request_upstream_key`.
+3. Returns ``401 {"error": "unauthorized"}`` on miss.
 
 Cookie attributes (``HttpOnly``, ``Secure``, ``SameSite=Lax``) are set
 by :func:`issue_session_cookie` / :func:`clear_session_cookie`.  The
-``Secure`` flag is gated on the request scheme so local-dev HTTP works;
-production deployments must front the gateway with TLS.
+``Secure`` flag is gated on the request scheme so local-dev HTTP
+works; production deployments must front the gateway with TLS.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from typing import Awaitable, Callable, Iterable, Optional
 
 from aiohttp import web
 
+from gateway.web.key_storage import KeyVault, KeyVaultError
 from gateway.web.users import InvalidCredentialsError, UserStore
 
 logger = logging.getLogger("hermes.web.auth")
@@ -42,20 +48,21 @@ logger = logging.getLogger("hermes.web.auth")
 # cookie a future dashboard might add.
 SESSION_COOKIE = "hermes_session"
 
-# aiohttp app key under which the UserStore is registered.  Uses the
-# typed AppKey idiom (aiohttp 3.9+) — avoids the NotAppKeyWarning and
-# makes ``request.app[USER_STORE_APP_KEY]`` typecheckable.
+# aiohttp app keys.  Using the typed AppKey idiom (aiohttp 3.9+) avoids
+# the NotAppKeyWarning and makes ``request.app[KEY]`` typecheckable.
 USER_STORE_APP_KEY: "web.AppKey[UserStore]" = web.AppKey("user_store", UserStore)
+KEY_VAULT_APP_KEY: "web.AppKey[KeyVault]" = web.AppKey("key_vault", KeyVault)
 
-# aiohttp request key under which the authenticated user_id is exposed.
+# aiohttp request keys exposed by the middleware.
 USER_ID_REQUEST_KEY = "user_id"
+API_KEY_ENC_REQUEST_KEY = "api_key_enc"
 
 # Default whitelist of paths that pass through the middleware
 # without authentication.  Handlers for these paths must of course be
-# safe to expose anonymously (login, register, healthz, static).
+# safe to expose anonymously (login, healthz, static).
 _DEFAULT_PUBLIC_PATHS: frozenset[str] = frozenset({
-    "/api/auth/register",
     "/api/auth/login",
+    "/api/auth/logout",
     "/api/healthz",
     "/healthz",
 })
@@ -77,6 +84,15 @@ def get_user_store(app: web.Application) -> UserStore:
     return app[USER_STORE_APP_KEY]
 
 
+def install_key_vault(app: web.Application, vault: KeyVault) -> None:
+    """Attach the KeyVault for upstream-key decryption."""
+    app[KEY_VAULT_APP_KEY] = vault
+
+
+def get_key_vault(app: web.Application) -> KeyVault:
+    return app[KEY_VAULT_APP_KEY]
+
+
 def get_request_user_id(request: web.Request) -> Optional[str]:
     """Return the authenticated ``user_id``, or None on a public route.
 
@@ -85,10 +101,33 @@ def get_request_user_id(request: web.Request) -> Optional[str]:
     return request.get(USER_ID_REQUEST_KEY)
 
 
+def get_request_upstream_key(request: web.Request) -> Optional[str]:
+    """Return the plaintext new-api key for the current request.
+
+    Decrypts ``api_key_enc`` stored on the request by the auth
+    middleware using the app's :class:`KeyVault`.  Returns ``None`` if
+    the request is on a public route, or if decryption fails (which
+    means the master key was rotated — the chat handler treats this as
+    "session invalid, force re-login").
+    """
+    enc = request.get(API_KEY_ENC_REQUEST_KEY)
+    if not enc:
+        return None
+    vault = request.app.get(KEY_VAULT_APP_KEY)
+    if vault is None:
+        logger.error("get_request_upstream_key called but KeyVault not installed")
+        return None
+    try:
+        return vault.decrypt(enc)
+    except KeyVaultError as exc:
+        logger.warning("upstream key decryption failed: %s", exc)
+        return None
+
+
 def _is_spa_entry(path: str) -> bool:
     """The SPA entrypoint (``/``) and its client-side routes are static
     HTML, served unauthenticated.  The SPA itself then calls
-    ``/api/auth/login`` to obtain a cookie.
+    ``/api/auth/login`` to obtain a cookie once the user pastes a key.
     """
     if path == "/":
         return True
@@ -120,8 +159,8 @@ def make_auth_middleware(
         request: web.Request,
         handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
     ) -> web.StreamResponse:
-        # CORS preflight always allowed; the response handler attaches the
-        # right CORS headers separately.
+        # CORS preflight always allowed; the response handler attaches
+        # the right CORS headers separately.
         if request.method == "OPTIONS":
             return await handler(request)
 
@@ -140,21 +179,12 @@ def make_auth_middleware(
                 {"error": "auth_not_configured"}, status=500
             )
 
-        # 1) Cookie
         cookie = request.cookies.get(SESSION_COOKIE)
         if cookie:
             try:
-                request[USER_ID_REQUEST_KEY] = store.verify_web_session(cookie)
-                return await handler(request)
-            except InvalidCredentialsError:
-                pass  # fall through to Bearer
-
-        # 2) Bearer
-        auth_hdr = request.headers.get("Authorization", "")
-        if auth_hdr.startswith("Bearer "):
-            token = auth_hdr[len("Bearer "):].strip()
-            try:
-                request[USER_ID_REQUEST_KEY] = store.verify_api_key(token)
+                session = store.verify_web_session(cookie)
+                request[USER_ID_REQUEST_KEY] = session["user_id"]
+                request[API_KEY_ENC_REQUEST_KEY] = session["api_key_enc"]
                 return await handler(request)
             except InvalidCredentialsError:
                 pass
@@ -193,8 +223,4 @@ def issue_session_cookie(
 def clear_session_cookie(response: web.StreamResponse, *, secure: bool) -> None:
     """Expire the ``hermes_session`` cookie on logout."""
     response.del_cookie(SESSION_COOKIE, path="/")
-    # del_cookie sets Max-Age=0; secure/samesite don't strictly matter on
-    # an expiring cookie but we keep them consistent for cleanliness.
-    # aiohttp's del_cookie API doesn't accept those kwargs, so this is a
-    # no-op placeholder — kept for symmetry with issue_session_cookie.
-    _ = secure
+    _ = secure  # kept for symmetry with issue_session_cookie

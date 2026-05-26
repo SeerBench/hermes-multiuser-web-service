@@ -171,14 +171,19 @@ youtube = [
 ]
 # `hermes dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
 web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0"]
-# Multi-user web chat platform (gateway/platforms/web_chat.py).  Provides
-# the per-user account / API key / quota / sandbox control plane on top
-# of the existing aiohttp gateway runtime — argon2-cffi is the only
-# extra dependency (aiohttp is already pulled by the messaging extras
-# and core).  Lazy-installable: if a user enables platforms.web_chat
-# in config.yaml without the extra, WebChatAdapter.connect logs a
-# friendly install hint and refuses to start.
-web-chat = ["argon2-cffi==25.1.0"]
+# Multi-user web chat platform (gateway/platforms/web_chat.py). Provides
+# the per-user session / sandbox control plane on top of the existing
+# aiohttp gateway runtime.  Authentication and billing are delegated to
+# an upstream new-api gateway (see docs/user-guide/web-chat.md), so the
+# only extra runtime dependency is the cryptography library used by
+# gateway/web/key_storage.py to encrypt user-supplied new-api keys at
+# rest.  cryptography is also pulled transitively by PyJWT[crypto];
+# pinning it explicitly here keeps the [web-chat] extra honest under
+# the project's no-ranges policy.  Lazy-installable: if a user enables
+# platforms.web_chat in config.yaml without the extra,
+# WebChatAdapter.connect logs a friendly install hint and refuses to
+# start.
+web-chat = ["cryptography==46.0.7"]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be lazy-installed via `tools/lazy_deps.py` — i.e. things every

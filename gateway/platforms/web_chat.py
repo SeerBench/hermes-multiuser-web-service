@@ -3,10 +3,12 @@
 HTTP gateway adapter for the self-hosted multi-user web service.  Wires
 together everything from ``gateway/web/``:
 
-- ``UserStore`` for accounts, API keys, browser sessions, quota
-- ``make_auth_middleware`` for cookie + Bearer auth
-- ``enter_user_context`` to bind workspace + ``HERMES_HOME`` per request
-- ``QuotaGate`` for preflight 429 + post-flight token recording
+- ``UserStore`` for cookie sessions and the (minimal) per-user record
+- ``KeyVault`` for symmetric encryption of the user's new-api key
+- ``validate_key_against_upstream`` for pre-login key probing
+- ``make_auth_middleware`` for cookie auth
+- ``enter_user_context`` / ``enter_upstream_key`` to bind workspace +
+  ``HERMES_HOME`` + per-request upstream key
 - ``WebChatAgentRunner`` to spawn AIAgent inside an executor thread
 
 Mirror-but-independent of ``gateway/platforms/api_server.py`` (see
@@ -20,19 +22,20 @@ HTTP surface
 ==========  =========================  =================================
 Method      Path                       Purpose
 ==========  =========================  =================================
-POST        /api/auth/register         create user + initial API key + cookie
-POST        /api/auth/login            verify password, set cookie
+POST        /api/auth/login            validate new-api key + set cookie
 POST        /api/auth/logout           expire cookie
-GET         /api/keys                  list keys (no plaintext)
-POST        /api/keys                  sign a new key, plaintext returned ONCE
-DELETE      /api/keys/{key_id}         revoke a key
+GET         /api/me                    current user_id + timestamps
 GET         /api/conversations         list user's sessions
-GET         /api/usage                 current quota state
 POST        /api/chat                  SSE stream of agent response
 GET         /api/healthz               public health probe
-GET         /static/...                SPA static assets (stage 6)
-GET         /                          SPA shell (stage 6 placeholder)
+GET         /static/...                SPA static assets
+GET         /                          SPA shell
 ==========  =========================  =================================
+
+No registration endpoint — accounts are issued by the upstream new-api
+gateway.  No quota endpoint — billing is the upstream's responsibility.
+No /api/keys/* endpoints — keys aren't minted here; they're pasted in
+at the login modal.
 
 SSE event protocol (``/api/chat`` only)
 ---------------------------------------
@@ -45,13 +48,12 @@ following ``event:``-tagged frames, each with a JSON ``data:`` body:
 - ``tool_end``   — a tool call finished
 - ``reasoning``  — model reasoning text (when the provider exposes it)
 - ``done``       — final summary, includes ``session_id`` + ``usage``
-                   + ``quota`` state
 - ``error``      — fatal error before ``done``
 
 The protocol is UI-friendly rather than OpenAI-compat: per-event
 discrimination via the SSE ``event:`` field, structured payloads.
-External OpenAI-compat clients should keep using
-``gateway/platforms/api_server.py``.
+External OpenAI-compat clients should talk to the upstream new-api
+gateway directly, not to this surface.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ import os
 import socket as _socket
 import time
 import uuid
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 try:
     from aiohttp import web
@@ -77,16 +79,19 @@ from gateway.platforms.base import BasePlatformAdapter, SendResult
 from gateway.web.auth import (
     SESSION_COOKIE,
     clear_session_cookie,
+    get_request_upstream_key,
     get_request_user_id,
+    install_key_vault,
     install_user_store,
     issue_session_cookie,
     make_auth_middleware,
 )
-from gateway.web.chat_runner import WebChatAgentRunner, collect_usage
-from gateway.web.quota import QuotaGate, attach_quota_headers
+from gateway.web.chat_runner import WebChatAgentRunner
+from gateway.web.key_storage import KeyVault, KeyVaultError
 from gateway.web.sandbox import enter_user_context
+from gateway.web.upstream_key import derive_user_id, enter_upstream_key
+from gateway.web.upstream_validator import validate_key_against_upstream
 from gateway.web.users import (
-    DuplicateEmailError,
     InvalidCredentialsError,
     UserStore,
     UserStoreError,
@@ -113,13 +118,14 @@ def check_web_chat_requirements() -> bool:
     """Return True if optional deps for web_chat are importable.
 
     Called by gateway startup to decide whether to even attempt
-    instantiating ``WebChatAdapter``.  argon2-cffi is required (for
-    UserStore); aiohttp is shared with api_server.
+    instantiating ``WebChatAdapter``.  aiohttp + cryptography are
+    required (the latter for KeyVault); aiohttp is shared with
+    api_server, cryptography ships as a transitive of PyJWT[crypto].
     """
     if not AIOHTTP_AVAILABLE:
         return False
     try:
-        import argon2  # noqa: F401
+        import cryptography.fernet  # noqa: F401
     except ImportError:
         return False
     return True
@@ -133,16 +139,14 @@ class WebChatAdapter(BasePlatformAdapter):
 
     Lifecycle (driven by ``GatewayRunner``):
     1. ``__init__`` — construct from ``PlatformConfig``; instantiate
-       ``UserStore`` (opens / creates ``web_users.db``) and
-       ``WebChatAgentRunner``.
-    2. ``connect()`` — build aiohttp app, wire routes + middleware,
-       bind socket, start listening.
+       ``UserStore`` + ``KeyVault`` + ``WebChatAgentRunner``.
+    2. ``connect()`` — verify ``NEW_API_BASE_URL`` is configured, build
+       aiohttp app, wire routes + middleware, bind socket.
     3. ``disconnect()`` — graceful shutdown of the aiohttp runner and
        close ``UserStore``.
 
     All chat traffic is request/response — there is no inbound stream
-    of "messages" to receive, so ``send()`` is unused (mirrors
-    api_server.py's stub).
+    of "messages" to receive, so ``send()`` is unused.
     """
 
     def __init__(self, config: PlatformConfig):
@@ -166,9 +170,6 @@ class WebChatAdapter(BasePlatformAdapter):
             self._port = DEFAULT_PORT
 
         # ── Cookie + Auth tuning ──
-        # secure=False is necessary for local-dev HTTP; production must
-        # set ``platforms.web_chat.cookie_secure: true`` (or wrap in TLS
-        # reverse proxy).
         self._cookie_secure: bool = bool(
             extra.get("cookie_secure", os.getenv("WEB_CHAT_COOKIE_SECURE", "0") == "1")
         )
@@ -182,18 +183,6 @@ class WebChatAdapter(BasePlatformAdapter):
         except (TypeError, ValueError):
             self._cookie_ttl_seconds = _DEFAULT_COOKIE_TTL_SECONDS
 
-        # Testing escape hatch.  By default we refuse to bind a non-loopback
-        # host unless ``cookie_secure: true`` is also set — the cookie
-        # would otherwise travel over plaintext HTTP and be sniffable on
-        # the path.  ``allow_insecure_bind: true`` opts out of that gate.
-        # Intended use:
-        #   - Local LAN / Tailscale testing where the network layer
-        #     already encrypts transit (Tailscale WireGuard does).
-        #   - Behind a TLS-terminating reverse proxy on the same host
-        #     where the gateway binds 0.0.0.0 for the proxy to reach it.
-        # In both cases ``cookie_secure`` stays ``false`` because the
-        # browser sees plain HTTP at the listener — Secure would block
-        # the cookie entirely.
         self._allow_insecure_bind: bool = bool(
             extra.get(
                 "allow_insecure_bind",
@@ -201,10 +190,16 @@ class WebChatAdapter(BasePlatformAdapter):
             )
         )
 
+        # ── Upstream new-api gateway ──
+        # Required.  We resolve it lazily in connect() so __init__ stays
+        # cheap and importable even when the env isn't fully set up
+        # (e.g. during config reloads or unit tests).
+        self._new_api_base_url: str = (
+            extra.get("new_api_base_url")
+            or os.getenv("NEW_API_BASE_URL", "")
+        ).strip().rstrip("/")
+
         # ── Concurrency limit ──
-        # Bounded by an asyncio.Semaphore to prevent N concurrent users
-        # from all spinning up AIAgent instances at once on a small VPS.
-        # Defaults to 12 (sized for 2c/4G — see plan capacity table).
         try:
             self._max_concurrent_agents: int = int(
                 extra.get(
@@ -216,10 +211,9 @@ class WebChatAdapter(BasePlatformAdapter):
             self._max_concurrent_agents = 12
         self._agent_semaphore: Optional[asyncio.Semaphore] = None  # created at connect
 
-        # ── Sub-systems (constructed lazily in connect so __init__ stays
-        # cheap and side-effect free — UserStore opens a SQLite file).
+        # ── Sub-systems (constructed lazily in connect) ──
         self._user_store: Optional[UserStore] = None
-        self._quota: Optional[QuotaGate] = None
+        self._key_vault: Optional[KeyVault] = None
         self._runner: Optional[WebChatAgentRunner] = None
         self._session_db: Optional[Any] = None
 
@@ -233,8 +227,19 @@ class WebChatAdapter(BasePlatformAdapter):
     async def connect(self) -> bool:
         if not check_web_chat_requirements():
             logger.warning(
-                "[%s] aiohttp and/or argon2-cffi not installed — install "
+                "[%s] aiohttp and/or cryptography not installed — install "
                 "the [web-chat] extra to enable",
+                self.name,
+            )
+            return False
+
+        if not self._new_api_base_url:
+            logger.error(
+                "[%s] NEW_API_BASE_URL is not configured — set it via .env "
+                "or platforms.web_chat.extra.new_api_base_url in config.yaml. "
+                "The multi-user web service routes every LLM call through an "
+                "upstream new-api gateway; without that URL we have nowhere "
+                "to send requests.",
                 self.name,
             )
             return False
@@ -242,13 +247,11 @@ class WebChatAdapter(BasePlatformAdapter):
         try:
             # Importing this package registers the sandboxed file tools
             # (web_file_read / web_file_write / web_file_patch /
-            # web_file_search) via side effect.  Done here, not at
-            # module top, so adapters that aren't enabled don't pay
-            # the import cost.
+            # web_file_search) via side effect.
             import gateway.web.tools  # noqa: F401
 
-            self._user_store = UserStore()  # default path under HERMES_HOME
-            self._quota = QuotaGate(self._user_store)
+            self._user_store = UserStore()
+            self._key_vault = KeyVault()
             self._session_db = self._ensure_session_db()
             self._runner = WebChatAgentRunner(session_db=self._session_db)
             self._agent_semaphore = asyncio.Semaphore(self._max_concurrent_agents)
@@ -257,21 +260,14 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
         try:
-            # Auth is the single middleware — body limits and CORS are
-            # left to the front proxy in production; in dev the SPA and
-            # API share an origin (Vite proxies /api → :8643), so CORS
-            # isn't needed at this layer either.
             self._app = web.Application(
                 middlewares=[make_auth_middleware()],
                 client_max_size=MAX_REQUEST_BYTES,
             )
             install_user_store(self._app, self._user_store)
+            install_key_vault(self._app, self._key_vault)
             self._wire_routes(self._app)
 
-            # Refuse to bind a non-loopback host without HTTPS + secure
-            # cookies, mirroring api_server.py's defensive posture.
-            # ``allow_insecure_bind`` opts out for LAN / Tailscale /
-            # behind-reverse-proxy use (see __init__ for the rationale).
             if (
                 self._is_network_accessible(self._host)
                 and not self._cookie_secure
@@ -300,7 +296,6 @@ class WebChatAdapter(BasePlatformAdapter):
                     self.name, self._host,
                 )
 
-            # Port conflict — fail fast.
             if self._port_in_use(self._host, self._port):
                 logger.error(
                     "[%s] port %d already in use — set platforms.web_chat.port",
@@ -315,8 +310,9 @@ class WebChatAdapter(BasePlatformAdapter):
 
             self._mark_connected()
             logger.info(
-                "[%s] listening on http://%s:%d  (max_concurrent_agents=%d)",
-                self.name, self._host, self._port, self._max_concurrent_agents,
+                "[%s] listening on http://%s:%d  (new-api: %s, max_concurrent=%d)",
+                self.name, self._host, self._port,
+                self._new_api_base_url, self._max_concurrent_agents,
             )
             return True
         except Exception as exc:
@@ -353,11 +349,7 @@ class WebChatAdapter(BasePlatformAdapter):
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
-        """Not used — web_chat is request/response, not push.
-
-        Returns failure so any accidental call path is loud rather than
-        silently dropped.  Mirrors api_server.py's stub.
-        """
+        """Not used — web_chat is request/response, not push."""
         return SendResult(
             success=False,
             error="web_chat is request/response; use /api/chat instead",
@@ -374,23 +366,16 @@ class WebChatAdapter(BasePlatformAdapter):
 
     def _wire_routes(self, app: "web.Application") -> None:
         app.router.add_get("/api/healthz", self._handle_healthz)
-        app.router.add_post("/api/auth/register", self._handle_register)
         app.router.add_post("/api/auth/login", self._handle_login)
         app.router.add_post("/api/auth/logout", self._handle_logout)
-        app.router.add_get("/api/keys", self._handle_list_keys)
-        app.router.add_post("/api/keys", self._handle_create_key)
-        app.router.add_delete("/api/keys/{key_id}", self._handle_revoke_key)
+        app.router.add_get("/api/me", self._handle_me)
         app.router.add_get("/api/conversations", self._handle_list_conversations)
-        app.router.add_get("/api/usage", self._handle_usage)
         app.router.add_post("/api/chat", self._handle_chat)
-        # SPA shell + static assets.  If the SPA has been built (web-chat/
-        # → gateway/web/_static/), serve that bundle; otherwise fall back
-        # to the inline placeholder so the gateway still answers GET / .
+        # SPA shell + static assets.
         from pathlib import Path as _Path
         static_dir = _Path(__file__).resolve().parent.parent / "web" / "_static"
         index_html = static_dir / "index.html"
         if index_html.is_file():
-            # Mount Vite's hashed assets and the catch-all SPA shell.
             assets_dir = static_dir / "assets"
             if assets_dir.is_dir():
                 app.router.add_static("/assets/", path=str(assets_dir), name="spa_assets")
@@ -418,12 +403,6 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
     def _ensure_session_db(self) -> Optional[Any]:
-        """Return a SessionDB instance, or None if unavailable.
-
-        Mirrors api_server.py's lazy-init pattern.  Failure to open the
-        session DB is non-fatal — the agent will fall back to per-call
-        SessionDB creation.
-        """
         if self._session_db is not None:
             return self._session_db
         try:
@@ -452,63 +431,67 @@ class WebChatAdapter(BasePlatformAdapter):
 
     # ── /api/auth/* ────────────────────────────────────────────────────
 
-    async def _handle_register(self, request: "web.Request") -> "web.Response":
-        try:
-            body = await request.json()
-        except Exception:
-            return self._json_error("invalid JSON")
-        email = (body.get("email") or "").strip()
-        password = body.get("password") or ""
-        if not email or not password:
-            return self._json_error("email and password required")
-
-        try:
-            user_id, api_key = self._user_store.create_user(email, password)
-        except DuplicateEmailError:
-            return self._json_error("email already registered", status=409, code="duplicate_email")
-        except UserStoreError as exc:
-            return self._json_error(str(exc), status=400)
-
-        cookie_token = self._user_store.create_web_session(
-            user_id, ttl_seconds=self._cookie_ttl_seconds
-        )
-        resp = web.json_response({
-            "user_id": user_id,
-            "email": email,
-            "api_key": api_key,  # only returned here — UI must show + offer copy
-        })
-        issue_session_cookie(
-            resp, cookie_token,
-            ttl_seconds=self._cookie_ttl_seconds,
-            secure=self._cookie_secure,
-        )
-        logger.info("[%s] registered user_id=%s", self.name, user_id)
-        return resp
-
     async def _handle_login(self, request: "web.Request") -> "web.Response":
+        """Validate a new-api key, derive ``user_id``, sign a cookie."""
         try:
             body = await request.json()
         except Exception:
             return self._json_error("invalid JSON")
-        email = (body.get("email") or "").strip()
-        password = body.get("password") or ""
-        if not email or not password:
-            return self._json_error("email and password required")
+        api_key = (body.get("api_key") or "").strip()
+        if not api_key:
+            return self._json_error(
+                "api_key required",
+                status=400,
+                code="missing_api_key",
+            )
 
-        try:
-            user_id = self._user_store.verify_password(email, password)
-        except InvalidCredentialsError:
-            return self._json_error("bad credentials", status=401, code="bad_credentials")
-
-        cookie_token = self._user_store.create_web_session(
-            user_id, ttl_seconds=self._cookie_ttl_seconds
+        # Probe the upstream to make sure the key works before we even
+        # touch the local DB.  Sub-second on a healthy gateway; the
+        # validator already bounds itself to a 10s timeout for the
+        # pathological case.
+        validation = await validate_key_against_upstream(
+            api_key, self._new_api_base_url
         )
-        resp = web.json_response({"user_id": user_id, "email": email})
+        if not validation.valid:
+            # Map the validator's three failure modes to distinct HTTP
+            # statuses so the SPA can render targeted error messages.
+            if validation.error_code == "invalid_key":
+                status = 401
+            elif validation.error_code == "misconfigured":
+                # Operator's fault — fail with 502 (bad gateway) so it
+                # shows up in operator dashboards rather than user logs.
+                status = 502
+            else:  # upstream_unreachable
+                status = 503
+            logger.info(
+                "[%s] login rejected (%s): %s",
+                self.name, validation.error_code, validation.error_msg,
+            )
+            return self._json_error(
+                "key validation failed",
+                status=status,
+                code=validation.error_code or "validation_failed",
+            )
+
+        # Key is good — bind it to a stable user_id and persist a cookie.
+        user_id = derive_user_id(api_key)
+        try:
+            self._user_store.upsert_user(user_id)
+            encrypted = self._key_vault.encrypt(api_key)
+            cookie_token = self._user_store.create_web_session(
+                user_id, encrypted, ttl_seconds=self._cookie_ttl_seconds,
+            )
+        except (UserStoreError, KeyVaultError) as exc:
+            logger.error("[%s] login persistence failed: %s", self.name, exc)
+            return self._json_error("internal error", status=500)
+
+        resp = web.json_response({"user_id": user_id})
         issue_session_cookie(
             resp, cookie_token,
             ttl_seconds=self._cookie_ttl_seconds,
             secure=self._cookie_secure,
         )
+        logger.info("[%s] login user_id=%s", self.name, user_id)
         return resp
 
     async def _handle_logout(self, request: "web.Request") -> "web.Response":
@@ -524,31 +507,25 @@ class WebChatAdapter(BasePlatformAdapter):
         clear_session_cookie(resp, secure=self._cookie_secure)
         return resp
 
-    # ── /api/keys ──────────────────────────────────────────────────────
+    # ── /api/me ────────────────────────────────────────────────────────
 
-    async def _handle_list_keys(self, request: "web.Request") -> "web.Response":
-        user_id = get_request_user_id(request)
-        keys = self._user_store.list_api_keys(user_id)
-        return web.json_response({"keys": keys})
+    async def _handle_me(self, request: "web.Request") -> "web.Response":
+        """Return the current user's identifier and timestamps.
 
-    async def _handle_create_key(self, request: "web.Request") -> "web.Response":
+        Useful for the SPA's settings page ("Logged in as: u_xxxx").
+        Does not expose the upstream key — that stays server-side
+        encrypted and is only ever materialised inside a chat request
+        context.
+        """
         user_id = get_request_user_id(request)
-        try:
-            key_id, plaintext = self._user_store.create_api_key(user_id)
-        except UserStoreError as exc:
-            return self._json_error(str(exc), status=400)
+        user = self._user_store.get_user(user_id) if user_id else None
+        if not user:
+            return self._json_error("user not found", status=404)
         return web.json_response({
-            "key_id": key_id,
-            "api_key": plaintext,  # only here
+            "user_id": user["user_id"],
+            "created_at": user["created_at"],
+            "last_seen_at": user["last_seen_at"],
         })
-
-    async def _handle_revoke_key(self, request: "web.Request") -> "web.Response":
-        user_id = get_request_user_id(request)
-        key_id = request.match_info["key_id"]
-        ok = self._user_store.revoke_api_key(key_id, user_id)
-        if not ok:
-            return self._json_error("key not found", status=404, code="key_not_found")
-        return web.json_response({"ok": True, "key_id": key_id})
 
     # ── /api/conversations ─────────────────────────────────────────────
 
@@ -578,7 +555,6 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.error("[%s] list_sessions_rich failed: %s", self.name, exc, exc_info=True)
             return self._json_error("conversation list unavailable", status=500)
 
-        # Project to a SPA-friendly shape.
         projected = [
             {
                 "id": r.get("id"),
@@ -592,20 +568,18 @@ class WebChatAdapter(BasePlatformAdapter):
         ]
         return web.json_response({"conversations": projected})
 
-    # ── /api/usage ─────────────────────────────────────────────────────
-
-    async def _handle_usage(self, request: "web.Request") -> "web.Response":
-        user_id = get_request_user_id(request)
-        try:
-            state = self._user_store.check_quota(user_id)
-        except UserStoreError as exc:
-            return self._json_error(str(exc), status=500)
-        return web.json_response(state)
-
     # ── /api/chat ──────────────────────────────────────────────────────
 
     async def _handle_chat(self, request: "web.Request") -> "web.StreamResponse":
         user_id = get_request_user_id(request)
+        upstream_key = get_request_upstream_key(request)
+        if not upstream_key:
+            # Cookie is good but the encrypted key didn't decrypt — the
+            # master key was rotated, or the row is corrupt.  Force a
+            # re-login by returning 401 so the SPA reopens the key modal.
+            return self._json_error(
+                "session expired", status=401, code="session_expired",
+            )
 
         # Parse body
         try:
@@ -622,30 +596,6 @@ class WebChatAdapter(BasePlatformAdapter):
             return self._json_error("conversation_history must be a list")
         gateway_session_key = body.get("session_key") or f"web::{user_id}"
 
-        # Quota preflight (also rolls the 30-day window if stale).
-        try:
-            quota_before = self._quota.preflight(user_id)
-        except web.HTTPTooManyRequests as exc:
-            # Only relay the X-Quota-* headers — leaving HTTPTooManyRequests'
-            # default Content-Type in would collide with json_response's
-            # own Content-Type setter.
-            quota_headers = {
-                name: value
-                for name, value in exc.headers.items()
-                if name.startswith("X-Quota-")
-            }
-            return web.json_response(
-                {"error": "quota_exceeded", "quota": {
-                    "used": int(quota_headers.get("X-Quota-Used", "0")),
-                    "limit": int(quota_headers.get("X-Quota-Limit", "0")),
-                    "remaining": int(quota_headers.get("X-Quota-Remaining", "0")),
-                }},
-                status=429,
-                headers=quota_headers,
-            )
-
-        # Concurrency gate — protects shared resources (memory, CPU)
-        # under load.  Holds the slot for the entire agent loop.
         if self._agent_semaphore is None:
             return self._json_error("server not ready", status=503)
 
@@ -659,16 +609,12 @@ class WebChatAdapter(BasePlatformAdapter):
                 "X-Accel-Buffering": "no",  # nginx: don't buffer SSE
             },
         )
-        attach_quota_headers(resp, quota_before)
         await resp.prepare(request)
 
         loop = asyncio.get_running_loop()
-        # Event queue: agent-thread callbacks push events here via
-        # call_soon_threadsafe; this coroutine drains and writes them.
         event_queue: asyncio.Queue[Optional[Dict[str, Any]]] = asyncio.Queue()
 
         def _push(event_type: str, payload: Dict[str, Any]) -> None:
-            """Thread-safe push from the agent worker thread."""
             try:
                 loop.call_soon_threadsafe(
                     event_queue.put_nowait, {"event": event_type, "data": payload}
@@ -691,10 +637,12 @@ class WebChatAdapter(BasePlatformAdapter):
             })
 
         agent_ref: List[Any] = [None]
-        usage_recorded = False
 
         async with self._agent_semaphore:
-            with enter_user_context(user_id):
+            # ContextVar nesting: workspace (filesystem sandbox +
+            # HERMES_HOME override) outer, upstream key inner.  Both
+            # propagate into the agent's executor thread automatically.
+            with enter_user_context(user_id), enter_upstream_key(upstream_key):
                 writer_task = asyncio.create_task(
                     self._sse_writer(resp, event_queue),
                     name=f"web_chat-sse-{session_id}",
@@ -714,7 +662,6 @@ class WebChatAdapter(BasePlatformAdapter):
                         gateway_session_key=gateway_session_key,
                     )
                 except asyncio.CancelledError:
-                    # Client disconnected — interrupt the running agent.
                     if agent_ref[0] is not None:
                         try:
                             agent_ref[0].interrupt()
@@ -727,59 +674,25 @@ class WebChatAdapter(BasePlatformAdapter):
                         self.name, user_id, session_id, exc, exc_info=True,
                     )
                     _push("error", {"message": str(exc), "code": "agent_error"})
-                    # Sentinel to drain the writer.
                     await event_queue.put(None)
                     try:
                         await writer_task
                     except Exception:
                         pass
                     return resp
-                finally:
-                    # Record usage even on partial / interrupted runs.
-                    # Pull what the agent collected so far (collect_usage
-                    # is defensive about missing fields).
-                    if not usage_recorded and agent_ref[0] is not None:
-                        partial_usage = {
-                            "total_tokens": getattr(
-                                agent_ref[0], "session_total_tokens", 0
-                            ) or 0,
-                        }
-                        try:
-                            self._quota.record(
-                                user_id, collect_usage({}, partial_usage)
-                            )
-                            usage_recorded = True
-                        except Exception:
-                            logger.debug(
-                                "[%s] quota.record failed", self.name, exc_info=True,
-                            )
-
-                # Happy path: agent finished, record real usage, emit done.
-                if not usage_recorded:
-                    quota_after = self._quota.record(
-                        user_id, collect_usage(result, usage),
-                    )
-                    usage_recorded = True
-                else:
-                    quota_after = self._user_store.check_quota(user_id)
 
                 effective_session_id = result.get("session_id", session_id)
-                # Push the terminal "done" event directly (we're on the
-                # main event loop here, not a worker thread).  The
-                # _push() helper schedules via call_soon_threadsafe,
-                # which would race with the sentinel queued immediately
-                # after it — the writer could see the sentinel first
-                # and exit before the done event is delivered.
+                # Terminal "done" event — emit directly (we're on the
+                # main event loop here, not a worker thread).  See git
+                # commit 19308b974 for the SSE race rationale.
                 event_queue.put_nowait({
                     "event": "done",
                     "data": {
                         "session_id": effective_session_id,
                         "usage": usage,
-                        "quota": quota_after,
                     },
                 })
 
-                # Sentinel — tells the writer to flush and exit cleanly.
                 await event_queue.put(None)
                 try:
                     await writer_task
@@ -793,11 +706,6 @@ class WebChatAdapter(BasePlatformAdapter):
         resp: "web.StreamResponse",
         queue: "asyncio.Queue[Optional[Dict[str, Any]]]",
     ) -> None:
-        """Drain ``queue`` and write SSE frames until a None sentinel arrives.
-
-        Each non-sentinel item is ``{"event": str, "data": Dict[str, Any]}``.
-        Closes the response on disconnect or after the sentinel.
-        """
         try:
             while True:
                 item = await queue.get()
@@ -809,7 +717,6 @@ class WebChatAdapter(BasePlatformAdapter):
                 try:
                     await resp.write(frame)
                 except (ConnectionResetError, asyncio.CancelledError):
-                    # Client disconnected — let the outer handler clean up.
                     return
                 except Exception:
                     logger.debug("[%s] SSE write failed", self.name, exc_info=True)
@@ -817,18 +724,10 @@ class WebChatAdapter(BasePlatformAdapter):
         except asyncio.CancelledError:
             return
 
-    # ── SPA shell (placeholder until stage 6) ─────────────────────────
+    # ── SPA shell ─────────────────────────────────────────────────────
 
     async def _handle_spa_index(self, request: "web.Request") -> "web.Response":
-        """Serve the built SPA's index.html.
-
-        Vite output uses hashed asset filenames (`/assets/index-XYZ.js`),
-        so the index.html is cacheable as long as the SPA hasn't been
-        rebuilt — but we send no-cache anyway because re-deploys
-        regenerate this file on the same path.
-        """
         if self._spa_index_path is None or not self._spa_index_path.is_file():
-            # Was set at startup, but the file disappeared — fall back.
             return await self._handle_spa_shell(request)
         return web.Response(
             body=self._spa_index_path.read_bytes(),
@@ -837,22 +736,22 @@ class WebChatAdapter(BasePlatformAdapter):
         )
 
     async def _handle_spa_shell(self, request: "web.Request") -> "web.Response":
-        """Serve the SPA index.
+        """Fallback HTML when the SPA bundle isn't built.
 
-        Until stage 6 ships the React build, we serve a small placeholder
-        explaining the API.  The auth middleware lets ``/`` through
-        unauthenticated (it's the SPA entrypoint where login happens).
+        Production deployments build the SPA into ``gateway/web/_static``.
+        Source checkouts that just want to poke at the API still see a
+        useful page here.
         """
         return web.Response(
             text=(
                 "<!doctype html><html><head><title>Hermes Multi-User Web Chat</title>"
                 "<meta charset=\"utf-8\"></head><body>"
                 "<h1>Hermes Multi-User Web Chat</h1>"
-                "<p>The SPA bundle is not yet installed.  The backend API "
-                "is live; use any HTTP client to hit "
-                "<code>POST /api/auth/register</code> to create an account "
-                "and <code>POST /api/chat</code> to start a streaming "
-                "conversation.</p>"
+                "<p>The SPA bundle is not yet installed. The backend API "
+                "is live; users with a new-api key can POST it to "
+                "<code>/api/auth/login</code> to obtain a session cookie, "
+                "then POST messages to <code>/api/chat</code> for a "
+                "streaming response.</p>"
                 "<p>See <code>/api/healthz</code> for a liveness probe.</p>"
                 "</body></html>"
             ),
