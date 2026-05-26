@@ -42,14 +42,20 @@ class _FakeResp:
 
 
 class _FakeSession:
-    """Captures the URL + headers it was called with so tests can assert
-    on what the validator actually sent.
+    """Captures the URL + headers + body it was called with so tests can
+    assert on what the validator actually sent.
+
+    Supports both ``get(url, headers=...)`` and
+    ``post(url, headers=..., json=...)`` since the validator picks one
+    based on whether a ``probe_model`` was supplied.
     """
 
     def __init__(self, response_payload):
         self._response_payload = response_payload
         self.last_url: Optional[str] = None
+        self.last_method: Optional[str] = None
         self.last_headers: Optional[dict] = None
+        self.last_json: Optional[Any] = None
 
     async def __aenter__(self):
         return self
@@ -58,8 +64,16 @@ class _FakeSession:
         return False
 
     def get(self, url, headers=None):
+        self.last_method = "GET"
         self.last_url = url
         self.last_headers = dict(headers or {})
+        return _FakeResp(self._response_payload)
+
+    def post(self, url, headers=None, json=None):
+        self.last_method = "POST"
+        self.last_url = url
+        self.last_headers = dict(headers or {})
+        self.last_json = json
         return _FakeResp(self._response_payload)
 
 
@@ -230,3 +244,72 @@ async def test_empty_base_url_returns_misconfigured(monkeypatch):
     result = await validate_key_against_upstream("sk-good", "")
     assert result.valid is False
     assert result.error_code == "misconfigured"
+
+
+# ── probe_model: chat-completions probe ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_probe_model_posts_to_chat_completions(monkeypatch):
+    """With ``probe_model`` supplied, the validator POSTs a minimal
+    chat-completions request rather than GETting /v1/models.  This is
+    the path that catches keys accepted by /v1/models but rejected by
+    chat — the real-world ``new-api`` misconfiguration this fork
+    started hitting in production.
+    """
+    session = _install_fake_session(monkeypatch, 200)
+    result = await validate_key_against_upstream(
+        "sk-good", "https://api.example.com", probe_model="claude-sonnet-4-6",
+    )
+    assert result.valid is True
+    assert session.last_method == "POST"
+    assert session.last_url == "https://api.example.com/v1/chat/completions"
+    assert session.last_headers["Authorization"] == "Bearer sk-good"
+    assert session.last_json["model"] == "claude-sonnet-4-6"
+    assert session.last_json["max_tokens"] == 1
+    # Body must include at least one message so the gateway routes the
+    # request as a real chat call and doesn't 400 it before auth check.
+    assert isinstance(session.last_json["messages"], list)
+    assert session.last_json["messages"][0]["role"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_probe_model_401_is_invalid_key(monkeypatch):
+    """The whole point of the chat-completions probe — a key that the
+    gateway rejects at chat must produce ``invalid_key`` even if it
+    would have passed the unauthenticated /v1/models probe.
+    """
+    _install_fake_session(monkeypatch, 401)
+    result = await validate_key_against_upstream(
+        "sk-bad", "https://api.example.com", probe_model="claude-sonnet-4-6",
+    )
+    assert result.valid is False
+    assert result.error_code == "invalid_key"
+
+
+@pytest.mark.asyncio
+async def test_no_probe_model_falls_back_to_models_get(monkeypatch):
+    """Backwards compat: passing ``probe_model=None`` (or omitting it)
+    preserves the original GET /v1/models behavior so tests + operators
+    who can't resolve a model name still work.
+    """
+    session = _install_fake_session(monkeypatch, 200)
+    await validate_key_against_upstream(
+        "sk-good", "https://api.example.com",
+    )
+    assert session.last_method == "GET"
+    assert session.last_url == "https://api.example.com/v1/models"
+    assert session.last_json is None
+
+
+@pytest.mark.asyncio
+async def test_probe_model_base_url_with_v1_normalizes(monkeypatch):
+    """Base URL with a trailing /v1 must not double up into /v1/v1/...
+    when the chat-completions probe is used.
+    """
+    session = _install_fake_session(monkeypatch, 200)
+    await validate_key_against_upstream(
+        "sk-good", "https://api.example.com/v1",
+        probe_model="claude-sonnet-4-6",
+    )
+    assert session.last_url == "https://api.example.com/v1/chat/completions"

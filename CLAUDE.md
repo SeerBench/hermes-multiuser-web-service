@@ -116,11 +116,24 @@ These bit us during development; future sessions should know them.
    test fails with "confine_path called outside a web user context",
    the test forgot `enter_user_context(user_id)`.
 
-4. **`ContextVars` propagate into `loop.run_in_executor` automatically.**
-   `WebChatAgentRunner` runs the AIAgent inside an executor thread, and
-   both the workspace contextvar and `HERMES_HOME` override end up
-   correctly set in that thread.  Don't add explicit context-passing
-   plumbing — Python copies the current context on submission.
+4. **`ContextVars` do NOT propagate into `loop.run_in_executor` by
+   default — you must wrap with `contextvars.copy_context().run`.**
+   This was a load-bearing wrong claim in an earlier revision of this
+   doc.  `asyncio.create_task` and `asyncio.to_thread` copy the
+   current context for you, but the lower-level
+   `loop.run_in_executor(None, fn)` does not.  Without `ctx.run`
+   wrapping, every ContextVar read inside the worker thread returns
+   its default — and the user's encrypted upstream API key silently
+   fell back to the global `"no-key-required"` placeholder, producing
+   `HTTP 401: Invalid token` on every chat turn.
+   `WebChatAgentRunner.run` therefore does:
+   ```python
+   ctx = contextvars.copy_context()
+   return await loop.run_in_executor(None, ctx.run, _run)
+   ```
+   The same fix carries the workspace + `HERMES_HOME` override into
+   the agent thread.  If you add another `run_in_executor` call inside
+   the web_chat path, wrap it the same way.
 
 5. **SSE event ordering: don't push `done` via `call_soon_threadsafe`.**
    Token / tool callbacks fire from the executor thread and must use

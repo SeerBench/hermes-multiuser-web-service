@@ -1,10 +1,31 @@
 """Pre-flight validation of an end-user's upstream API key against new-api.
 
 When a user logs in to ``web_chat`` by pasting their upstream key, we
-ping the configured ``new-api`` (or any OpenAI-compatible) gateway with
-``GET /v1/models`` carrying ``Authorization: Bearer <key>``.  This
-gives the user immediate, deterministic feedback — invalid keys are
-rejected at the login modal rather than at the next chat turn.
+ping the configured ``new-api`` (or any OpenAI-compatible) gateway and
+classify the response.  This gives the user immediate, deterministic
+feedback — invalid keys are rejected at the login modal rather than at
+the next chat turn.
+
+Two probe modes are supported:
+
+- ``probe_model="<name>"``  — POST ``/v1/chat/completions`` with the
+                              smallest possible request (``max_tokens=1``,
+                              one short user message).  This is the
+                              accurate path: it exercises the same code
+                              path the chat handler does, so a key that
+                              ``/v1/models`` accepts but chat rejects
+                              (a real-world new-api configuration, where
+                              the models list is unauthenticated but
+                              chat strictly checks the token) is caught
+                              at login.  Costs a couple of tokens per
+                              login — fractions of a cent.
+- ``probe_model=None``      — GET ``/v1/models``.  No token cost, but
+                              can be misled by gateways that don't
+                              authenticate the models endpoint.  Kept
+                              as a fallback for operators who can't
+                              afford the few-token chat probe, and for
+                              the case where the gateway's default
+                              model name can't be resolved at login time.
 
 Outcomes we distinguish:
 
@@ -72,14 +93,29 @@ async def validate_key_against_upstream(
     api_key: str,
     base_url: str,
     *,
+    probe_model: Optional[str] = None,
     timeout_seconds: float = _VALIDATE_TIMEOUT_SECONDS,
     path: str = "/v1/models",
 ) -> ValidationResult:
-    """Probe ``{base_url}{path}`` with ``api_key`` and classify the response.
+    """Probe the upstream with ``api_key`` and classify the response.
 
     ``base_url`` is expected to be the value of ``NEW_API_BASE_URL`` —
-    i.e. the operator's upstream gateway root, without a trailing slash
-    and without ``/v1/...``.  Trailing slashes are stripped to be safe.
+    i.e. the operator's upstream gateway root.  Trailing slashes and a
+    trailing ``/v1`` segment are both tolerated via
+    :func:`gateway.web.upstream_key.normalize_new_api_base_url`.
+
+    When ``probe_model`` is given, the validator POSTs a minimal
+    ``/v1/chat/completions`` request (``max_tokens=1``, one short user
+    message) so the probe exercises the same authentication code path
+    the chat handler will hit.  This is the recommended mode — it
+    catches new-api gateways whose ``/v1/models`` is unauthenticated
+    but whose chat endpoint strictly validates the token.
+
+    When ``probe_model`` is ``None``, the validator falls back to
+    ``GET /v1/models`` — preserved for backwards compatibility, for
+    operators who don't want the few-token probe cost, and for the
+    edge case where ``_resolve_gateway_model()`` returns an empty
+    string and the caller has no model name to supply.
 
     The function never raises for transport errors — they are reported
     via the ``ValidationResult``.  Caller is responsible for whether to
@@ -111,7 +147,16 @@ async def validate_key_against_upstream(
             error_msg="NEW_API_BASE_URL is not configured on the server",
         )
 
-    url = base_url.rstrip("/") + path
+    # Accept both forms operators commonly configure
+    # (``https://gateway.example.com`` *and*
+    # ``https://gateway.example.com/v1``) by stripping a trailing ``/v1``
+    # before re-appending the probe path.  See
+    # ``gateway.web.upstream_key.normalize_new_api_base_url`` for the
+    # rationale — the chat path needs the ``/v1`` baked in, the
+    # validator needs to hit ``/v1/...`` exactly once.
+    from gateway.web.upstream_key import normalize_new_api_base_url
+
+    base = normalize_new_api_base_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Accept": "application/json",
@@ -120,7 +165,23 @@ async def validate_key_against_upstream(
 
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, headers=headers) as resp:
+            if probe_model:
+                url = base + "/v1/chat/completions"
+                body = {
+                    "model": probe_model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                    # ``stream=False`` is the default but spell it out
+                    # so a server that requires the field doesn't reject
+                    # the probe for the wrong reason.
+                    "stream": False,
+                }
+                ctx = session.post(url, headers=headers, json=body)
+            else:
+                url = base + path
+                ctx = session.get(url, headers=headers)
+
+            async with ctx as resp:
                 status = resp.status
                 if 200 <= status < 300:
                     return ValidationResult(valid=True, status=status)
@@ -141,8 +202,10 @@ async def validate_key_against_upstream(
                         error_msg=f"upstream returned {status}",
                         status=status,
                     )
-                # Remaining 4xx (400, 404, 405, …) → base_url or path is
-                # wrong; operator's fault, not the user's.
+                # Remaining 4xx (400, 404, 405, …) → base_url is wrong,
+                # the model name is wrong, or the request body shape
+                # mismatched the gateway's expectations.  All of these
+                # are operator-side, not end-user-side.
                 return ValidationResult(
                     valid=False,
                     error_code="misconfigured",

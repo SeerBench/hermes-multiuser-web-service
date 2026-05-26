@@ -1059,11 +1059,48 @@ def _resolve_runtime_agent_kwargs() -> dict:
     )
     from hermes_cli.auth import AuthError
 
+    # web_chat × new-api integration: if NEW_API_BASE_URL is set, every
+    # chat call will be routed at this upstream and the per-user key is
+    # bound by the chat handler via the upstream_key ContextVar
+    # (see chat_runner._create_agent's `if upstream_key:` override).
+    # That means a BYO-key-only deployment doesn't need *any* server-
+    # side provider key — and ``resolve_runtime_provider()`` will throw
+    # AuthError on such a deployment because it can't find one.  We
+    # detect that case below and synthesize a minimal config so the
+    # web_chat platform works without operators having to add a
+    # placeholder OPENAI_API_KEY to ~/.hermes/.env.
+    new_api_url = os.getenv("NEW_API_BASE_URL", "").strip()
+
     try:
         runtime = resolve_runtime_provider()
     except AuthError as auth_exc:
-        # Primary provider auth failed (expired token, revoked key, etc.).
-        # Try the fallback provider chain before raising.
+        # In BYO-key mode the missing global key is expected, not an
+        # error.  Skip the fallback chain entirely and hand back a
+        # config whose ``api_key`` is a placeholder — chat_runner
+        # overrides it from the user's encrypted session key before
+        # the AIAgent ever gets constructed.  Other gateway-spawned
+        # AIAgent paths (compress, etc.) that don't bind an upstream
+        # key will see the placeholder and fail loudly at the upstream
+        # gateway, which is the correct behavior: a non-BYO call site
+        # has no business borrowing user credentials.
+        if new_api_url:
+            from gateway.web.upstream_key import normalize_new_api_base_url
+            logger.info(
+                "BYO-key mode: NEW_API_BASE_URL is set and no global "
+                "provider key configured — chat_runner will inject the "
+                "end-user's key per request"
+            )
+            return {
+                "api_key": "no-key-required",
+                "base_url": normalize_new_api_base_url(new_api_url) + "/v1",
+                "provider": "custom",
+                "api_mode": "chat_completions",
+                "command": None,
+                "args": [],
+                "credential_pool": None,
+            }
+        # Non-BYO deployment: try the fallback provider chain before
+        # giving up.
         logger.warning("Primary provider auth failed: %s — trying fallback", auth_exc)
         fb_config = _try_resolve_fallback_provider()
         if fb_config is not None:
@@ -1081,15 +1118,19 @@ def _resolve_runtime_agent_kwargs() -> dict:
         "args": list(runtime.get("args") or []),
         "credential_pool": runtime.get("credential_pool"),
     }
-    # web_chat × new-api integration: if NEW_API_BASE_URL is set, route
-    # every gateway-spawned LLM call through that upstream gateway.  The
-    # per-user api_key is injected separately by chat_runner via
-    # gateway.web.upstream_key.get_upstream_key(); here we only override
-    # the URL (and force chat_completions mode, since new-api speaks the
-    # OpenAI-compatible protocol regardless of the configured provider).
-    new_api_url = os.getenv("NEW_API_BASE_URL", "").strip()
+    # web_chat × new-api integration: when NEW_API_BASE_URL is set and
+    # we *also* have a global provider configured, route the URL at
+    # the upstream gateway regardless of which provider config.yaml
+    # named.  The OpenAI-compatible SDK appends ``/chat/completions``
+    # to whatever ``base_url`` we give it, so the version path must
+    # already be baked in — we normalize the env var (strip trailing
+    # ``/`` and trailing ``/v1``) and add ``/v1`` ourselves so both
+    # ``https://gw`` and ``https://gw/v1`` work.  See
+    # ``gateway.web.upstream_key.normalize_new_api_base_url`` for why
+    # this is split between the validator and chat paths.
     if new_api_url:
-        result["base_url"] = new_api_url.rstrip("/")
+        from gateway.web.upstream_key import normalize_new_api_base_url
+        result["base_url"] = normalize_new_api_base_url(new_api_url) + "/v1"
         result["api_mode"] = "chat_completions"
     return result
 

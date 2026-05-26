@@ -279,3 +279,60 @@ async def test_chat_with_no_message_returns_400(adapter_app, monkeypatch):
 
     resp = await adapter_app.client.post("/api/chat", json={})
     assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_failed_run_emits_sse_error_event(adapter_app, monkeypatch):
+    """When the agent loop returns ``failed: True`` (HTTP 401 from the
+    upstream LLM gateway, billing-blocked accounts, …), the chat
+    handler must surface that as an SSE ``error`` event with the
+    underlying message — otherwise the SPA's assistant turn is stuck
+    on "…" forever with no indication of what went wrong.
+    """
+    await _patch_validator(monkeypatch, valid=True)
+    await adapter_app.client.post("/api/auth/login", json={"api_key": "sk-good"})
+
+    async def _fail(**kw):
+        return (
+            {"final_response": None, "failed": True, "error": "HTTP 401: Invalid token"},
+            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        )
+
+    adapter_app.adapter._runner.run = _fail
+
+    resp = await adapter_app.client.post(
+        "/api/chat", json={"message": "hi"},
+    )
+    assert resp.status == 200
+    text = await resp.text()
+    assert "event: error" in text
+    assert "Invalid token" in text
+    assert "agent_error" in text
+    # Must NOT also emit a terminal ``done`` event — the SPA treats
+    # ``done`` as success and would clear the error indicator.
+    assert "event: done" not in text
+
+
+@pytest.mark.asyncio
+async def test_chat_successful_run_emits_done(adapter_app, monkeypatch):
+    """Sanity counterpart to the failed-run test: a non-failed result
+    still emits ``done`` (not ``error``).
+    """
+    await _patch_validator(monkeypatch, valid=True)
+    await adapter_app.client.post("/api/auth/login", json={"api_key": "sk-good"})
+
+    async def _ok(**kw):
+        return (
+            {"final_response": "hi back", "session_id": "s_xyz"},
+            {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+
+    adapter_app.adapter._runner.run = _ok
+
+    resp = await adapter_app.client.post(
+        "/api/chat", json={"message": "hi"},
+    )
+    assert resp.status == 200
+    text = await resp.text()
+    assert "event: done" in text
+    assert "event: error" not in text

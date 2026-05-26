@@ -290,6 +290,58 @@ async def test_run_passes_history_and_message(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_propagates_upstream_key_contextvar_to_worker_thread(monkeypatch):
+    """Regression for the "no-key-required" 401 incident.
+
+    ``WebChatAgentRunner._create_agent`` runs in a worker thread via
+    ``loop.run_in_executor``.  ``run_in_executor(None, fn)`` does NOT
+    automatically copy the calling task's ContextVar context — so the
+    runner has to wrap with ``contextvars.copy_context().run`` or every
+    per-request ContextVar (including the encrypted upstream API key
+    bound by ``enter_upstream_key``) silently reads its default
+    ``None``, and the chat call falls back to the global
+    ``"no-key-required"`` placeholder → HTTP 401 from the upstream
+    LLM gateway on every turn.
+
+    This test fails fast (before any real chat traffic) if a future
+    refactor drops the ``ctx.run`` wrapping.
+    """
+    from gateway.web.upstream_key import enter_upstream_key, get_upstream_key
+
+    _patch_gateway_runtime(monkeypatch)
+    seen_key = {"value": "<NOT-CAPTURED>"}
+
+    def fake_aiagent(**kwargs):
+        # AIAgent is built inside the executor thread; reading the
+        # contextvar here is the same surface the real chat_runner uses
+        # when it injects the upstream key into runtime_kwargs.
+        seen_key["value"] = get_upstream_key()
+        agent = MagicMock(name="agent")
+        agent.session_id = "s1"
+        agent.run_conversation.return_value = {"final_response": "ok"}
+        agent.session_prompt_tokens = 0
+        agent.session_completion_tokens = 0
+        agent.session_total_tokens = 0
+        return agent
+
+    monkeypatch.setattr("run_agent.AIAgent", fake_aiagent)
+
+    with enter_upstream_key("sk-test-marker-1234567890"):
+        await WebChatAgentRunner().run(
+            user_id="u_alice",
+            user_message="hi",
+            conversation_history=[],
+            session_id="s1",
+        )
+
+    assert seen_key["value"] == "sk-test-marker-1234567890", (
+        "Upstream key ContextVar did NOT cross into the executor thread. "
+        "WebChatAgentRunner.run must use contextvars.copy_context().run "
+        "to wrap _run — see CLAUDE.md note #4."
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_injects_effective_session_id_on_compression(monkeypatch):
     """If the agent rotated session_id mid-turn (compression), the runner
     surfaces the new id in the result for the SSE/header layer to relay.
@@ -307,6 +359,69 @@ async def test_run_injects_effective_session_id_on_compression(monkeypatch):
         session_id="s1_original",
     )
     assert result["session_id"] == "s2_post_compress"
+
+
+# ── _resolve_runtime_agent_kwargs BYO mode ────────────────────────────────
+
+
+def test_resolve_runtime_agent_kwargs_byo_only_synthesizes_config(monkeypatch):
+    """BYO-key deployment (NEW_API_BASE_URL set, no global provider key
+    configured) must not error out of ``_resolve_runtime_agent_kwargs``.
+    Before this fix, the function called ``resolve_runtime_provider``
+    first, that threw ``AuthError`` because no OPENAI/OPENROUTER/etc.
+    key was set, and the whole web_chat platform refused to serve
+    requests with "No inference provider configured" — even though
+    every chat turn supplies the key per-request via
+    ``enter_upstream_key``.
+    """
+    from hermes_cli.auth import AuthError
+    from gateway.run import _resolve_runtime_agent_kwargs
+
+    monkeypatch.setenv("NEW_API_BASE_URL", "https://gw.example.com")
+
+    def _raise_auth_error():
+        raise AuthError("No inference provider configured.")
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        _raise_auth_error,
+    )
+
+    cfg = _resolve_runtime_agent_kwargs()
+    assert cfg["base_url"] == "https://gw.example.com/v1"
+    assert cfg["api_mode"] == "chat_completions"
+    assert cfg["provider"] == "custom"
+    # The placeholder must be present (chat_runner overrides it from
+    # the user's session key) — empty/None would crash AIAgent init.
+    assert cfg["api_key"]
+
+
+def test_resolve_runtime_agent_kwargs_non_byo_auth_error_still_raises(monkeypatch):
+    """Counterpart to the BYO test: if NEW_API_BASE_URL is NOT set, an
+    AuthError from the provider resolver must still propagate (and
+    after trying the fallback chain).  Otherwise a misconfigured
+    non-web_chat deployment would silently mint a config pointing at
+    nothing.
+    """
+    from hermes_cli.auth import AuthError
+    from gateway.run import _resolve_runtime_agent_kwargs
+
+    monkeypatch.delenv("NEW_API_BASE_URL", raising=False)
+
+    def _raise_auth_error():
+        raise AuthError("No inference provider configured.")
+
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        _raise_auth_error,
+    )
+    monkeypatch.setattr(
+        "gateway.run._try_resolve_fallback_provider",
+        lambda: None,
+    )
+
+    with pytest.raises(RuntimeError, match="No inference provider"):
+        _resolve_runtime_agent_kwargs()
 
 
 # ── derive_session_id_from_history ────────────────────────────────────────

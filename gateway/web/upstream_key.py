@@ -83,6 +83,36 @@ def enter_upstream_key(key: Optional[str]) -> Iterator[None]:
         _UPSTREAM_API_KEY.reset(token)
 
 
+def normalize_new_api_base_url(base_url: str) -> str:
+    """Return ``base_url`` stripped of trailing slash and trailing ``/v1``.
+
+    ``NEW_API_BASE_URL`` is consumed in two places with different path
+    expectations: the upstream validator hits ``GET /v1/models`` to
+    accept-or-reject a user's key at login, and the AIAgent's OpenAI-
+    compatible client expects ``base_url`` to already include the
+    version path so it can append ``/chat/completions`` itself.  If we
+    consumed the raw env-var in both, operators would have to pick one
+    convention and the other surface would break: the symptom the
+    operator hits here is "key validates fine but every chat turn
+    returns an empty response after 3 retries" (the SDK hit
+    ``{root}/chat/completions`` instead of ``{root}/v1/chat/completions``
+    and the upstream returned 404 → empty body).
+
+    The fix is to normalize to a canonical root, then add the right
+    suffix at each call site:
+
+    - validator       → ``{root}/v1/models``
+    - chat (AIAgent)  → ``{root}/v1``
+
+    Empty / whitespace-only input returns the empty string unchanged so
+    "not configured" stays a single check at the call site.
+    """
+    s = (base_url or "").strip().rstrip("/")
+    if s.endswith("/v1"):
+        s = s[:-3].rstrip("/")
+    return s
+
+
 def derive_user_id(api_key: str) -> str:
     """Map an upstream API key to a deterministic ``u_<12hex>`` user_id.
 

@@ -145,7 +145,41 @@ class UserStore:
 
     def _init_schema(self) -> None:
         with self._lock:
+            self._migrate_legacy_schema_locked()
             self._conn.executescript(_SCHEMA)
+
+    def _migrate_legacy_schema_locked(self) -> None:
+        """Drop pre-new-api tables when an old ``web_users.db`` is found.
+
+        The switch to new-api key login (commit ``2751078b8``) is a
+        breaking change: ``user_id`` is now derived from
+        ``sha256(api_key)`` instead of being random, and ``web_sessions``
+        gained a non-nullable ``api_key_enc`` column.  Old user rows
+        carry neither a usable key nor a derivable id, so there is
+        nothing to preserve — we drop the legacy tables and let the
+        ``CREATE TABLE IF NOT EXISTS`` block below rebuild them.
+
+        Detection: the legacy ``users`` table has an ``email`` column;
+        the new one does not.  Also drops the obsolete ``api_keys``
+        table if present.
+        """
+        cols = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(users)")
+        }
+        if "email" not in cols:
+            return
+        logger.warning(
+            "web_users.db: legacy auth schema detected (email/password); "
+            "dropping web_sessions/api_keys/users to migrate to new-api "
+            "key login. Existing local accounts cannot be preserved — "
+            "users must sign in again with their new-api key."
+        )
+        self._conn.executescript(
+            "DROP TABLE IF EXISTS web_sessions;\n"
+            "DROP TABLE IF EXISTS api_keys;\n"
+            "DROP TABLE IF EXISTS users;\n"
+        )
 
     def close(self) -> None:
         with self._lock:

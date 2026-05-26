@@ -250,6 +250,15 @@ class WebChatAdapter(BasePlatformAdapter):
             # web_file_search) via side effect.
             import gateway.web.tools  # noqa: F401
 
+            # Route hermes' auxiliary chain (title generation,
+            # compression, vision analyze, …) through the BYO upstream
+            # so single-user-pays deployments don't get a flurry of
+            # "OpenRouter unhealthy / Nous unavailable" warnings on
+            # every chat turn.  Idempotent and a no-op when
+            # NEW_API_BASE_URL is unset.
+            from gateway.web.aux_byo_router import install_aux_byo_router
+            install_aux_byo_router()
+
             self._user_store = UserStore()
             self._key_vault = KeyVault()
             self._session_db = self._ensure_session_db()
@@ -449,8 +458,19 @@ class WebChatAdapter(BasePlatformAdapter):
         # touch the local DB.  Sub-second on a healthy gateway; the
         # validator already bounds itself to a 10s timeout for the
         # pathological case.
+        #
+        # Prefer a chat-completions probe over the plain ``/v1/models``
+        # GET: some new-api gateways don't authenticate the models
+        # endpoint, so a key that ``/v1/models`` accepts may still be
+        # rejected at the first real chat turn.  Hitting chat
+        # completions with ``max_tokens=1`` exercises the same auth
+        # path and catches that case at login.  If the gateway's
+        # default model can't be resolved (empty config), fall back to
+        # the models endpoint rather than refusing logins entirely.
+        from gateway.run import _resolve_gateway_model
+        probe_model = (_resolve_gateway_model() or "").strip() or None
         validation = await validate_key_against_upstream(
-            api_key, self._new_api_base_url
+            api_key, self._new_api_base_url, probe_model=probe_model,
         )
         if not validation.valid:
             # Map the validator's three failure modes to distinct HTTP
@@ -682,16 +702,36 @@ class WebChatAdapter(BasePlatformAdapter):
                     return resp
 
                 effective_session_id = result.get("session_id", session_id)
-                # Terminal "done" event — emit directly (we're on the
-                # main event loop here, not a worker thread).  See git
-                # commit 19308b974 for the SSE race rationale.
-                event_queue.put_nowait({
-                    "event": "done",
-                    "data": {
-                        "session_id": effective_session_id,
-                        "usage": usage,
-                    },
-                })
+                # The agent's conversation loop does NOT raise on
+                # non-retryable provider errors (HTTP 401 from the LLM
+                # gateway, billing-blocked accounts, …) — it returns a
+                # result dict with ``failed: True`` and an ``error``
+                # string.  Without translating that to an SSE ``error``
+                # event the client only sees ``done`` after an empty
+                # stream and the assistant turn is stuck displaying "…"
+                # forever with no indication of what went wrong.
+                #
+                # Terminal "done"/"error" events — emit directly (we're
+                # on the main event loop here, not a worker thread).
+                # See git commit 19308b974 for the SSE race rationale.
+                if result.get("failed"):
+                    event_queue.put_nowait({
+                        "event": "error",
+                        "data": {
+                            "message": str(
+                                result.get("error") or "agent run failed"
+                            ),
+                            "code": "agent_error",
+                        },
+                    })
+                else:
+                    event_queue.put_nowait({
+                        "event": "done",
+                        "data": {
+                            "session_id": effective_session_id,
+                            "usage": usage,
+                        },
+                    })
 
                 await event_queue.put(None)
                 try:

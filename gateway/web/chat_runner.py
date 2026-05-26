@@ -40,6 +40,7 @@ memory + session isolation work without touching any agent-internal code.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
 import time
@@ -179,12 +180,20 @@ class WebChatAgentRunner:
         disconnect.
 
         ContextVars (the workspace + HERMES_HOME override set by
-        ``enter_user_context``) propagate into the executor thread
-        automatically — Python copies the current context on
-        ``loop.run_in_executor`` submission.  No special arrangement
-        needed here.
+        ``enter_user_context``, plus the upstream API key set by
+        ``enter_upstream_key``) must be carried into the executor
+        thread explicitly: ``loop.run_in_executor(None, fn)`` does
+        **not** copy the current context the way ``asyncio.to_thread``
+        or ``asyncio.create_task`` do.  Without ``ctx.run`` wrapping,
+        every ContextVar inside ``_run`` reads its default — which for
+        ``upstream_key`` means ``None``, which silently dropped
+        per-user keys and let the agent fall back to the global
+        ``"no-key-required"`` placeholder.  The symptom was HTTP 401
+        from the upstream LLM gateway on every chat turn (see commit
+        message for the diagnostic that uncovered this).
         """
         loop = asyncio.get_running_loop()
+        ctx = contextvars.copy_context()
 
         def _run() -> Tuple[Dict[str, Any], Dict[str, int]]:
             agent = self._create_agent(
@@ -218,7 +227,7 @@ class WebChatAgentRunner:
                 result["session_id"] = eff_sid
             return result, usage
 
-        return await loop.run_in_executor(None, _run)
+        return await loop.run_in_executor(None, ctx.run, _run)
 
 
 def derive_session_id_from_history(

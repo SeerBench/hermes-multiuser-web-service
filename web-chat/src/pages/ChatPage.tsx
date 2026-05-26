@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react'
-import { conversations as convosApi, streamChat } from '../api'
+import { ApiError, auth, conversations as convosApi, streamChat } from '../api'
 import type { ChatMessage, ConversationSummary } from '../api'
 import { ConversationList } from '../components/ConversationList'
 import { KeyPromptModal } from '../components/KeyPromptModal'
@@ -17,8 +17,23 @@ type Turn = {
   errorMessage?: string
 }
 
+// `crypto.randomUUID` only exists in secure contexts (HTTPS or
+// localhost).  This gateway is commonly accessed over plain HTTP on a
+// Tailscale / LAN IP, where the API is undefined and calling it throws
+// TypeError.  We only need a key that's unique within this React tree's
+// lifetime, not a real UUID, so a timestamp + random suffix is fine.
+function newTurnId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 type KeyModalState =
   | { open: false }
+  // `pendingMessage` is empty when the modal is opened proactively on
+  // page load (no cookie); non-empty when the user hit send and we
+  // discovered the session is missing or expired mid-request.
   | { open: true; reason: 'first-message' | 'session-expired'; pendingMessage: string }
 
 export function ChatPage() {
@@ -31,12 +46,31 @@ export function ChatPage() {
   const abortRef = useRef<AbortController | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
 
-  // Initial conversation list — silently empty if not signed in.
+  // On mount: probe /api/me. If unauthenticated, open the key modal
+  // up front so the user isn't staring at a blank chat with no hint
+  // that they need to sign in. If authenticated, populate the
+  // conversation list.
   useEffect(() => {
-    convosApi
-      .list()
-      .then(setConvos)
-      .catch(() => setConvos([]))
+    let cancelled = false
+    void (async () => {
+      try {
+        await auth.me()
+        if (cancelled) return
+        try {
+          setConvos(await convosApi.list())
+        } catch {
+          setConvos([])
+        }
+      } catch (err) {
+        if (cancelled) return
+        if (err instanceof ApiError && err.status === 401) {
+          setKeyModal({ open: true, reason: 'first-message', pendingMessage: '' })
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Auto-scroll on new content.
@@ -72,14 +106,14 @@ export function ChatPage() {
   const runMessage = useCallback(
     async (message: string, historyOverride?: ChatMessage[]) => {
       const userTurn: Turn = {
-        id: crypto.randomUUID(),
+        id: newTurnId(),
         role: 'user',
         content: message,
         tools: [],
         status: 'done',
       }
       const assistantTurn: Turn = {
-        id: crypto.randomUUID(),
+        id: newTurnId(),
         role: 'assistant',
         content: '',
         tools: [],
@@ -212,13 +246,16 @@ export function ChatPage() {
 
   const stop = () => abortRef.current?.abort()
 
-  // After successful login from the modal, resend the stashed message.
+  // After successful login from the modal, resend the stashed message
+  // (if any — empty when the modal was opened proactively on mount).
   const onLoginSuccess = useCallback(() => {
     setKeyModal((prev) => {
       if (!prev.open) return prev
-      // Resend the original message; pass an empty history because
-      // we cleared the in-flight turns above.
-      void runMessage(prev.pendingMessage, [])
+      if (prev.pendingMessage) {
+        // Resend the original message; pass an empty history because
+        // we cleared the in-flight turns above.
+        void runMessage(prev.pendingMessage, [])
+      }
       return { open: false }
     })
     // Refresh conversation list now that we're signed in.
