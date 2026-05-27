@@ -104,9 +104,22 @@ Before any disk write, `web_skill_install` parses the supplied SKILL.md and reje
 - The category dir path under `<ws>/skills/` would resolve outside the workspace (defense in depth — `confine_path` catches this too, but we want a friendlier error).
 - Total skill size (SKILL.md + scripts + references) >256 KB or any single file >64 KB (quota-aware, configurable).
 
-### 3.5 Quota integration
+### 3.5 No local quota integration
 
-`web_skill_install` adds to the user's existing quota counter (the byte counter in `gateway/web/quota.py`, currently tracks file writes). Skill size counts the same as `files/` writes. Existing `_handle_chat`'s `finally`-block quota recording stays unchanged.
+The fork dropped its local quota module in commit `2751078b8`
+(*"feat(web_chat)!: replace local auth with new-api key login, drop
+quota"*) — usage billing is the upstream **new-api** gateway's
+responsibility now, by design. `web_skill_install` therefore does **not**
+maintain any local byte counter. The per-file 64 KB and per-skill 256 KB
+hard caps in §3.4 are the only disk-footprint guardrail, and they're
+sufficient: a single tenant can install at most ~256 KB per skill, and
+the user's overall workspace size is already bounded by operator
+deployment policy (container disk, dedicated UID, etc. — see
+`docs/user-guide/web-chat.md` § Per-user isolation).
+
+If new-api later exposes a disk-space dimension, plumbing skill installs
+into that call is a one-line addition at the end of the install handler;
+the change is purely additive and does not affect the API surface here.
 
 ## 4. API design — tool schemas (exact)
 
@@ -316,7 +329,7 @@ These need an answer before implementation kicks off:
 
 **Q2.** Should category names be a hard-coded allowlist (as designed) or freeform with a regex (`^[a-z][a-z0-9-]{0,32}$`)? *Recommendation: allowlist — keeps `web_skills_list` listings clean and matches upstream's de-facto category convention.*
 
-**Q3.** Size caps — 64KB/file, 256KB/skill, configurable via `web_chat.skill_quota.*` keys? *Recommendation: yes, but ship with defaults; revisit if operators ask for tunables.*
+**Q3.** Size caps — 64 KB/file, 256 KB/skill — should they be configurable via `web_chat.skill_limits.*` keys (note the rename: these are disk-footprint guardrails, not billing dimensions; quota itself lives in new-api per §3.5)? *Recommendation: ship with hard-coded defaults. Add a config key only when an operator surfaces a real need; the defaults comfortably fit a SKILL.md plus a handful of reference docs.*
 
 **Q4.** Should we surface user skills in the **system prompt's** skill banner (matching how global skills appear)? *Recommendation: **no** — the banner is rendered once per session by upstream `prompt_builder.py`, which we don't touch. Agents discover user skills on demand via `web_skills_list`. We document this clearly so users understand the asymmetry.*
 

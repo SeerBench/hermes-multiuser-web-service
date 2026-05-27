@@ -478,9 +478,12 @@ def _handle_web_skill_install(args: Dict[str, Any], **kw: Any) -> str:
         target_file.parent.mkdir(parents=True, exist_ok=True)
         target_file.write_bytes(cb)
 
-    # TODO(quota): when gateway/web/quota.py lands, record ``total`` bytes
-    # against the user's storage quota here. See §3.5 of
-    # docs/plans/2026-05-26-per-user-skill-isolation.md.
+    # No local quota counter — the fork dropped its local quota module
+    # in commit 2751078b8 ("feat(web_chat)!: replace local auth with
+    # new-api key login, drop quota").  Usage billing is the upstream
+    # new-api gateway's responsibility.  The per-file MAX_FILE_BYTES /
+    # per-skill MAX_SKILL_BYTES caps above bound the per-tenant disk
+    # footprint without any local accounting.
 
     return _json({
         "success": True,
