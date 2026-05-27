@@ -375,6 +375,26 @@ def test_install_files_relpath_escape_rejected(hermes_home, alice_workspace):
 # ── Cross-tenant isolation ─────────────────────────────────────────────
 
 
+def test_install_never_writes_to_global_tree(hermes_home, alice_workspace):
+    """Direct security-property guard: ``web_skill_install`` must write into
+    the user's workspace, never into the operator-curated global library.
+
+    Even a successful install must leave ``$HERMES_HOME/skills/<cat>/<name>``
+    absent.  This is the property the user pinned the design on: web installs
+    are isolated, not global.
+    """
+    result = _call("web_skill_install", {
+        "name": "alice-private",
+        "category": "research",
+        "skill_md": _good_skill_md("alice-private"),
+    })
+    assert result["success"] is True
+    # User-side: present
+    assert (alice_workspace / "skills" / "research" / "alice-private" / "SKILL.md").exists()
+    # Global-side: must not be touched at all
+    assert not (hermes_home / "skills" / "research" / "alice-private").exists()
+
+
 def test_install_invisible_to_other_user(hermes_home):
     with enter_user_context("u_alice"):
         _call("web_skill_install", {

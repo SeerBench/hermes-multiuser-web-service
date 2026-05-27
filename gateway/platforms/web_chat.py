@@ -282,6 +282,8 @@ class WebChatAdapter(BasePlatformAdapter):
             self._session_db = self._ensure_session_db()
             self._runner = WebChatAgentRunner(session_db=self._session_db)
             self._agent_semaphore = asyncio.Semaphore(self._max_concurrent_agents)
+
+            self._log_global_skills_visibility()
         except Exception as exc:
             logger.error("[%s] failed to initialise subsystems: %s", self.name, exc)
             return False
@@ -445,6 +447,63 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.warning("[%s] SessionDB unavailable: %s", self.name, exc)
             self._session_db = None
         return self._session_db
+
+    def _log_global_skills_visibility(self) -> None:
+        """One-shot startup probe: where does ``$HERMES_HOME/skills/`` resolve
+        and what's actually there?
+
+        Operator-curated skills (Stage A: ``research/brave-search`` and
+        friends) live under ``$HERMES_HOME/skills/`` and are surfaced to
+        every web user via the overlay merge in
+        :mod:`gateway.web.tools.sandboxed_skill_manage`.  If ``HERMES_HOME``
+        is unset, or the resolved directory is missing or empty, web users
+        won't see those skills — typically a deployment-time misconfig.
+        Log loudly so the operator catches it before users do.
+        """
+        import os as _os
+        from pathlib import Path as _Path
+
+        env_home = _os.environ.get("HERMES_HOME", "").strip()
+        if env_home:
+            skills_dir = _Path(env_home) / "skills"
+            source = f"HERMES_HOME={env_home}"
+        else:
+            skills_dir = _Path.home() / ".hermes" / "skills"
+            source = "default ~/.hermes (HERMES_HOME unset)"
+
+        if not skills_dir.is_dir():
+            logger.warning(
+                "[%s] global skills dir %s does not exist (%s) — "
+                "operator-curated skills will not be visible to web users. "
+                "Create the directory and populate it with SKILL.md folders, "
+                "or set HERMES_HOME to the path that already has skills.",
+                self.name, skills_dir, source,
+            )
+            return
+
+        try:
+            skill_count = sum(
+                1 for p in skills_dir.rglob("SKILL.md") if p.is_file()
+            )
+        except OSError as exc:
+            logger.warning(
+                "[%s] could not scan global skills dir %s: %s",
+                self.name, skills_dir, exc,
+            )
+            return
+
+        if skill_count == 0:
+            logger.warning(
+                "[%s] global skills dir %s is empty (%s) — web users will "
+                "only see their own private skills. Drop SKILL.md folders "
+                "into this path to share them across all users.",
+                self.name, skills_dir, source,
+            )
+        else:
+            logger.info(
+                "[%s] global skills: %d found under %s (%s)",
+                self.name, skill_count, skills_dir, source,
+            )
 
     @staticmethod
     def _json_error(message: str, *, status: int = 400, code: str = None) -> "web.Response":

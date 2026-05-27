@@ -50,6 +50,69 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger("hermes.web.chat_runner")
 
 
+# Platform-level system-prompt addendum.  Appended ahead of any SPA-supplied
+# ``system_prompt`` so the agent always knows what surface it is running on,
+# what fork-specific tools exist, and how Brave / secrets are handled.
+# Added 2026-05-27 after a session in which the agent — lacking these tools
+# at the time and having no platform guidance — tried to "install" a Brave
+# Search skill by instructing the user to paste an API key into chat and
+# run shell commands.  See ``docs/plans/2026-05-26-per-user-skill-isolation.md``.
+_WEB_PLATFORM_PROMPT_ADDENDUM = """\
+[hermes-multiuser-web-service platform notes]
+
+You are running inside a multi-user web service.  Every request is bound to
+one authenticated user with a private workspace at ``<workspace>/skills/``.
+That workspace overlays the operator-curated global library at
+``$HERMES_HOME/skills/``; the user can see both, but can only write to their
+own.
+
+Per-user skill tools (use these instead of ``skill_*`` — those upstream tools
+are intentionally absent here):
+
+- ``web_skills_list`` — list available skills (user-private + global, merged).
+  Call this first when the user asks to install, find, or use a skill.
+- ``web_skill_view`` — read a skill's ``SKILL.md`` or a supporting file.
+- ``web_skill_install`` — write a new ``SKILL.md`` (and optional supporting
+  files) into the user's private skills dir.
+- ``web_skill_delete`` — delete a user-private skill (global skills cannot
+  be deleted from chat).
+
+Skill-install protocol (strict — these rules exist because a previous agent
+violated them and the user lost trust):
+
+1. **Installs ALWAYS go through ``web_skill_install``.**  Never instruct the
+   user to run shell commands (``mkdir``, ``cat > … << EOF``, ``vi``, etc.)
+   to create skill files themselves.  That bypasses the per-user sandbox,
+   points at the wrong filesystem path, and may even leak credentials into
+   their shell history.  If you don't have file-write permission for the
+   destination, you don't have permission, period — surface the limitation,
+   don't route around it through the user.
+2. **Installs ALWAYS land in *this user's private skills directory*.**
+   They are not visible to other users and they are not in the global
+   library.  You cannot install into ``$HERMES_HOME/skills/`` from chat —
+   that is an operator-side action, out of scope for you.
+3. **If ``web_skill_install`` returns an error** (bad frontmatter, name
+   collision, size cap, invalid category), surface the tool's error to the
+   user verbatim and offer to fix the input.  Do NOT fall back to
+   shell-install workarounds.
+4. **``web_skill_delete`` refuses to remove global skills.**  Tell the user
+   to ask the operator if they need a global skill gone.
+
+Skills are Markdown documents with YAML frontmatter that *teach you how to
+use existing tools*.  They are NOT runtime configuration files, and they
+MUST NOT contain API keys, tokens, or any other user secret.  Never write a
+SKILL.md that embeds credentials; if a user pastes one in chat, ask them to
+rotate it and explain that secrets are configured server-side, not in chat.
+
+Web search:  The ``web_search`` tool is already wired up.  If the operator
+has configured ``BRAVE_SEARCH_API_KEY`` server-side, ``web_search`` already
+routes through Brave's free index — no skill install is needed to "use
+Brave".  Likewise for Tavily / Firecrawl / Exa.  The user should NOT paste
+search-provider API keys into chat; if they do, refuse to embed the key
+anywhere and tell them where to configure it (operator-side environment).
+"""
+
+
 class WebChatAgentRunner:
     """Stateless factory + runner for AIAgent instances behind ``web_chat``.
 
@@ -130,13 +193,24 @@ class WebChatAgentRunner:
 
         fallback_model = GatewayRunner._load_fallback_model()
 
+        # Platform-level addendum is always present; SPA-supplied prompt is
+        # appended after so anything the user specifies overrides on conflict
+        # (LLMs typically weight later instructions more heavily when they
+        # disagree, and we want user intent to win).
+        if ephemeral_system_prompt:
+            effective_ephemeral = (
+                _WEB_PLATFORM_PROMPT_ADDENDUM + "\n\n" + ephemeral_system_prompt
+            ).strip()
+        else:
+            effective_ephemeral = _WEB_PLATFORM_PROMPT_ADDENDUM.strip()
+
         agent = AIAgent(
             model=model,
             **runtime_kwargs,
             max_iterations=max_iterations,
             quiet_mode=True,
             verbose_logging=False,
-            ephemeral_system_prompt=ephemeral_system_prompt or None,
+            ephemeral_system_prompt=effective_ephemeral,
             enabled_toolsets=enabled_toolsets,
             session_id=session_id,
             platform="web_chat",

@@ -196,6 +196,54 @@ def test_create_agent_passes_gateway_session_key(monkeypatch):
     assert captured["gateway_session_key"] == "channel-42"
 
 
+def test_create_agent_always_prepends_platform_addendum(monkeypatch):
+    """The web platform addendum (telling the agent about web_skill_*
+    tools and Brave Search backend handling) must be present in every
+    agent's system prompt, with or without a SPA-supplied ephemeral
+    prompt.
+
+    Regression guard for the 2026-05-27 fix: previously web agents
+    received no platform context and would, e.g., try to "install" Brave
+    Search by asking the user to paste an API key into chat.
+    """
+    from gateway.web.chat_runner import _WEB_PLATFORM_PROMPT_ADDENDUM
+
+    _patch_gateway_runtime(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        "run_agent.AIAgent",
+        lambda **kw: (captured.update(kw), MagicMock())[1],
+    )
+
+    # No SPA prompt → just the addendum
+    WebChatAgentRunner()._create_agent(user_id="u_alice")
+    eph = captured["ephemeral_system_prompt"]
+    assert eph is not None
+    # Tool surface
+    for tool in ("web_skills_list", "web_skill_view", "web_skill_install", "web_skill_delete"):
+        assert tool in eph, f"addendum missing tool reference: {tool}"
+    # Install-protocol rules — these are load-bearing for the security
+    # posture and must not silently drop out of the prompt.
+    assert "private skills dir" in eph
+    assert "shell commands" in eph  # forbids shell-install workaround
+    assert "operator-side action" in eph
+    # Brave / secret guidance
+    assert "BRAVE_SEARCH_API_KEY" in eph
+    assert "MUST NOT contain API keys" in eph
+
+    # SPA prompt supplied → addendum first, SPA prompt appended after
+    captured.clear()
+    WebChatAgentRunner()._create_agent(
+        user_id="u_alice",
+        ephemeral_system_prompt="Be terse.",
+    )
+    eph = captured["ephemeral_system_prompt"]
+    assert _WEB_PLATFORM_PROMPT_ADDENDUM.strip() in eph
+    assert "Be terse." in eph
+    # Addendum lands first so SPA's later instructions can override on conflict.
+    assert eph.index("web_skills_list") < eph.index("Be terse.")
+
+
 def test_create_agent_supports_model_name_override(monkeypatch):
     """If the runner is constructed with a custom model_name, that takes
     precedence over `_resolve_gateway_model()`.  Lets the platform expose
