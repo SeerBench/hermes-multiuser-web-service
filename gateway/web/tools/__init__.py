@@ -24,5 +24,6 @@ user's workspace from the ``_USER_WORKSPACE`` contextvar set by
 """
 
 from gateway.web.tools import sandboxed_file_operations  # noqa: F401 — side effect
+from gateway.web.tools import sandboxed_skill_manage  # noqa: F401 — side effect
 
-__all__ = ["sandboxed_file_operations"]
+__all__ = ["sandboxed_file_operations", "sandboxed_skill_manage"]

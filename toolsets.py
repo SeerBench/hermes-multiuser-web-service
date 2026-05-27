@@ -364,22 +364,32 @@ TOOLSETS = {
             "the host shell or runs code: no terminal, no process, no "
             "code_execution, no browser_*. File operations go through the "
             "sandboxed web_file_* variants which strictly confine paths "
-            "to the per-user workspace.  ``skill_manage`` is intentionally "
-            "absent: ``tools/skills_tool.py`` caches ``SKILLS_DIR`` at "
-            "import time, so any write would land in the process-global "
-            "``~/.hermes/skills/`` and bleed across tenants.  Web users "
-            "get read-only access (``skills_list``, ``skill_view``) to the "
-            "operator-curated skill library; an operator wanting to ship "
-            "a new skill does so out-of-band."
+            "to the per-user workspace.  Skill management goes through "
+            "the sandboxed web_skill_* variants (see "
+            "gateway/web/tools/sandboxed_skill_manage.py): "
+            "``web_skills_list`` / ``web_skill_view`` expose a merged "
+            "view of global operator-curated skills + the user's private "
+            "skills (user version overlays global on name collision); "
+            "``web_skill_install`` / ``web_skill_delete`` only ever "
+            "touch the per-user ``<workspace>/skills/`` directory.  We "
+            "do **not** expose upstream ``skill_manage`` because "
+            "``tools/skills_tool.py`` caches ``SKILLS_DIR`` at import "
+            "time and would bleed across tenants — see "
+            "docs/plans/2026-05-26-per-user-skill-isolation.md for the "
+            "design rationale."
         ),
         "tools": [
             # Web research — outbound HTTP only, no local FS / process.
             "web_search", "web_extract",
             # Vision + image generation (no FS writes by default).
             "vision_analyze", "image_generate",
-            # Skills — read-only.  ``skill_manage`` is excluded on purpose;
-            # see the toolset description above.
-            "skills_list", "skill_view",
+            # Skills — sandboxed per-user variants.  ``skill_manage`` is
+            # excluded; see the toolset description above.  User-installed
+            # skills are NOT auto-injected into the system prompt (upstream's
+            # prompt_builder doesn't observe ContextVars); the agent
+            # discovers them at runtime via ``web_skills_list``.
+            "web_skills_list", "web_skill_view",
+            "web_skill_install", "web_skill_delete",
             # Planning + memory — both go through HERMES_HOME and are
             # automatically scoped to the per-user workspace by the
             # set_hermes_home_override contextvar set in

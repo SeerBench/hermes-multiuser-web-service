@@ -51,7 +51,7 @@ _USER_WORKSPACE: ContextVar[Optional[Path]] = ContextVar(
 # Canonical layout inside a user workspace.  The web_chat platform
 # enforces these subdirs exist on first request; sandboxed tools rely on
 # them.
-_USER_SUBDIRS = ("memories", "files", "cache")
+_USER_SUBDIRS = ("memories", "files", "cache", "skills")
 
 
 class PathSandboxViolation(PermissionError):

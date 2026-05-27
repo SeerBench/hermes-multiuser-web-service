@@ -214,6 +214,51 @@ Real-time cross-browser push (SSE event-bus) is not implemented.
 
 ---
 
+## Per-user skill management
+
+Web users get a sandboxed skill toolset that mirrors upstream's skill
+surface but with per-tenant isolation.  Four tools, all confined to the
+user's workspace by `confine_path`:
+
+| Tool | Purpose |
+|---|---|
+| `web_skills_list` | Merged listing of global (operator-curated) + per-user skills.  On name collision the user version overlays the global one.  Filterable by `category` and `source` (`"all"` / `"global"` / `"user"`). |
+| `web_skill_view` | Read a skill's `SKILL.md`, or a relative file under it (`file_path="references/api.md"`).  User layer wins over global on name collision. |
+| `web_skill_install` | Write a new skill into `<workspace>/skills/<category>/<name>/`.  Validates SKILL.md frontmatter (`name` matches install arg, `description` ≤1024 chars, `version` present), enforces a per-file 64 KB and per-skill 256 KB cap, and accepts optional `files={...}` for `references/` and `scripts/`. |
+| `web_skill_delete` | Remove a personal skill.  Global operator-curated skills cannot be deleted by users — the call returns an error. |
+
+Upstream's `skill_manage` is **not** exposed on the web platform because
+`tools/skills_tool.py` caches `SKILLS_DIR` at module-import time and would
+bleed writes across tenants.  See
+`docs/plans/2026-05-26-per-user-skill-isolation.md` for the full design
+rationale.
+
+### What user-installed skills are (and aren't)
+
+- **Discoverable on demand** — the agent calls `web_skills_list` to see
+  what's available and `web_skill_view` to load full content.
+- **NOT auto-injected into the system prompt.**  Upstream's prompt
+  banner is rendered once per session by code (`agent/prompt_builder.py`)
+  that doesn't observe per-request ContextVars, so per-user skills
+  cannot be added to it without breaking the fork's zero-upstream-touch
+  rule.  Treat user skills as Anthropic-style progressive disclosure:
+  the agent pulls them when relevant.
+- **Scripts are reference-only.**  The `hermes-web-chat` toolset
+  excludes `terminal`, `process`, `code_execution`, and `browser_*`,
+  so any `scripts/*.py` in a user skill is read for guidance, never
+  executed by the agent.
+
+### Operator-curated global library
+
+Anything you (the operator) place under `$HERMES_HOME/skills/<category>/<name>/`
+is read-only-visible to every web user.  Useful for shipping shared
+references (e.g. the bundled `brave-search` skill).  Categories are
+restricted to a fixed allowlist matching upstream's de-facto top-level
+directories — adding a new category requires editing
+`_ALLOWED_CATEGORIES` in `gateway/web/tools/sandboxed_skill_manage.py`.
+
+---
+
 ## Sizing
 
 Numbers from the plan's capacity table.
