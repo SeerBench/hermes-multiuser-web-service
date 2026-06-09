@@ -52,6 +52,8 @@ Concretely, what the fork still does itself:
 - **Per-user memory** (`MEMORY.md`, `USER.md`, every provider's cache — all isolated by workspace)
 - **Per-user filesystem workspaces** at `$HERMES_HOME/web_workspaces/<user_id>/`
 - **Sandboxed file tools** (`web_file_*`) that mirror upstream `read_file` / `write_file` / `patch` / `search_files` but reject any path that escapes the user's workspace
+- **Per-user skill management** (`web_skill_*`) — every user sees a merged view of the operator's global skill library plus their own private skills (user version overlays global on name collision); install/delete only ever touch the user's own `<workspace>/skills/`
+- **Zero-key web research out of the box** — `web_search` (DuckDuckGo via `ddgs`) and `web_extract` (the fork-bundled `http-fetch` provider) both work on a fresh install with no paid API key; point `web.extract_backend` at Firecrawl/Tavily/Exa/Parallel to upgrade
 - A new gateway **HTTP adapter** (`gateway/platforms/web_chat.py`) on port 8643 with cookie auth and SSE streaming
 - A minimal **React SPA** (`web-chat/`) — 65 KB gzipped JS, no UI framework, no router library
 - **Encrypted-at-rest key storage** (Fernet under a server-side master key) so a paste of the key at first login is enough — no need to re-enter it on every browser restart
@@ -96,8 +98,8 @@ The forks that die are the ones that quietly rewrite half of upstream and then c
 | **Sub-package isolation** | All multi-tenant code lives under `gateway/web/` (new directory), `gateway/platforms/web_chat.py` (new file), and `web-chat/` (new directory). | These paths don't exist upstream, so `git pull` never touches them. Conflict probability: 0. |
 | **Mirror, not refactor** | `WebChatAgentRunner` (`gateway/web/chat_runner.py`) is a ~150-LOC parallel to `gateway/platforms/api_server.py`'s `_create_agent` / `_run_agent`. We don't refactor api_server.py to share code with us. | api_server.py is the most-edited gateway file upstream. Any shared module would be a permanent merge-conflict source. The duplication is paid once. |
 | **Wrap, not fork** | `web_file_read` / `web_file_write` / `web_file_patch` / `web_file_search` call the upstream `read_file_tool` / `write_file_tool` / etc. via their public function signatures, prefixed by a `confine_path` check. We don't fork `tools/file_operations.py` (~2k LOC) or `tools/file_tools.py`. | Upstream is free to refactor tool internals. Only the public function names matter to us, and those have been stable for many releases. |
-| **Surgical bug-fixes** in upstream files | A handful of small B-class edits: `run_agent.py:517` and `agent/conversation_compression.py:391` (1 line each — propagate `user_id` to SessionDB writes); `gateway/run.py` (one `elif Platform.WEB_CHAT` branch in `_create_adapter` + one `NEW_API_BASE_URL` override block in `_resolve_runtime_agent_kwargs`); `hermes_state.py` query-method `user_id` parameter additions; `hermes_cli/config.py` `OPTIONAL_ENV_VARS` entry for `NEW_API_BASE_URL`. All are pure bug fixes or additive parameters; default behavior unchanged. | The user_id propagation is a real multi-tenant bug — slated to be offered back upstream as a PR. The NEW_API_BASE_URL block is a small operational hook. Conflict points resolve in seconds. |
-| **Opt-in extra** | `cryptography` is in `[web-chat]` extras, not core. Installs without the extra fail loudly at adapter startup with a clear pip hint. | Doesn't bloat the upstream base install for users who never run the web service. |
+| **Surgical bug-fixes** in upstream files | A handful of small B-class edits: `run_agent.py:517` and `agent/conversation_compression.py:391` (1 line each — propagate `user_id` to SessionDB writes); `gateway/run.py` (one `elif Platform.WEB_CHAT` branch in `_create_adapter` + one `NEW_API_BASE_URL` override block in `_resolve_runtime_agent_kwargs`); `hermes_state.py` query-method `user_id` parameter additions; `hermes_cli/config.py` `OPTIONAL_ENV_VARS` entry for `NEW_API_BASE_URL`; and three fork-gated blocks in `tools/web_tools.py` registering the bundled `http-fetch` extract backend. All are pure bug fixes or additive/inert-upstream branches; default behavior unchanged. | The user_id propagation is a real multi-tenant bug — slated to be offered back upstream as a PR. The NEW_API_BASE_URL and http-fetch hooks are small operational additions. Conflict points resolve in seconds. |
+| **Opt-in extra** | `cryptography` (KeyVault) and `ddgs` (keyless `web_search`) are in the `[web-chat]` extra, not core. Installs without the extra fail loudly at adapter startup with a clear pip hint. | Doesn't bloat the upstream base install for users who never run the web service. |
 
 **Files we deliberately did not touch**, even when it would have been simpler:
 
@@ -164,7 +166,7 @@ git clone https://github.com/SeerBench/hermes-multiuser-web-service.git
 cd hermes-multiuser-web-service
 ./setup-hermes.sh                                 # uv venv + .[all,dev]
 source .venv/bin/activate
-uv pip install -e ".[web-chat]"                   # adds cryptography (for KeyVault)
+uv pip install -e ".[web-chat]"                   # cryptography (KeyVault) + ddgs (keyless web_search)
 
 # 2. Point at your new-api (or other OpenAI-compatible gateway)
 echo "NEW_API_BASE_URL=https://your-new-api.example.com" >> ~/.hermes/.env
@@ -208,6 +210,9 @@ The single auth mode is the `hermes_session` cookie, issued by `/api/auth/login`
 | `POST` | `/api/auth/logout` | cookie | expire cookie + delete server-side row |
 | `GET`  | `/api/me` | yes | current `user_id` + first/last-seen timestamps |
 | `GET`  | `/api/conversations` | yes | list user's sessions, filtered by `user_id` |
+| `GET`  | `/api/conversations/{id}` | yes | load one session's transcript (own sessions only) |
+| `GET`  | `/api/commands` | yes | list slash commands available to the user |
+| `POST` | `/api/command` | yes | run a slash command |
 | `POST` | `/api/chat` | yes | **SSE stream** of agent response |
 | `GET`  | `/api/healthz` | none | liveness probe |
 | `GET`  | `/static/*`, `/assets/*` | none | SPA assets |
@@ -297,6 +302,11 @@ This fork ships with automated tests for every fork-specific module. All passing
 | Upstream key validator (new-api `/v1/models` probe) | `tests/gateway/test_web_upstream_validator.py` |
 | Upstream key ContextVar + user_id derivation | `tests/gateway/test_web_upstream_key.py` |
 | Fernet KeyVault (encrypt / decrypt / master key file) | `tests/gateway/test_web_key_storage.py` |
+| Transcript load (`GET /api/conversations/{id}`) | `tests/gateway/test_web_get_conversation.py` |
+| Per-user sandboxed skill tools (`web_skill_*`) | `tests/gateway/test_web_sandboxed_skills.py` |
+| Slash-command surface (`/api/commands`, `/api/command`) | `tests/gateway/test_web_commands.py` |
+| Auxiliary BYO model router | `tests/gateway/test_web_aux_byo_router.py` |
+| Zero-key `http-fetch` web_extract provider | `tests/tools/test_web_providers_http_fetch.py` |
 
 Run with the project test wrapper (CI-parity hermetic env):
 
@@ -304,7 +314,11 @@ Run with the project test wrapper (CI-parity hermetic env):
 scripts/run_tests.sh tests/gateway/test_web_*.py tests/hermes_state/test_user_id_filtering.py
 ```
 
-The most load-bearing test is **`test_concurrent_requests_dont_swap_user_contexts`** — two simultaneous chat requests from different users must each see their own `user_id` and their own upstream API key reaching the runner. This is the test that proves the multi-user contract: ContextVars are asyncio-task-local, not threadlocal, so one user's request can't leak into another's workspace or billing account under concurrent load.
+The most load-bearing tests prove the multi-user isolation contract — that ContextVars are asyncio-task-local (not threadlocal), so one user's request can't leak into another's workspace or billing account under concurrent load:
+
+- **`test_run_propagates_upstream_key_contextvar_to_worker_thread`** (`test_web_chat_runner.py`) — the regression for the "no-key-required" 401 incident: the runner executes the AIAgent in a `loop.run_in_executor` worker thread, and this test proves the per-request upstream key ContextVar actually reaches that thread (via `copy_context().run`) instead of falling back to the global placeholder.
+- **`test_contextvar_propagates_to_asyncio_task`** (`test_web_upstream_key.py`) — confirms the upstream-key ContextVar is task-local, so concurrent chat tasks each see their own key.
+- **`test_derive_user_id_is_deterministic_across_calls`** / **`test_derive_user_id_differs_for_different_keys`** (`test_web_upstream_key.py`) — the `user_id = sha256(key)[:12]` anchor is stable per key and distinct across keys, the property every workspace/session/billing boundary hangs off.
 
 ---
 
@@ -322,9 +336,16 @@ The most load-bearing test is **`test_concurrent_requests_dont_swap_user_context
 │       ├── upstream_validator.py    pre-login key probe against new-api /v1/models
 │       ├── key_storage.py           KeyVault (Fernet + on-disk master key)
 │       ├── chat_runner.py           AIAgent factory (mirror of api_server)
+│       ├── aux_byo_router.py        per-user bring-your-own auxiliary model routing
+│       ├── web_commands.py          slash-command surface (/api/commands, /api/command)
 │       └── tools/
 │           ├── __init__.py          (side-effect register on import)
-│           └── sandboxed_file_operations.py     web_file_* tools
+│           ├── sandboxed_file_operations.py     web_file_* tools
+│           └── sandboxed_skill_manage.py        web_skill_* tools (per-user + global)
+│
+├── plugins/web/http_fetch/          ← fork-bundled zero-key web_extract provider
+│   ├── plugin.yaml                  kind: backend, provides http-fetch
+│   └── provider.py                  httpx GET + stdlib HTML→text
 │
 ├── web-chat/                        ← React SPA → builds to gateway/web/_static/
 │   ├── src/
@@ -339,7 +360,8 @@ The most load-bearing test is **`test_concurrent_requests_dont_swap_user_context
 │
 ├── tests/
 │   ├── hermes_state/test_user_id_filtering.py
-│   └── gateway/test_web_*.py        9 test files covering the fork surface
+│   ├── gateway/test_web_*.py        13 files covering the gateway fork surface
+│   └── tools/test_web_providers_http_fetch.py   zero-key extract provider
 │
 ├── docs/user-guide/web-chat.md      operator guide (new-api integration walk-through)
 │
@@ -350,9 +372,14 @@ The most load-bearing test is **`test_concurrent_requests_dont_swap_user_context
 
 ## Roadmap
 
+Shipped since the first cut:
+
+- [x] **GET /api/conversations/{id}** — transcript history loads when switching sessions (`test_web_get_conversation.py`)
+- [x] **Per-user skill management** — `web_skill_*` tools with a merged global + private library (`test_web_sandboxed_skills.py`)
+- [x] **Zero-key web research** — `web_search` (ddgs) + `web_extract` (bundled `http-fetch`) work with no paid key (`test_web_providers_http_fetch.py`)
+
 In rough order of useful next steps:
 
-- [ ] **GET /api/conversations/{id}** to load transcript history (SPA can switch sessions but doesn't fetch history yet)
 - [ ] **Refreshed screenshots** matching the new-api login flow
 - [ ] **Plugin-hook proposal to upstream** — `register_gateway_platform()` on `PluginManager` so this whole fork can be re-published as a standalone plugin and the surgical patches dissolve
 - [ ] **Optional Postgres backend** for `web_users.db` when single-box SQLite tops out

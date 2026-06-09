@@ -384,9 +384,17 @@ class TestBackendSelection:
             assert _get_backend() == "firecrawl"
 
     def test_fallback_no_keys_defaults_to_firecrawl(self):
-        """No keys, no config → 'firecrawl' (will fail at client init)."""
+        """No keys, no config, no ddgs → 'firecrawl' (will fail at client init).
+
+        ddgs is the keyless last-resort fallback, so this invariant only
+        holds when the ``ddgs`` package isn't importable. Mock its probe so
+        the test is deterministic regardless of whether ddgs is installed in
+        the env (the fork's ``[web-chat]`` extra ships ddgs, which would
+        otherwise make ``_get_backend()`` return "ddgs" here).
+        """
         from tools.web_tools import _get_backend
-        with patch("tools.web_tools._load_web_config", return_value={}):
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch("tools.web_tools._ddgs_package_importable", return_value=False):
             assert _get_backend() == "firecrawl"
 
     def test_invalid_config_falls_through_to_fallback(self):
@@ -602,8 +610,12 @@ class TestCheckWebApiKey:
             assert check_web_api_key() is True
 
     def test_no_keys_returns_false(self):
+        # ddgs is keyless, so "no web backend available" is only true when
+        # the ddgs package isn't importable. Mock its probe for determinism
+        # (the fork's [web-chat] extra ships ddgs).
         from tools.web_tools import check_web_api_key
-        assert check_web_api_key() is False
+        with patch("tools.web_tools._ddgs_package_importable", return_value=False):
+            assert check_web_api_key() is False
 
     def test_both_keys_returns_true(self):
         with patch.dict(os.environ, {
