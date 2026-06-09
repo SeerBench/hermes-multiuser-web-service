@@ -619,6 +619,24 @@ code {
   background: var(--bg);
 }
 
+/* Fallback rendering of an image_generate result as an actual thumbnail
+   (always visible, not gated behind the collapse toggle). */
+.tool-image-link {
+  display: block;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.tool-image {
+  display: block;
+  max-width: min(420px, 100%);
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
 .tool-event-section {
   margin-bottom: 6px;
 }

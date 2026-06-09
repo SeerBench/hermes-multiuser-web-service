@@ -164,6 +164,24 @@ set a provider key in `~/.hermes/.env`, or point `web.search_backend` /
 `web.extract_backend` (or the shared `web.backend`) at an available provider.
 Backend config changes are picked up on the next gateway restart.
 
+### Generated images
+
+`image_generate` returns the picture as a **URL** in its result, not an inline
+blob.  Two layers surface it in the browser:
+
+1. The web-platform prompt addendum instructs the agent to embed that URL in
+   its reply as Markdown `![desc](url)` — the SPA's Markdown renderer turns
+   that into an inline `<img>` in the chat bubble (the primary, best-looking
+   path).
+2. As a fallback, the SPA also parses any `image_generate` tool result and
+   renders the returned `https` URL as a thumbnail under that tool event — so
+   the image still appears even if the model forgets to inline the Markdown.
+
+Caveat: backends that return an **absolute local file path** instead of a URL
+are not yet served by the web gateway (no static route for generated files),
+so those render as broken images.  The shipped FAL path returns URLs and is
+unaffected.
+
 ---
 
 ## HTTP surface

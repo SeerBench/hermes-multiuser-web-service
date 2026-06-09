@@ -116,6 +116,15 @@ routes through Brave's free index — no skill install is needed to "use
 Brave".  Likewise for Tavily / Firecrawl / Exa.  The user should NOT paste
 search-provider API keys into chat; if they do, refuse to embed the key
 anywhere and tell them where to configure it (operator-side environment).
+
+Images:  When you generate an image with ``image_generate``, the tool returns
+the image as a URL in the result's ``image`` field.  You MUST surface it by
+embedding that URL in your reply as Markdown — ``![<short description>](<url>)``
+— on its own line.  This is not optional: on this web surface a generated
+image is INVISIBLE to the user unless you inline it as Markdown; merely
+describing the picture in prose shows them nothing.  Always paste the actual
+``![...](<url>)`` (in addition to any caption), and never claim you "created"
+or "attached" an image without including its Markdown link.
 """
 
 

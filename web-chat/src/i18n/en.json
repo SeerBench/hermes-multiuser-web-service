@@ -57,6 +57,7 @@
   "tool.args.heading": "Arguments",
   "tool.result.heading": "Result",
   "tool.result.empty": "(no output)",
+  "tool.image.alt": "Generated image",
 
   "command.popover.heading": "Commands",
   "command.popover.empty": "No matching commands",

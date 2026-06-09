@@ -28,6 +28,13 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
 
   const canToggle = finished && (Boolean(args) || Boolean(result_preview))
 
+  // Fallback image rendering: image_generate returns its picture only as a URL
+  // inside the tool result. Surface it as an actual <img> so the user sees the
+  // image even when the model forgets to inline ![](url) in its prose reply.
+  // (The primary path is the agent embedding the Markdown — see the web
+  // platform prompt addendum — but this guards against non-compliance.)
+  const imageUrl = !error && finished ? extractImageUrl(tool, result_preview) : null
+
   return (
     <div className={`tool-event ${error ? 'tool-error' : ''}${open ? ' tool-open' : ''}`}>
       <button
@@ -47,6 +54,16 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
           </span>
         )}
       </button>
+      {imageUrl && (
+        <a
+          className="tool-image-link"
+          href={imageUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img className="tool-image" src={imageUrl} alt={t('tool.image.alt')} loading="lazy" />
+        </a>
+      )}
       {open && (
         <div className="tool-event-details">
           {args ? (
@@ -77,4 +94,24 @@ function prettyJson(input: string): string {
   } catch {
     return input
   }
+}
+
+// Pull a renderable image URL out of an image_generate tool result.
+// Scoped to that tool so we never turn an arbitrary URL from some other
+// tool's output into an <img>. Only http(s) URLs are accepted (no data:/
+// javascript:), and we fall back to a regex when the preview was truncated
+// past the closing brace so the JSON no longer parses.
+function extractImageUrl(tool: string, result?: string): string | null {
+  if (tool !== 'image_generate' || !result) return null
+  let url: unknown = null
+  try {
+    const parsed = JSON.parse(result)
+    if (parsed && typeof parsed === 'object' && (parsed as any).success) {
+      url = (parsed as any).image
+    }
+  } catch {
+    const m = result.match(/"image"\s*:\s*"(https?:\/\/[^"\\]+)"/)
+    if (m) url = m[1]
+  }
+  return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null
 }

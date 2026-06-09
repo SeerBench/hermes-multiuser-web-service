@@ -57,6 +57,7 @@
   "tool.args.heading": "参数",
   "tool.result.heading": "结果",
   "tool.result.empty": "(无输出)",
+  "tool.image.alt": "生成的图片",
 
   "command.popover.heading": "命令",
   "command.popover.empty": "无匹配命令",
