@@ -62,7 +62,23 @@ backward-compatible — these are the named patches the rebase loop has to resol
 - `toolsets.py` — `hermes-web-chat` toolset definition.
 - `hermes_state.py` — `user_id` parameter added to `list_sessions_rich` and
   `search_messages` (purely additive — default `None` preserves old behavior).
-- `pyproject.toml` — `[web-chat]` extra (argon2-cffi).
+- `pyproject.toml` — `[web-chat]` extra (cryptography + ddgs).
+- `tools/web_tools.py` — 3 small fork-gated blocks registering the
+  fork-bundled `http-fetch` backend: (1) its name in `_get_backend()`'s
+  configured allow-set, (2) `_is_backend_available("http-fetch") -> True`,
+  and (3) an auto-route in `_get_extract_backend()` that returns
+  `http-fetch` when no `web.extract_backend` is configured and the shared
+  fallback resolved to a search-only provider (ddgs/brave-free/searxng).
+  Together these let deployments without a paid extract API
+  (Firecrawl/Tavily/Exa/Parallel) get a working `web_extract` out of the
+  box — no config needed — while explicit config and any extract-capable
+  paid backend are left untouched.  All three branches are inert upstream
+  (`http-fetch` is fork-only).  See `plugins/web/http_fetch/`.
+- `tests/plugins/web/test_web_search_provider_plugins.py` — 1 additive filter
+  in `test_all_seven_plugins_present_in_registry` excluding the fork-bundled
+  `http-fetch` provider from the registry snapshot.  The upstream expected
+  list (`brave-free`…`xai`) is left byte-identical, so upstream edits to that
+  list never conflict with this filter on rebase.
 
 **Upstream sync workflow**: `git fetch upstream && git rebase upstream/main`.
 If a conflict lands in one of the named patches above, resolve it by hand

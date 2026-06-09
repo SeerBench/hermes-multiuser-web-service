@@ -92,6 +92,40 @@ on any machine lands the user in the same conversation history.
 
 ---
 
+## Web research out of the box (no API keys)
+
+Every web user shares one tool surface, and the two web-research tools in
+the `hermes-web-chat` toolset work with **zero extra configuration** —
+no Firecrawl / Tavily / Exa / Parallel account required:
+
+| Tool | Default backend | Notes |
+|---|---|---|
+| `web_search` | `ddgs` (DuckDuckGo) | Shipped in the `[web-chat]` extra so search works on a fresh install. |
+| `web_extract` | `http-fetch` (fork-bundled) | Plain `httpx` GET + stdlib HTML→text. Auto-selected when no paid extract backend is configured — see `plugins/web/http_fetch/`. |
+
+`http-fetch` is **extract-only** and deliberately lightweight: no
+JavaScript rendering, no readability heuristics. It's the "fetch this
+article / docs page / RSS item" fallback, not a scraper. The downstream
+LLM summarizer compresses whatever it returns. Server-Side Request
+Forgery is blocked by `web_extract_tool`'s `is_safe_url` gate *before*
+the provider sees a URL — private / link-local / metadata-endpoint
+targets never get fetched.
+
+**To upgrade quality**, point `web.extract_backend` at a paid provider in
+`~/.hermes/config.yaml` and set its key in `~/.hermes/.env`:
+
+```yaml
+web:
+  extract_backend: firecrawl   # or tavily / exa / parallel
+```
+
+Any explicitly-configured extract backend, and any paid backend whose key
+is present, takes precedence — the `http-fetch` auto-route only fires as
+the last resort when extract would otherwise fail with a "search-only
+backend" error.
+
+---
+
 ## HTTP surface
 
 All endpoints return JSON unless noted.  The single auth mode is the
@@ -351,7 +385,10 @@ from the same key.
   `chat_runner.py`, `upstream_key.py`, `upstream_validator.py`,
   `key_storage.py`, and `tools/sandboxed_file_operations.py`
 - `web-chat/` — React SPA
-- `[web-chat]` pyproject extra (`cryptography==46.0.7`)
+- `plugins/web/http_fetch/` — bundled zero-key `web_extract` provider
+  (auto-loaded as a `kind: backend` plugin) so web research works on a
+  fresh install; opt up to a paid backend via `web.extract_backend`
+- `[web-chat]` pyproject extra (`cryptography==46.0.7`, `ddgs==9.14.4`)
 - `NEW_API_BASE_URL` registered in `hermes_cli/config.py::OPTIONAL_ENV_VARS`
 - One new toolset (`hermes-web-chat`) + one new Platform enum value
   (`Platform.WEB_CHAT`)

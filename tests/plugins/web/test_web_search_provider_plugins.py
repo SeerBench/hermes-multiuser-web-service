@@ -77,7 +77,16 @@ class TestBundledPluginsRegister:
         _ensure_plugins_loaded()
         from agent.web_search_registry import list_providers
 
-        names = sorted(p.name for p in list_providers())
+        names = sorted(
+            p.name
+            for p in list_providers()
+            # Fork (hermes-multiuser-web-service) bundles extra web providers
+            # that don't exist upstream — e.g. the zero-key ``http-fetch``
+            # extract backend in plugins/web/http_fetch. Exclude them here so
+            # this upstream snapshot's expected list stays byte-identical to
+            # upstream and never conflicts on `git rebase upstream/main`.
+            if p.name not in {"http-fetch"}
+        )
         assert names == [
             "brave-free",
             "ddgs",

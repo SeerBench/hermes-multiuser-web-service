@@ -183,7 +183,15 @@ web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0"]
 # platforms.web_chat in config.yaml without the extra,
 # WebChatAdapter.connect logs a friendly install hint and refuses to
 # start.
-web-chat = ["cryptography==46.0.7"]
+#
+# ``ddgs`` ships in this extra (not the upstream-driven ``[web]`` lazy
+# path) because the multi-user web service has to expose ``web_search``
+# out of the box: operators won't generally pre-configure a paid
+# Firecrawl / Tavily / Exa key for every deployment, and the
+# fork-bundled ``plugins/web/http_fetch`` extract provider relies on a
+# zero-key search companion to be useful.  Pinned to keep the no-ranges
+# policy honest.
+web-chat = ["cryptography==46.0.7", "ddgs==9.14.4"]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be lazy-installed via `tools/lazy_deps.py` — i.e. things every

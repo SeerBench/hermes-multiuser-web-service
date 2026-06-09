@@ -140,7 +140,12 @@ def _get_backend() -> str:
     keys manually without running setup.
     """
     configured = (_load_web_config().get("backend") or "").lower().strip()
-    if configured in {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai"}:
+    # ``http-fetch`` is recognised here so the hermes-multiuser-web-service
+    # fork can opt deployments into the bundled zero-key extract provider
+    # (plugins/web/http_fetch) via ``web.backend: http-fetch`` without
+    # tripping the unknown-backend fallback below. Additive change — does
+    # not affect any other backend's resolution path.
+    if configured in {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai", "http-fetch"}:
         return configured
 
     # Fallback for manual / legacy config — pick the highest-priority
@@ -186,7 +191,35 @@ def _get_extract_backend() -> str:
     2. ``web.backend`` (shared fallback — existing behavior)
     3. Auto-detect from env vars
     """
-    return _get_capability_backend("extract")
+    backend = _get_capability_backend("extract")
+
+    # Fork (hermes-multiuser-web-service): when no extract backend is
+    # explicitly configured and the shared fallback resolved to a
+    # search-only provider (ddgs / brave-free / searxng — the zero-key
+    # defaults a multi-user deployment ships with), route web_extract
+    # through the bundled zero-key ``http-fetch`` provider instead of
+    # letting web_extract_tool short-circuit to a "search-only backend
+    # cannot extract" error. Explicit ``web.extract_backend`` and any
+    # extract-capable (paid) backend are left untouched — this only fires
+    # as the last resort. Gated on http-fetch actually being registered and
+    # extract-capable (not just _is_backend_available), so it's inert both
+    # upstream and anywhere the plugin failed to load — there the existing
+    # "search-only backend cannot extract" error is preserved unchanged.
+    # See plugins/web/http_fetch/.
+    explicit = (_load_web_config().get("extract_backend") or "").lower().strip()
+    if not explicit:
+        from agent.web_search_registry import get_provider
+
+        resolved = get_provider(backend)
+        http_fetch = get_provider("http-fetch")
+        if (
+            resolved is not None
+            and not resolved.supports_extract()
+            and http_fetch is not None
+            and http_fetch.supports_extract()
+        ):
+            return "http-fetch"
+    return backend
 
 
 def _get_capability_backend(capability: str) -> str:
@@ -218,6 +251,10 @@ def _is_backend_available(backend: str) -> bool:
         return _has_env("BRAVE_SEARCH_API_KEY")
     if backend == "ddgs":
         return _ddgs_package_importable()
+    if backend == "http-fetch":
+        # Fork-bundled zero-key extract provider — always available because
+        # httpx is a core dependency. See plugins/web/http_fetch/.
+        return True
     if backend == "xai":
         # Cheap probe — env var OR auth.json has OAuth tokens. Must not
         # call resolve_xai_http_credentials() here because the OAuth path
