@@ -127,6 +127,43 @@ is present, takes precedence — the `http-fetch` auto-route only fires as
 the last resort when extract would otherwise fail with a "search-only
 backend" error.
 
+### Troubleshooting: `web_search` / `web_extract` missing from the model's tools
+
+If the assistant says it has no `web_search` tool (even though the toolset
+lists it), the tool registry is *hiding* it because no usable backend
+resolved.  A tool is only handed to the model when its registry `check_fn`
+passes (`tools/registry.py::get_definitions`); for these two tools the
+fork gates each on the backend its dispatch path would actually use —
+`web.search_backend` for `web_search`, `web.extract_backend` for
+`web_extract` — **not** the shared `web.backend`.
+
+The classic trap is a stale shared backend: `web.backend: firecrawl` with no
+`FIRECRAWL_API_KEY`, while search/extract are correctly routed to zero-key
+providers:
+
+```yaml
+web:
+  backend: ddgs          # keep the shared fallback on an AVAILABLE provider;
+                         # firecrawl-without-key here used to hide both tools
+  search_backend: ddgs
+  extract_backend: http-fetch
+```
+
+When a backend fails to resolve, the gate logs a `WARNING` naming the tool
+and the resolved-but-unavailable backend, e.g.:
+
+```
+WARNING tools.web_tools: web_search HIDDEN from the model: resolved search
+backend 'firecrawl' is unavailable (web.search_backend='', web.backend='firecrawl').
+Configure a search provider key ... or ensure the 'ddgs' package is importable ...
+```
+
+Grep the gateway log for `HIDDEN from the model` to confirm a tool was gated
+out and why.  Fix is one of: install the `[web-chat]` extra (ships `ddgs`),
+set a provider key in `~/.hermes/.env`, or point `web.search_backend` /
+`web.extract_backend` (or the shared `web.backend`) at an available provider.
+Backend config changes are picked up on the next gateway restart.
+
 ---
 
 ## HTTP surface

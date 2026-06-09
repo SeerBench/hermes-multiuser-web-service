@@ -63,8 +63,8 @@ backward-compatible — these are the named patches the rebase loop has to resol
 - `hermes_state.py` — `user_id` parameter added to `list_sessions_rich` and
   `search_messages` (purely additive — default `None` preserves old behavior).
 - `pyproject.toml` — `[web-chat]` extra (cryptography + ddgs).
-- `tools/web_tools.py` — 3 small fork-gated blocks registering the
-  fork-bundled `http-fetch` backend: (1) its name in `_get_backend()`'s
+- `tools/web_tools.py` — 4 small fork-gated blocks.  Blocks (1)–(3) register
+  the fork-bundled `http-fetch` backend: (1) its name in `_get_backend()`'s
   configured allow-set, (2) `_is_backend_available("http-fetch") -> True`,
   and (3) an auto-route in `_get_extract_backend()` that returns
   `http-fetch` when no `web.extract_backend` is configured and the shared
@@ -74,6 +74,22 @@ backward-compatible — these are the named patches the rebase loop has to resol
   box — no config needed — while explicit config and any extract-capable
   paid backend are left untouched.  All three branches are inert upstream
   (`http-fetch` is fork-only).  See `plugins/web/http_fetch/`.
+  Block (4): the `web_search` / `web_extract` registry `check_fn` (the gate
+  `tools/registry.py::get_definitions` uses to decide whether a tool is
+  *exposed* to the model) is swapped from the shared `check_web_api_key`
+  (upstream, left byte-identical) to two new per-capability functions
+  `check_web_search_available` / `check_web_extract_available`, which gate on
+  the backend each tool's dispatch path would actually resolve
+  (`_get_search_backend` / `_get_extract_backend`) instead of only the shared
+  `web.backend`.  Without this, a deployment that sets `web.backend: firecrawl`
+  (no key) but routes `search_backend: ddgs` / `extract_backend: http-fetch`
+  had both tools *hidden* from the model even though dispatch worked — the
+  symptom that prompted this fix.  The two new functions log at WARNING on the
+  "hidden" path so a misconfigured backend is visible in operator logs.  This
+  is a latent upstream bug (per-capability overrides ignored by the gate) and
+  is an upstream-PR candidate like the `user_id` propagation fix; the swap and
+  new functions are additive — `check_web_api_key` is untouched so its upstream
+  tests stay green.
 - `tests/plugins/web/test_web_search_provider_plugins.py` — 1 additive filter
   in `test_all_seven_plugins_present_in_registry` excluding the fork-bundled
   `http-fetch` provider from the registry snapshot.  The upstream expected

@@ -1412,6 +1412,74 @@ def check_web_api_key() -> bool:
     )
 
 
+# ─── Fork (hermes-multiuser-web-service): per-capability registry gating ──────
+# ``check_web_api_key`` above (upstream, byte-identical — do not edit) looks
+# ONLY at the shared ``web.backend`` key.  That ignores the per-capability
+# ``web.search_backend`` / ``web.extract_backend`` overrides, so a deployment
+# that set ``web.backend: firecrawl`` (no key) while routing search→ddgs /
+# extract→http-fetch had a perfectly working *dispatch* path yet got BOTH
+# web_search and web_extract *hidden* from the model: the shared gate saw only
+# the unavailable firecrawl and the tool registry (tools/registry.py::
+# get_definitions) dropped them.  The two functions below gate each tool on the
+# exact backend its dispatch path would resolve (``_get_search_backend`` /
+# ``_get_extract_backend``), so exposure matches reality.  They are wired in as
+# the ``check_fn`` of the web_search / web_extract registrations at the bottom
+# of this module (replacing the shared ``check_web_api_key``).  Additive +
+# fork-only; ``check_web_api_key`` itself is untouched so upstream tests and the
+# upstream rebase are unaffected.  On the "hidden" path they log at WARNING so a
+# misconfigured deployment is visible in the operator's logs (the symptom that
+# motivated this — see docs/user-guide/web-chat.md).
+def check_web_search_available() -> bool:
+    """Registry ``check_fn`` deciding whether ``web_search`` is exposed.
+
+    Gates on the backend ``web_search_tool`` would actually use
+    (``_get_search_backend()``), which honors ``web.search_backend`` and
+    only falls back to the shared ``web.backend`` / env auto-detect when no
+    per-capability override is set.
+    """
+    backend = _get_search_backend()
+    available = _is_backend_available(backend)
+    if available:
+        logger.debug("web_search exposed: search backend %r is available", backend)
+    else:
+        cfg = _load_web_config()
+        logger.warning(
+            "web_search HIDDEN from the model: resolved search backend %r is "
+            "unavailable (web.search_backend=%r, web.backend=%r). Configure a "
+            "search provider key (BRAVE_SEARCH_API_KEY / TAVILY_API_KEY / "
+            "EXA_API_KEY / ...) or ensure the 'ddgs' package is importable, or "
+            "point web.search_backend at an available provider.",
+            backend,
+            (cfg.get("search_backend") or ""),
+            (cfg.get("backend") or ""),
+        )
+    return available
+
+
+def check_web_extract_available() -> bool:
+    """Registry ``check_fn`` deciding whether ``web_extract`` is exposed.
+
+    Gates on the backend ``web_extract_tool`` would actually use
+    (``_get_extract_backend()``), which in this fork falls back to the bundled
+    zero-key ``http-fetch`` provider — so web_extract stays exposed on a
+    deployment with no paid extract key, matching its dispatch path.
+    """
+    backend = _get_extract_backend()
+    available = _is_backend_available(backend)
+    if available:
+        logger.debug("web_extract exposed: extract backend %r is available", backend)
+    else:
+        cfg = _load_web_config()
+        logger.warning(
+            "web_extract HIDDEN from the model: resolved extract backend %r is "
+            "unavailable (web.extract_backend=%r, web.backend=%r).",
+            backend,
+            (cfg.get("extract_backend") or ""),
+            (cfg.get("backend") or ""),
+        )
+    return available
+
+
 def check_auxiliary_model() -> bool:
     """Check if an auxiliary text model is available for LLM content processing."""
     client, _, _ = _resolve_web_extract_auxiliary()
@@ -1579,7 +1647,9 @@ registry.register(
     toolset="web",
     schema=WEB_SEARCH_SCHEMA,
     handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 5)),
-    check_fn=check_web_api_key,
+    # Fork: gate on the resolved *search* backend (honors web.search_backend),
+    # not the shared web.backend — see check_web_search_available above.
+    check_fn=check_web_search_available,
     requires_env=_web_requires_env(),
     emoji="🔍",
     max_result_size_chars=100_000,
@@ -1590,7 +1660,9 @@ registry.register(
     schema=WEB_EXTRACT_SCHEMA,
     handler=lambda args, **kw: web_extract_tool(
         args.get("urls", [])[:5] if isinstance(args.get("urls"), list) else [], "markdown"),
-    check_fn=check_web_api_key,
+    # Fork: gate on the resolved *extract* backend (honors web.extract_backend
+    # / the bundled http-fetch fallback) — see check_web_extract_available above.
+    check_fn=check_web_extract_available,
     requires_env=_web_requires_env(),
     is_async=True,
     emoji="📄",
