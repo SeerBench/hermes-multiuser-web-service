@@ -278,4 +278,4 @@ printf '%s%sHermes Multi-User Web Chat → %s%s\n' "$C_BOLD" "$C_GREEN" "$URL" "
 printf '%s%s%s\n' "$C_BOLD" "════════════════════════════════════════════════════════════════" "$C_RESET"
 printf '%sCtrl+C to stop.  Logs follow.%s\n\n' "$C_DIM" "$C_RESET"
 
-exec hermes gateway run
+exec hermes gateway run --replace
