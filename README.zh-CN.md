@@ -197,6 +197,8 @@ hermes gateway run
 
 **生产部署**:gateway 前面接 TLS(Caddy / nginx / Traefik),`cookie_secure: true`,然后才可以改 `host: 0.0.0.0` —— 跳过 TLS 直接监听公网,适配器会**拒绝启动**。完整 checklist 在 [`docs/user-guide/web-chat.md`](docs/user-guide/web-chat.md)。
 
+**更新已部署的服务**:单纯 `git pull` 不会刷新前端 —— SPA 产物(`gateway/web/_static/`)是 gitignore 的,必须重建。用 `./update-web.sh` 一键完成 拉取 → 重建 SPA → 重启 → 健康检查(systemd 托管则加 `--systemd <unit名>`)。表结构变更在启动时自动应用(`CREATE TABLE IF NOT EXISTS`),无需迁移步骤。详见 [更新已部署的服务](docs/user-guide/web-chat.md#updating-a-deployment)。
+
 ---
 
 ## HTTP 接口

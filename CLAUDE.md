@@ -247,6 +247,32 @@ npm run build      # outputs to ../gateway/web/_static/
 build at deploy time; the SPA placeholder is what users see if you
 forget to build.
 
+### Deploy / update a running server
+
+`update-web.sh` (repo root) is the one-command native-box updater:
+activate venv → `git pull --ff-only` from the SeerBench fork → rebuild
+the SPA → restart the gateway → health-check `/api/healthz`.  Use it (or
+follow it manually) instead of an ad-hoc `git pull`, because of two
+deploy facts that bite every time:
+
+1. **The SPA bundle is `.gitignore`'d**, so `git pull` never refreshes
+   the UI — you must rebuild `gateway/web/_static/`.  `startweb.sh` only
+   auto-builds when the bundle is *missing*, not when it's stale.
+2. **Schema changes are automatic; deps are not.**  New tables (e.g.
+   `conversation_flags` in `web_users.db`) come up via
+   `CREATE TABLE IF NOT EXISTS` on startup — no migration.  But
+   `pyproject.toml`/`uv.lock` changes need `uv pip install -e ".[web-chat]"`,
+   and `web-chat/package*.json` changes need `npm ci` before the build.
+   `update-web.sh` reinstalls npm deps only when those manifests changed,
+   and restores the repo-root `package.json` after npm's camofox
+   postinstall dirties it (a known `npm install` side effect in this repo).
+
+Restart strategy flags: default background relaunch (foreground / tmux /
+nohup), `--systemd <unit>` (systemd-managed — always use this if a unit
+owns the process), `--restart-cmd '<cmd>'`, or `--no-restart`.  Full
+operator walk-through: `docs/user-guide/web-chat.md` § "Updating a
+deployment".
+
 ---
 
 ## Setup

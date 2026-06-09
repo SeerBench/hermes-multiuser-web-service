@@ -198,6 +198,8 @@ Open `http://127.0.0.1:8643/` in a browser. The chat UI is already visible — t
 
 For production deployment: front the gateway with TLS (Caddy / nginx / Traefik), set `cookie_secure: true`, only then change `host: 0.0.0.0` — the adapter **refuses to start** if you skip TLS on a non-loopback bind. Full checklist in [`docs/user-guide/web-chat.md`](docs/user-guide/web-chat.md).
 
+**Updating a deployed box:** a plain `git pull` won't refresh the UI — the SPA bundle (`gateway/web/_static/`) is `.gitignore`'d and must be rebuilt. Run `./update-web.sh` to automate pull → rebuild SPA → restart → health-check (use `--systemd <unit>` if the gateway is systemd-managed). Schema changes apply automatically on startup (`CREATE TABLE IF NOT EXISTS`), so there's no migration step. See [Updating a deployment](docs/user-guide/web-chat.md#updating-a-deployment).
+
 ---
 
 ## HTTP surface
