@@ -179,3 +179,64 @@ def test_user_row_survives_close_and_reopen(tmp_path):
     assert user is not None
     assert user["user_id"] == "u_persist"
     store2.close()
+
+
+# ── conversation flags (pin / archive) ──────────────────────────────────────
+
+
+def test_conversation_flags_default_empty(store):
+    assert store.get_conversation_flags("u_x") == {}
+
+
+def test_set_conversation_flag_pin(store):
+    store.set_conversation_flag("u_x", "sess1", pinned=True)
+    flags = store.get_conversation_flags("u_x")
+    assert flags["sess1"] == {"pinned": True, "archived": False}
+
+
+def test_set_conversation_flag_partial_update_preserves_other(store):
+    store.set_conversation_flag("u_x", "sess1", pinned=True)
+    # Setting archived must not clobber the existing pinned flag.
+    store.set_conversation_flag("u_x", "sess1", archived=True)
+    assert store.get_conversation_flags("u_x")["sess1"] == {
+        "pinned": True, "archived": True,
+    }
+    # …and toggling archived back off keeps pinned.
+    store.set_conversation_flag("u_x", "sess1", archived=False)
+    assert store.get_conversation_flags("u_x")["sess1"] == {
+        "pinned": True, "archived": False,
+    }
+
+
+def test_conversation_flags_isolated_per_user(store):
+    store.set_conversation_flag("u_a", "sess1", pinned=True)
+    assert store.get_conversation_flags("u_b") == {}
+
+
+def test_clear_conversation_flags(store):
+    store.set_conversation_flag("u_x", "sess1", pinned=True)
+    store.clear_conversation_flags("u_x", "sess1")
+    assert store.get_conversation_flags("u_x") == {}
+
+
+def test_set_conversation_flag_noop_when_both_none(store):
+    store.set_conversation_flag("u_x", "sess1")  # nothing to change
+    assert store.get_conversation_flags("u_x") == {}
+
+
+def test_set_conversation_flag_requires_ids(store):
+    with pytest.raises(UserStoreError):
+        store.set_conversation_flag("", "sess1", pinned=True)
+
+
+def test_conversation_flags_survive_reopen(tmp_path):
+    db_path = tmp_path / "web_users.db"
+    store1 = UserStore(db_path)
+    store1.set_conversation_flag("u_p", "sess1", pinned=True, archived=True)
+    store1.close()
+
+    store2 = UserStore(db_path)
+    assert store2.get_conversation_flags("u_p")["sess1"] == {
+        "pinned": True, "archived": True,
+    }
+    store2.close()

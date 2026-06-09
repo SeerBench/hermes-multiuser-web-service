@@ -112,14 +112,22 @@ def test_confine_path_accepts_paths_inside_workspace(hermes_home):
 
 def test_confine_path_accepts_relative_paths_inside(hermes_home):
     with enter_user_context("u_alice") as ws:
-        # Path() is relative to CWD; we test that the resolution is
-        # actually anchored to ws/files when passing absolute paths.
-        # Relative inputs are tricky — they resolve from os.getcwd, which
-        # is not the workspace.  Sandboxed tools should always pass
-        # workspace-relative absolute paths.  The strict-absolute test
-        # below covers the security-critical case.
-        resolved = confine_path(ws / "files/nested/doc.txt")
-        assert ws in resolved.parents or resolved == ws / "files/nested/doc.txt"
+        # Relative inputs resolve against the *workspace*, not os.getcwd —
+        # the tool schemas advertise "relative to workspace" and the
+        # attachment convention (``uploads/<name>``) relies on it.
+        resolved = confine_path("uploads/data.csv")
+        assert resolved == (ws / "uploads" / "data.csv").resolve()
+        # Absolute paths under the workspace still pass through unchanged.
+        resolved_abs = confine_path(ws / "files/nested/doc.txt")
+        assert resolved_abs == (ws / "files" / "nested" / "doc.txt").resolve()
+
+
+def test_confine_path_rejects_relative_dotdot_escape(hermes_home):
+    with enter_user_context("u_alice"):
+        # A relative ``..`` escape resolves against the workspace and must
+        # still be rejected once it climbs out of it.
+        with pytest.raises(PathSandboxViolation):
+            confine_path("../u_bob/MEMORY.md")
 
 
 def test_confine_path_rejects_dotdot_escape(hermes_home):

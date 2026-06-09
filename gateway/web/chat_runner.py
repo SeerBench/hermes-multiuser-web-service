@@ -104,6 +104,12 @@ MUST NOT contain API keys, tokens, or any other user secret.  Never write a
 SKILL.md that embeds credentials; if a user pastes one in chat, ask them to
 rotate it and explain that secrets are configured server-side, not in chat.
 
+Attachments:  When the user uploads files, they are saved into this user's
+private workspace under ``uploads/`` and the chat message lists them by their
+workspace-relative path (e.g. ``uploads/data.csv``).  Read them on demand with
+``web_file_read`` (or search them with ``web_file_search``) using that relative
+path — do not ask the user to paste file contents into chat.
+
 Web search:  The ``web_search`` tool is already wired up.  If the operator
 has configured ``BRAVE_SEARCH_API_KEY`` server-side, ``web_search`` already
 routes through Brave's free index — no skill install is needed to "use
@@ -147,6 +153,8 @@ class WebChatAgentRunner:
         tool_start_callback: Optional[Callable] = None,
         tool_complete_callback: Optional[Callable] = None,
         reasoning_callback: Optional[Callable] = None,
+        status_callback: Optional[Callable] = None,
+        step_callback: Optional[Callable] = None,
         gateway_session_key: Optional[str] = None,
     ) -> Any:
         """Construct an AIAgent for a single web_chat request.
@@ -220,6 +228,8 @@ class WebChatAgentRunner:
             tool_start_callback=tool_start_callback,
             tool_complete_callback=tool_complete_callback,
             reasoning_callback=reasoning_callback,
+            status_callback=status_callback,
+            step_callback=step_callback,
             session_db=self._session_db,
             fallback_model=fallback_model,
             reasoning_config=reasoning_config,
@@ -242,6 +252,8 @@ class WebChatAgentRunner:
         tool_start_callback: Optional[Callable] = None,
         tool_complete_callback: Optional[Callable] = None,
         reasoning_callback: Optional[Callable] = None,
+        status_callback: Optional[Callable] = None,
+        step_callback: Optional[Callable] = None,
         agent_ref: Optional[list] = None,
         gateway_session_key: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int]]:
@@ -282,6 +294,8 @@ class WebChatAgentRunner:
                 tool_start_callback=tool_start_callback,
                 tool_complete_callback=tool_complete_callback,
                 reasoning_callback=reasoning_callback,
+                status_callback=status_callback,
+                step_callback=step_callback,
                 gateway_session_key=gateway_session_key,
             )
             if agent_ref is not None:

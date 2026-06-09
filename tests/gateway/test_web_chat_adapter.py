@@ -336,3 +336,39 @@ async def test_chat_successful_run_emits_done(adapter_app, monkeypatch):
     text = await resp.text()
     assert "event: done" in text
     assert "event: error" not in text
+
+
+@pytest.mark.asyncio
+async def test_chat_emits_status_step_activity_events(adapter_app, monkeypatch):
+    """The chat handler must forward the agent's status_callback /
+    step_callback / tool_progress_callback into SSE ``status`` / ``step`` /
+    ``activity`` events so the SPA can show what's happening behind the
+    scenes.  We fake a runner that fires those callbacks mid-turn.
+    """
+    await _patch_validator(monkeypatch, valid=True)
+    await adapter_app.client.post("/api/auth/login", json={"api_key": "sk-good"})
+
+    async def _run(**kw):
+        # Fire the activity callbacks the way the real agent would, then
+        # yield so the SSE writer drains them before the turn finishes.
+        kw["status_callback"]("warn", "🗜️ compressing context")
+        kw["step_callback"](2, [{"name": "web_search"}])
+        kw["tool_progress_callback"]("_thinking", "deciding what to do next")
+        await asyncio.sleep(0.02)
+        return (
+            {"final_response": "done", "session_id": "s_act"},
+            {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+
+    adapter_app.adapter._runner.run = _run
+
+    resp = await adapter_app.client.post("/api/chat", json={"message": "hi"})
+    assert resp.status == 200
+    text = await resp.text()
+    assert "event: status" in text
+    assert "compressing context" in text
+    assert "event: step" in text
+    assert "web_search" in text
+    assert "event: activity" in text
+    assert "deciding what to do next" in text
+    assert "event: done" in text

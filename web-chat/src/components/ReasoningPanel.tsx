@@ -29,7 +29,10 @@ export function ReasoningPanel({ text, streaming }: Props) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <span className="reasoning-toggle-title">{title}</span>
+        <span className="reasoning-toggle-title">
+          {streaming && <span className="reasoning-pulse" aria-hidden />}
+          {title}
+        </span>
         <span className="reasoning-toggle-action">{action}</span>
       </button>
       {open && (

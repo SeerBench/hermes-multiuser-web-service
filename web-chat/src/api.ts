@@ -25,6 +25,16 @@ export type ConversationSummary = {
   started_at: number
   last_active: number
   message_count: number
+  pinned?: boolean
+  archived?: boolean
+}
+
+// A file the user uploaded into their sandbox workspace.  ``path`` is the
+// workspace-relative path the agent reads via ``web_file_read``.
+export type UploadedFile = {
+  name: string
+  path: string
+  size: number
 }
 
 export type ChatMessage = {
@@ -50,6 +60,9 @@ export type ChatEvent =
       result_preview: string
     }
   | { type: 'reasoning'; text: string }
+  | { type: 'status'; kind: 'lifecycle' | 'warn'; message: string }
+  | { type: 'step'; step: number; tools: string[] }
+  | { type: 'activity'; kind: string; text: string }
   | { type: 'done'; session_id: string; usage: Record<string, number> }
   | { type: 'error'; message: string; code?: string }
 
@@ -116,10 +129,17 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // FormData bodies must NOT carry an explicit Content-Type — the browser
+  // sets the multipart boundary itself.  Only default to JSON otherwise.
+  const isFormData =
+    typeof FormData !== 'undefined' && init.body instanceof FormData
+  const baseHeaders: Record<string, string> = isFormData
+    ? {}
+    : { 'Content-Type': 'application/json' }
   const res = await fetch(path, {
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...baseHeaders,
       ...(init.headers ?? {}),
     },
     ...init,
@@ -156,12 +176,44 @@ export const auth = {
 // ── Conversations ───────────────────────────────────────────────────────
 
 export const conversations = {
-  list: (limit = 50, offset = 0) =>
-    request<{ conversations: ConversationSummary[] }>(
-      `/api/conversations?limit=${limit}&offset=${offset}`,
-    ).then((r) => r.conversations),
+  list: (opts: { limit?: number; offset?: number; archived?: boolean } = {}) => {
+    const { limit = 50, offset = 0, archived = false } = opts
+    const q = `limit=${limit}&offset=${offset}${archived ? '&archived=1' : ''}`
+    return request<{ conversations: ConversationSummary[] }>(
+      `/api/conversations?${q}`,
+    ).then((r) => r.conversations)
+  },
   get: (id: string) =>
     request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
+  rename: (id: string, title: string) =>
+    request<{ id: string; title: string }>(
+      `/api/conversations/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify({ title }) },
+    ),
+  remove: (id: string) =>
+    request<{ id: string; deleted: boolean }>(
+      `/api/conversations/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    ),
+  setFlags: (id: string, flags: { pinned?: boolean; archived?: boolean }) =>
+    request<{ id: string; pinned: boolean; archived: boolean }>(
+      `/api/conversations/${encodeURIComponent(id)}/flags`,
+      { method: 'POST', body: JSON.stringify(flags) },
+    ),
+}
+
+// ── Uploads ──────────────────────────────────────────────────────────────
+
+export const uploads = {
+  /** Upload files into the user's sandbox; returns workspace-relative paths. */
+  create: (files: File[]) => {
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f, f.name)
+    return request<{ files: UploadedFile[] }>(`/api/uploads`, {
+      method: 'POST',
+      body: fd,
+    }).then((r) => r.files)
+  },
 }
 
 // ── Commands ────────────────────────────────────────────────────────────
@@ -311,6 +363,24 @@ function parseSseFrame(frame: string): ChatEvent | null {
       }
     case 'reasoning':
       return { type: 'reasoning', text: String(data.text ?? '') }
+    case 'status':
+      return {
+        type: 'status',
+        kind: data.kind === 'warn' ? 'warn' : 'lifecycle',
+        message: String(data.message ?? ''),
+      }
+    case 'step':
+      return {
+        type: 'step',
+        step: Number(data.step ?? 0),
+        tools: Array.isArray(data.tools) ? data.tools.map(String) : [],
+      }
+    case 'activity':
+      return {
+        type: 'activity',
+        kind: String(data.kind ?? 'thinking'),
+        text: String(data.text ?? ''),
+      }
     case 'done':
       return {
         type: 'done',

@@ -86,6 +86,18 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_web_sessions_user
     ON web_sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS conversation_flags (
+    user_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (user_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_convflags_user
+    ON conversation_flags(user_id);
 """
 
 
@@ -316,6 +328,80 @@ class UserStore:
             return cur.rowcount
 
         return self._execute_write(_do)
+
+    # ── Conversation flags (pin / archive) ─────────────────────────────
+    #
+    # Per-user, web-UI-only metadata for the *shared* SessionDB transcripts.
+    # We deliberately keep these flags here in the fork-owned ``web_users.db``
+    # rather than adding columns to the upstream ``sessions`` table: that
+    # table is shared infrastructure across ~25 platforms and editing its
+    # schema would create a permanent upstream merge-conflict surface (the
+    # fork's Strategy 2).  The list endpoint joins these flags in at read
+    # time; ``list_sessions_rich`` itself stays untouched.
+
+    def set_conversation_flag(
+        self,
+        user_id: str,
+        session_id: str,
+        *,
+        pinned: Optional[bool] = None,
+        archived: Optional[bool] = None,
+    ) -> None:
+        """Upsert pin/archive state for one conversation.
+
+        Only the fields that are passed (non-None) are changed; the other
+        is preserved.  Idempotent.
+        """
+        if not user_id or not session_id:
+            raise UserStoreError("user_id and session_id are required")
+        if pinned is None and archived is None:
+            return
+        now = time.time()
+        p = None if pinned is None else (1 if pinned else 0)
+        a = None if archived is None else (1 if archived else 0)
+
+        def _do(c):
+            c.execute(
+                """INSERT INTO conversation_flags
+                       (user_id, session_id, pinned, archived, updated_at)
+                   VALUES (?, ?, COALESCE(?, 0), COALESCE(?, 0), ?)
+                   ON CONFLICT(user_id, session_id) DO UPDATE SET
+                       pinned    = COALESCE(?, pinned),
+                       archived  = COALESCE(?, archived),
+                       updated_at = ?""",
+                (user_id, session_id, p, a, now, p, a, now),
+            )
+
+        self._execute_write(_do)
+
+    def get_conversation_flags(self, user_id: str) -> Dict[str, Dict[str, bool]]:
+        """Return ``{session_id: {"pinned": bool, "archived": bool}}`` for a user."""
+        if not user_id:
+            return {}
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT session_id, pinned, archived
+                   FROM conversation_flags WHERE user_id = ?""",
+                (user_id,),
+            ).fetchall()
+        return {
+            row["session_id"]: {
+                "pinned": bool(row["pinned"]),
+                "archived": bool(row["archived"]),
+            }
+            for row in rows
+        }
+
+    def clear_conversation_flags(self, user_id: str, session_id: str) -> None:
+        """Drop any flag row for a conversation (called when it's deleted)."""
+        if not user_id or not session_id:
+            return
+        self._execute_write(
+            lambda c: c.execute(
+                "DELETE FROM conversation_flags WHERE user_id = ? AND session_id = ?",
+                (user_id, session_id),
+            )
+        )
 
     # ── Write helper ───────────────────────────────────────────────────
 

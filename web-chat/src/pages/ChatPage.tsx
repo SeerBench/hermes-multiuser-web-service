@@ -6,13 +6,22 @@ import {
   commands as commandsApi,
   conversations as convosApi,
   streamChat,
+  uploads as uploadsApi,
 } from '../api'
 import type {
   ChatMessage,
   CommandSpec,
   ConversationSummary,
   ServerMessage,
+  UploadedFile,
 } from '../api'
+import { ActivityLog } from '../components/ActivityLog'
+import type { ActivityItem } from '../components/ActivityLog'
+import {
+  AttachmentList,
+  PendingAttachments,
+} from '../components/AttachmentChips'
+import type { PendingAttachment } from '../components/AttachmentChips'
 import { ConversationList } from '../components/ConversationList'
 import { KeyPromptModal } from '../components/KeyPromptModal'
 import { MarkdownContent } from '../components/MarkdownContent'
@@ -20,8 +29,9 @@ import { MessageActions } from '../components/MessageActions'
 import { ReasoningPanel } from '../components/ReasoningPanel'
 import { SlashCommandPopover } from '../components/SlashCommandPopover'
 import { ToolEvent } from '../components/ToolEvent'
+import { formatBytes } from '../format'
 import { useLocale, useT } from '../i18n'
-import type { Locale } from '../i18n'
+import type { Locale, Translator } from '../i18n'
 
 // ── Domain types ──────────────────────────────────────────────────────────
 
@@ -51,6 +61,18 @@ type Turn = {
   status: 'streaming' | 'done' | 'error'
   errorMessage?: string
   usage?: Record<string, number>
+  // Behind-the-scenes activity feed (assistant turns): lifecycle status,
+  // loop-iteration steps, pre-tool "thinking" hints.
+  activity: ActivityItem[]
+  // Files attached to a user turn (workspace-relative paths the agent reads).
+  attachments?: UploadedFile[]
+}
+
+// Build the reference block appended to a message when files are attached,
+// so the agent knows to read them with web_file_read.
+function attachmentNote(t: Translator, files: UploadedFile[]): string {
+  const lines = files.map((f) => `- ${f.path} (${formatBytes(f.size)})`)
+  return `\n\n${t('attach.inject.header')}\n${lines.join('\n')}`
 }
 
 type KeyModalState =
@@ -103,6 +125,7 @@ function messagesToTurns(messages: ServerMessage[]): Turn[] {
         role: 'user',
         segments: [{ kind: 'text', text: m.content ?? '' }],
         status: 'done',
+        activity: [],
       })
       continue
     }
@@ -118,6 +141,7 @@ function messagesToTurns(messages: ServerMessage[]): Turn[] {
         role: 'assistant',
         segments: [],
         status: 'done',
+        activity: [],
       }
     }
     if (m.reasoning) {
@@ -173,8 +197,11 @@ export function ChatPage() {
   const [keyModal, setKeyModal] = useState<KeyModalState>({ open: false })
   const [commandCatalog, setCommandCatalog] = useState<CommandSpec[]>([])
   const [historyBanner, setHistoryBanner] = useState<string | null>(null)
+  const [archived, setArchived] = useState<ConversationSummary[]>([])
+  const [pending, setPending] = useState<PendingAttachment[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Probe auth + initial data.
   useEffect(() => {
@@ -258,22 +285,134 @@ export function ChatPage() {
     [t],
   )
 
+  const refreshConvos = useCallback(() => {
+    void convosApi
+      .list()
+      .then(setConvos)
+      .catch(() => undefined)
+  }, [])
+
+  const loadArchived = useCallback(() => {
+    void convosApi
+      .list({ archived: true })
+      .then(setArchived)
+      .catch(() => setArchived([]))
+  }, [])
+
+  const handleRename = useCallback(
+    async (id: string, title: string) => {
+      try {
+        await convosApi.rename(id, title)
+      } catch {
+        // Non-fatal — leave the old title in place.
+      }
+      refreshConvos()
+      loadArchived()
+    },
+    [refreshConvos, loadArchived],
+  )
+
+  const handleDelete = useCallback(
+    async (id: string) => {
+      try {
+        await convosApi.remove(id)
+      } catch {
+        // Non-fatal.
+      }
+      if (id === sessionId) {
+        abortRef.current?.abort()
+        setSessionId(null)
+        setTurns([])
+        setHistoryBanner(null)
+      }
+      refreshConvos()
+      loadArchived()
+    },
+    [sessionId, refreshConvos, loadArchived],
+  )
+
+  const handleSetFlags = useCallback(
+    async (id: string, flags: { pinned?: boolean; archived?: boolean }) => {
+      try {
+        await convosApi.setFlags(id, flags)
+      } catch {
+        // Non-fatal.
+      }
+      refreshConvos()
+      loadArchived()
+    },
+    [refreshConvos, loadArchived],
+  )
+
+  // ── Attachments ────────────────────────────────────────────────────────
+
+  const removePending = useCallback((id: string) => {
+    setPending((prev) => prev.filter((p) => p.id !== id))
+  }, [])
+
+  const onPickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const picked = Array.from(files)
+    const entries: PendingAttachment[] = picked.map((f) => ({
+      id: newTurnId(),
+      name: f.name,
+      size: f.size,
+      status: 'uploading',
+    }))
+    setPending((prev) => [...prev, ...entries])
+    try {
+      const saved = await uploadsApi.create(picked)
+      // Match returned files back to the pending entries by position.
+      setPending((prev) =>
+        prev.map((p) => {
+          const idx = entries.findIndex((e) => e.id === p.id)
+          if (idx < 0 || idx >= saved.length) return p
+          const s = saved[idx]
+          return { ...p, status: 'done', path: s.path, name: s.name, size: s.size }
+        }),
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const ids = new Set(entries.map((e) => e.id))
+      setPending((prev) =>
+        prev.map((p) =>
+          ids.has(p.id) ? { ...p, status: 'error', error: msg } : p,
+        ),
+      )
+    }
+  }, [])
+
   const runMessage = useCallback(
-    async (message: string, historyOverride?: ChatMessage[]) => {
+    async (
+      message: string,
+      historyOverride?: ChatMessage[],
+      attachments?: UploadedFile[],
+    ) => {
       const userTurn: Turn = {
         id: newTurnId(),
         role: 'user',
         segments: [{ kind: 'text', text: message }],
         status: 'done',
+        activity: [],
+        attachments: attachments && attachments.length ? attachments : undefined,
       }
       const assistantTurn: Turn = {
         id: newTurnId(),
         role: 'assistant',
         segments: [],
         status: 'streaming',
+        activity: [],
       }
       setTurns((prev) => [...prev, userTurn, assistantTurn])
       setStreaming(true)
+
+      // Append the attachment reference block so the agent reads the
+      // uploaded files via web_file_read; the visible user turn keeps the
+      // clean message and shows attachments as chips instead.
+      const wireMessage =
+        attachments && attachments.length
+          ? message + attachmentNote(t, attachments)
+          : message
 
       const history: ChatMessage[] =
         historyOverride ??
@@ -291,7 +430,7 @@ export function ChatPage() {
       try {
         for await (const ev of streamChat(
           {
-            message,
+            message: wireMessage,
             session_id: sessionId ?? undefined,
             conversation_history: history,
           },
@@ -305,6 +444,28 @@ export function ChatPage() {
                 ...turn,
                 reasoning: (turn.reasoning ?? '') + ev.text,
               })),
+            )
+          } else if (ev.type === 'status') {
+            setTurns((prev) =>
+              pushActivity(prev, {
+                kind: 'status',
+                text: ev.message,
+                tone: ev.kind === 'warn' ? 'warn' : undefined,
+                ts: Date.now(),
+              }),
+            )
+          } else if (ev.type === 'step') {
+            setTurns((prev) =>
+              pushActivity(prev, {
+                kind: 'step',
+                step: ev.step,
+                tools: ev.tools,
+                ts: Date.now(),
+              }),
+            )
+          } else if (ev.type === 'activity') {
+            setTurns((prev) =>
+              pushActivity(prev, { kind: 'thinking', text: ev.text, ts: Date.now() }),
             )
           } else if (ev.type === 'tool_start') {
             const newSeg: ToolSegment = {
@@ -418,6 +579,7 @@ export function ChatPage() {
         role: 'assistant',
         segments: [{ kind: 'system', text, tone }],
         status: 'done',
+        activity: [],
       },
     ])
   }, [])
@@ -546,19 +708,29 @@ export function ChatPage() {
     [commandCatalog, t, runClientCommand, runServerCommand, appendSystemSegment],
   )
 
+  const uploading = pending.some((p) => p.status === 'uploading')
+
   const submit = useCallback(
     async (e?: FormEvent) => {
       e?.preventDefault()
       const message = input.trim()
-      if (!message || streaming) return
-      setInput('')
-      if (message.startsWith('/') && !message.includes('\n')) {
+      if (streaming || uploading) return
+      const ready: UploadedFile[] = pending
+        .filter((p) => p.status === 'done' && p.path)
+        .map((p) => ({ name: p.name, path: p.path as string, size: p.size }))
+      // Need either text or at least one uploaded attachment to send.
+      if (!message && ready.length === 0) return
+      // Slash commands never carry attachments.
+      if (message.startsWith('/') && !message.includes('\n') && ready.length === 0) {
+        setInput('')
         await dispatchSlash(message)
         return
       }
-      await runMessage(message)
+      setInput('')
+      setPending([])
+      await runMessage(message, undefined, ready.length ? ready : undefined)
     },
-    [input, streaming, runMessage, dispatchSlash],
+    [input, streaming, uploading, pending, runMessage, dispatchSlash],
   )
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -643,8 +815,13 @@ export function ChatPage() {
         </button>
         <ConversationList
           conversations={convos}
+          archived={archived}
           activeId={sessionId}
           onSelect={(id) => void switchConversation(id)}
+          onRename={(id, title) => void handleRename(id, title)}
+          onDelete={(id) => void handleDelete(id)}
+          onSetFlags={(id, flags) => void handleSetFlags(id, flags)}
+          onLoadArchived={loadArchived}
         />
       </aside>
 
@@ -671,6 +848,12 @@ export function ChatPage() {
                     </span>
                   )}
                 </header>
+                {turn.role === 'assistant' && (
+                  <ActivityLog
+                    items={turn.activity}
+                    streaming={turn.status === 'streaming'}
+                  />
+                )}
                 {turn.reasoning && (
                   <ReasoningPanel
                     text={turn.reasoning}
@@ -717,6 +900,9 @@ export function ChatPage() {
                     </div>
                   )
                 })}
+                {turn.attachments && turn.attachments.length > 0 && (
+                  <AttachmentList items={turn.attachments} />
+                )}
                 {turn.status === 'streaming' && turn.segments.length === 0 && (
                   <div className="turn-text">
                     <em>…</em>
@@ -756,6 +942,7 @@ export function ChatPage() {
                 onClose={() => setInput('')}
               />
             )}
+            <PendingAttachments items={pending} onRemove={removePending} />
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -766,6 +953,27 @@ export function ChatPage() {
             />
           </div>
           <div className="composer-actions">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                void onPickFiles(e.target.files)
+                // Reset so picking the same file again re-triggers onChange.
+                e.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              className="composer-attach"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming}
+              title={t('attach.button')}
+              aria-label={t('attach.button')}
+            >
+              📎
+            </button>
             {streaming ? (
               <button type="button" onClick={stop} className="composer-stop">
                 {t('composer.stop')}
@@ -773,7 +981,11 @@ export function ChatPage() {
             ) : (
               <button
                 type="submit"
-                disabled={!input.trim()}
+                disabled={
+                  (!input.trim() &&
+                    !pending.some((p) => p.status === 'done')) ||
+                  uploading
+                }
                 className="composer-send"
               >
                 {t('composer.send')}
@@ -799,6 +1011,13 @@ function updateAssistant(prev: Turn[], fn: (t: Turn) => Turn): Turn[] {
   const last = prev[prev.length - 1]
   if (last.role !== 'assistant') return prev
   return [...prev.slice(0, -1), fn(last)]
+}
+
+function pushActivity(prev: Turn[], item: ActivityItem): Turn[] {
+  return updateAssistant(prev, (turn) => ({
+    ...turn,
+    activity: [...turn.activity, item],
+  }))
 }
 
 function appendToken(turn: Turn, text: string): Turn {

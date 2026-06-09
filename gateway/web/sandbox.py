@@ -108,7 +108,17 @@ def confine_path(path: "str | Path") -> Path:
             "The web_chat platform must wrap requests in enter_user_context()."
         )
     ws_resolved = Path(ws).resolve(strict=False)
-    target = Path(path).expanduser().resolve(strict=False)
+    # Relative paths resolve against the *workspace*, not the process CWD.
+    # The tool schemas advertise "relative to workspace" and the agent (and
+    # the attachment-reference convention, ``uploads/<name>``) rely on that;
+    # resolving against CWD would silently push every relative path outside
+    # the sandbox and reject it.  Absolute paths are confined as-is, so this
+    # neither weakens the ``..`` / sibling-workspace guards nor changes the
+    # behaviour of the existing absolute-path callers.
+    requested = Path(path).expanduser()
+    if not requested.is_absolute():
+        requested = ws_resolved / requested
+    target = requested.resolve(strict=False)
     try:
         target.relative_to(ws_resolved)
     except ValueError:

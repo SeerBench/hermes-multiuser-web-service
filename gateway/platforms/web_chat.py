@@ -47,6 +47,15 @@ following ``event:``-tagged frames, each with a JSON ``data:`` body:
 - ``tool_start`` — a tool call began
 - ``tool_end``   — a tool call finished
 - ``reasoning``  — model reasoning text (when the provider exposes it)
+- ``status``     — agent lifecycle / warning message (context compression,
+                   rate-limit retries, fallback-provider switches, …).
+                   Payload: ``{"kind": "lifecycle"|"warn", "message": str}``.
+- ``step``       — a new agent loop iteration began.  Payload:
+                   ``{"step": int, "tools": [str, …]}`` (tools called in the
+                   *previous* iteration).
+- ``activity``   — a transient "what is the agent about to do" hint (the
+                   single-line intent the model emits before a tool call).
+                   Payload: ``{"kind": "thinking", "text": str}``.
 - ``done``       — final summary, includes ``session_id`` + ``usage``
 - ``error``      — fatal error before ``done``
 
@@ -122,6 +131,16 @@ _LIST_CONVERSATIONS_MAX_LIMIT = 200
 # ``GET /api/conversations/:id``.
 _SSE_PAYLOAD_TRUNCATE_BYTES = 4096
 
+# Attachment upload limits.  Files land in the user's sandbox at
+# ``<workspace>/uploads/`` and are read on demand by the agent via
+# ``web_file_read``.  Per-file cap matches the request-body cap so a
+# single multipart request can't exceed what aiohttp already accepts;
+# the count cap bounds fan-out per message.
+_UPLOAD_DIR_NAME = "uploads"
+_UPLOAD_MAX_FILE_BYTES = MAX_REQUEST_BYTES  # 10 MB per file
+_UPLOAD_MAX_FILES = 10
+_UPLOAD_MAX_FILENAME_LEN = 120
+
 
 def _truncate_for_sse(text: str, limit: int = _SSE_PAYLOAD_TRUNCATE_BYTES) -> str:
     """Trim a payload string to ``limit`` chars, appending an ellipsis marker."""
@@ -130,6 +149,33 @@ def _truncate_for_sse(text: str, limit: int = _SSE_PAYLOAD_TRUNCATE_BYTES) -> st
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n…[truncated {len(text) - limit} chars]"
+
+
+def _sanitize_upload_name(raw: str) -> str:
+    """Reduce a client-supplied filename to a safe basename.
+
+    Strips any directory components (``/``, ``\\``), drops leading dots so a
+    file can't masquerade as a dotfile or ``..``, keeps only a conservative
+    character set, and bounds the length.  The result is always a non-empty
+    basename; ``confine_path`` is still the authoritative sandbox guard, this
+    is just defence-in-depth + a tidy name.
+    """
+    import re
+
+    base = str(raw or "").replace("\\", "/").split("/")[-1].strip()
+    base = base.lstrip(".") or "file"
+    # Allow letters, digits, dash, underscore, dot, space; collapse the rest.
+    base = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)
+    base = base.strip(" .") or "file"
+    if len(base) > _UPLOAD_MAX_FILENAME_LEN:
+        # Preserve the extension when truncating an over-long name.
+        stem, dot, ext = base.rpartition(".")
+        if dot and len(ext) <= 16:
+            keep = _UPLOAD_MAX_FILENAME_LEN - len(ext) - 1
+            base = (stem[:keep] if keep > 0 else stem[:1]) + "." + ext
+        else:
+            base = base[:_UPLOAD_MAX_FILENAME_LEN]
+    return base
 
 
 def check_web_chat_requirements() -> bool:
@@ -403,8 +449,21 @@ class WebChatAdapter(BasePlatformAdapter):
             "/api/conversations/{conversation_id}",
             self._handle_get_conversation,
         )
+        app.router.add_patch(
+            "/api/conversations/{conversation_id}",
+            self._handle_rename_conversation,
+        )
+        app.router.add_delete(
+            "/api/conversations/{conversation_id}",
+            self._handle_delete_conversation,
+        )
+        app.router.add_post(
+            "/api/conversations/{conversation_id}/flags",
+            self._handle_set_conversation_flags,
+        )
         app.router.add_get("/api/commands", self._handle_list_commands)
         app.router.add_post("/api/command", self._handle_run_command)
+        app.router.add_post("/api/uploads", self._handle_upload)
         app.router.add_post("/api/chat", self._handle_chat)
         # SPA shell + static assets.
         from pathlib import Path as _Path
@@ -643,6 +702,8 @@ class WebChatAdapter(BasePlatformAdapter):
             offset = max(0, int(request.query.get("offset", 0)))
         except (TypeError, ValueError):
             offset = 0
+        # ``?archived=1`` returns the archived bucket; default hides it.
+        want_archived = request.query.get("archived", "0") in ("1", "true", "yes")
 
         db = self._ensure_session_db()
         if db is None:
@@ -658,17 +719,36 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.error("[%s] list_sessions_rich failed: %s", self.name, exc, exc_info=True)
             return self._json_error("conversation list unavailable", status=500)
 
-        projected = [
-            {
-                "id": r.get("id"),
+        # Join in per-user pin/archive flags (fork-owned UserStore — see
+        # gateway/web/users.py).  Filtering + pinned-first ordering happen
+        # here so the upstream ``list_sessions_rich`` stays untouched.
+        try:
+            flags = self._user_store.get_conversation_flags(user_id)
+        except Exception:
+            logger.debug("[%s] get_conversation_flags failed", self.name, exc_info=True)
+            flags = {}
+
+        projected = []
+        for r in rows:
+            sid = r.get("id")
+            f = flags.get(sid, {})
+            archived = bool(f.get("archived"))
+            if archived != want_archived:
+                continue
+            projected.append({
+                "id": sid,
                 "title": r.get("title"),
                 "preview": r.get("preview", ""),
                 "started_at": r.get("started_at"),
                 "last_active": r.get("last_active"),
                 "message_count": r.get("message_count", 0),
-            }
-            for r in rows
-        ]
+                "pinned": bool(f.get("pinned")),
+                "archived": archived,
+            })
+
+        # Pinned first, then by recency (rows already arrive last-active-desc,
+        # so a stable sort on the pinned flag preserves that secondary order).
+        projected.sort(key=lambda c: 0 if c["pinned"] else 1)
         return web.json_response({"conversations": projected})
 
     async def _handle_get_conversation(self, request: "web.Request") -> "web.Response":
@@ -735,6 +815,116 @@ class WebChatAdapter(BasePlatformAdapter):
             "messages": messages,
         })
 
+    def _own_session_or_error(self, db, cid, user_id):
+        """Fetch a session and verify ownership.
+
+        Returns ``(session, None)`` on success or ``(None, error_response)``.
+        Mirrors the not-found masking in ``_handle_get_conversation``: a
+        session owned by someone else is reported as 404 so we never leak
+        the existence of another user's session id.
+        """
+        try:
+            session = db.get_session(cid)
+        except Exception as exc:
+            logger.error("[%s] get_session failed for %s: %s", self.name, cid, exc)
+            return None, self._json_error("conversation unavailable", status=500)
+        if not session or session.get("user_id") != user_id:
+            return None, self._json_error("not found", status=404, code="not_found")
+        return session, None
+
+    async def _handle_rename_conversation(self, request: "web.Request") -> "web.Response":
+        """``PATCH /api/conversations/{id}`` — set a conversation title."""
+        user_id = get_request_user_id(request)
+        cid = (request.match_info.get("conversation_id") or "").strip()
+        if not cid:
+            return self._json_error("conversation id required")
+        try:
+            body = await request.json()
+        except Exception:
+            return self._json_error("invalid JSON")
+        title = (body.get("title") or "").strip()
+        if not title:
+            return self._json_error("title required", code="missing_title")
+        if len(title) > 200:
+            title = title[:200]
+
+        db = self._ensure_session_db()
+        if db is None:
+            return self._json_error("database unavailable", status=503, code="db_unavailable")
+        _session, err = self._own_session_or_error(db, cid, user_id)
+        if err is not None:
+            return err
+        try:
+            ok = db.set_session_title(cid, title)
+        except Exception as exc:
+            logger.error("[%s] set_session_title failed for %s: %s", self.name, cid, exc)
+            return self._json_error("rename failed", status=500)
+        if not ok:
+            return self._json_error("rename failed", status=500)
+        return web.json_response({"id": cid, "title": title})
+
+    async def _handle_delete_conversation(self, request: "web.Request") -> "web.Response":
+        """``DELETE /api/conversations/{id}`` — delete a conversation."""
+        user_id = get_request_user_id(request)
+        cid = (request.match_info.get("conversation_id") or "").strip()
+        if not cid:
+            return self._json_error("conversation id required")
+
+        db = self._ensure_session_db()
+        if db is None:
+            return self._json_error("database unavailable", status=503, code="db_unavailable")
+        _session, err = self._own_session_or_error(db, cid, user_id)
+        if err is not None:
+            return err
+        try:
+            deleted = db.delete_session(cid)
+        except Exception as exc:
+            logger.error("[%s] delete_session failed for %s: %s", self.name, cid, exc)
+            return self._json_error("delete failed", status=500)
+        # Best-effort flag cleanup — the conversation is gone either way.
+        try:
+            self._user_store.clear_conversation_flags(user_id, cid)
+        except Exception:
+            logger.debug("[%s] clear_conversation_flags failed", self.name, exc_info=True)
+        return web.json_response({"id": cid, "deleted": bool(deleted)})
+
+    async def _handle_set_conversation_flags(self, request: "web.Request") -> "web.Response":
+        """``POST /api/conversations/{id}/flags`` — set pin / archive state."""
+        user_id = get_request_user_id(request)
+        cid = (request.match_info.get("conversation_id") or "").strip()
+        if not cid:
+            return self._json_error("conversation id required")
+        try:
+            body = await request.json()
+        except Exception:
+            return self._json_error("invalid JSON")
+        pinned = body.get("pinned")
+        archived = body.get("archived")
+        if pinned is None and archived is None:
+            return self._json_error("nothing to update", code="empty_flags")
+
+        db = self._ensure_session_db()
+        if db is None:
+            return self._json_error("database unavailable", status=503, code="db_unavailable")
+        _session, err = self._own_session_or_error(db, cid, user_id)
+        if err is not None:
+            return err
+        try:
+            self._user_store.set_conversation_flag(
+                user_id, cid,
+                pinned=None if pinned is None else bool(pinned),
+                archived=None if archived is None else bool(archived),
+            )
+        except Exception as exc:
+            logger.error("[%s] set_conversation_flag failed for %s: %s", self.name, cid, exc)
+            return self._json_error("flag update failed", status=500)
+        flags = self._user_store.get_conversation_flags(user_id).get(cid, {})
+        return web.json_response({
+            "id": cid,
+            "pinned": bool(flags.get("pinned")),
+            "archived": bool(flags.get("archived")),
+        })
+
     # ── /api/commands & /api/command ──────────────────────────────────
 
     async def _handle_list_commands(self, request: "web.Request") -> "web.Response":
@@ -796,6 +986,131 @@ class WebChatAdapter(BasePlatformAdapter):
         if result.side_effects:
             payload["side_effects"] = result.side_effects
         return web.json_response(payload, status=result.status)
+
+    # ── /api/uploads ───────────────────────────────────────────────────
+
+    async def _handle_upload(self, request: "web.Request") -> "web.Response":
+        """Accept multipart file uploads into the user's sandbox.
+
+        Each file is streamed to ``<workspace>/uploads/<safe_name>`` inside
+        ``enter_user_context`` so :func:`confine_path` guarantees it can't
+        escape the per-user workspace.  The agent reads them on demand via
+        ``web_file_read("uploads/<name>")`` — the SPA injects those
+        references into the chat message (see the web-chat composer).
+
+        Returns ``{"files": [{"name", "path", "size"}]}`` where ``path`` is
+        the workspace-relative path the agent should read.  We deliberately
+        never return the absolute host path.
+        """
+        user_id = get_request_user_id(request)
+        if not user_id:
+            return self._json_error("unauthorized", status=401, code="unauthorized")
+
+        if not request.content_type.startswith("multipart/"):
+            return self._json_error("expected multipart/form-data", status=400)
+
+        from gateway.web.sandbox import (
+            PathSandboxViolation,
+            confine_path,
+            get_user_workspace,
+        )
+
+        saved: List[Dict[str, Any]] = []
+        with enter_user_context(user_id):
+            ws = get_user_workspace()
+            if ws is None:
+                return self._json_error("internal sandbox error", status=500)
+            uploads_dir = ws / _UPLOAD_DIR_NAME
+            try:
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                logger.error("[%s] upload mkdir failed: %s", self.name, exc)
+                return self._json_error("could not prepare upload dir", status=500)
+
+            try:
+                reader = await request.multipart()
+            except Exception:
+                return self._json_error("invalid multipart body", status=400)
+
+            while True:
+                try:
+                    part = await reader.next()
+                except Exception:
+                    return self._json_error("malformed multipart stream", status=400)
+                if part is None:
+                    break
+                if part.filename is None:
+                    # Non-file form field — skip.
+                    continue
+                if len(saved) >= _UPLOAD_MAX_FILES:
+                    return self._json_error(
+                        f"too many files (max {_UPLOAD_MAX_FILES})",
+                        status=400, code="too_many_files",
+                    )
+
+                safe_name = _sanitize_upload_name(part.filename)
+                # Resolve + confine, then de-dupe against existing names so a
+                # second upload of "data.csv" doesn't clobber the first.
+                try:
+                    dest = self._dedupe_upload_path(
+                        confine_path(uploads_dir / safe_name), uploads_dir,
+                    )
+                except PathSandboxViolation:
+                    return self._json_error("invalid filename", status=400)
+
+                size = 0
+                too_big = False
+                try:
+                    with dest.open("wb") as fh:
+                        while True:
+                            chunk = await part.read_chunk()
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > _UPLOAD_MAX_FILE_BYTES:
+                                too_big = True
+                                break
+                            fh.write(chunk)
+                except Exception as exc:
+                    logger.error("[%s] upload write failed: %s", self.name, exc)
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return self._json_error("upload write failed", status=500)
+
+                if too_big:
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return self._json_error(
+                        f"file too large (max {_UPLOAD_MAX_FILE_BYTES} bytes)",
+                        status=413, code="file_too_large",
+                    )
+
+                saved.append({
+                    "name": dest.name,
+                    "path": f"{_UPLOAD_DIR_NAME}/{dest.name}",
+                    "size": size,
+                })
+
+        return web.json_response({"files": saved})
+
+    @staticmethod
+    def _dedupe_upload_path(dest: "Any", uploads_dir: "Any"):
+        """If ``dest`` exists, append ``-<n>`` before the extension."""
+        from pathlib import Path as _Path
+        dest = _Path(dest)
+        if not dest.exists():
+            return dest
+        stem, suffix = dest.stem, dest.suffix
+        for n in range(1, 1000):
+            candidate = uploads_dir / f"{stem}-{n}{suffix}"
+            if not candidate.exists():
+                return candidate
+        # Pathological fallback — unique-enough suffix.
+        return uploads_dir / f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
 
     # ── /api/chat ──────────────────────────────────────────────────────
 
@@ -921,6 +1236,53 @@ class WebChatAdapter(BasePlatformAdapter):
             if text:
                 _push("reasoning", {"text": text})
 
+        def status_cb(kind, message, *_, **_kwargs) -> None:
+            # AIAgent fires ``status_callback("lifecycle"|"warn", message)``
+            # from ``_emit_status`` / ``_emit_warning`` — context
+            # compression, rate-limit retries, fallback-provider switches,
+            # 413 payload compaction, "Nous unavailable", etc.  These are
+            # the richest signal for "what is hermes doing behind the
+            # scenes"; the SPA renders them as an activity timeline.
+            if message:
+                _push("status", {
+                    "kind": str(kind) if kind else "lifecycle",
+                    "message": _truncate_for_sse(str(message), 280),
+                })
+
+        def step_cb(api_call_count, prev_tools=None, *_, **_kwargs) -> None:
+            # AIAgent fires ``step_callback(api_call_count, prev_tools)`` once
+            # per loop iteration (``agent/conversation_loop.py``).  We surface
+            # just the iteration number + the names of the tools run in the
+            # previous step so the SPA can show "step N · ran web_search".
+            names: List[str] = []
+            try:
+                for tc in prev_tools or []:
+                    if isinstance(tc, dict) and tc.get("name"):
+                        names.append(str(tc["name"]))
+            except Exception:
+                pass
+            try:
+                step_no = int(api_call_count)
+            except (TypeError, ValueError):
+                step_no = 0
+            _push("step", {"step": step_no, "tools": names})
+
+        def tool_progress_cb(event, *rest, **_kwargs) -> None:
+            # AIAgent fires ``tool_progress_callback(event, …)`` with a few
+            # shapes (see ``agent/tool_executor.py`` /
+            # ``agent/conversation_loop.py``).  ``tool.started`` duplicates
+            # ``tool_start`` and ``reasoning.available`` duplicates the
+            # reasoning stream, so we surface only ``_thinking`` — the
+            # concise single-line intent the model emits before acting.
+            if event != "_thinking" or not rest:
+                return
+            text = str(rest[0]).strip()
+            if text:
+                _push("activity", {
+                    "kind": "thinking",
+                    "text": _truncate_for_sse(text, 280),
+                })
+
         agent_ref: List[Any] = [None]
 
         async with self._agent_semaphore:
@@ -944,6 +1306,9 @@ class WebChatAdapter(BasePlatformAdapter):
                         tool_start_callback=tool_start_cb,
                         tool_complete_callback=tool_complete_cb,
                         reasoning_callback=reasoning_cb,
+                        status_callback=status_cb,
+                        step_callback=step_cb,
+                        tool_progress_callback=tool_progress_cb,
                         agent_ref=agent_ref,
                         gateway_session_key=gateway_session_key,
                     )

@@ -149,6 +149,8 @@ def test_create_agent_wires_callbacks(monkeypatch):
     tp_cb = MagicMock(name="tool_progress")
     ts_cb = MagicMock(name="tool_start")
     tc_cb = MagicMock(name="tool_complete")
+    status_cb = MagicMock(name="status")
+    step_cb = MagicMock(name="step")
 
     WebChatAgentRunner()._create_agent(
         user_id="u_alice",
@@ -156,12 +158,16 @@ def test_create_agent_wires_callbacks(monkeypatch):
         tool_progress_callback=tp_cb,
         tool_start_callback=ts_cb,
         tool_complete_callback=tc_cb,
+        status_callback=status_cb,
+        step_callback=step_cb,
     )
 
     assert captured["stream_delta_callback"] is stream_cb
     assert captured["tool_progress_callback"] is tp_cb
     assert captured["tool_start_callback"] is ts_cb
     assert captured["tool_complete_callback"] is tc_cb
+    assert captured["status_callback"] is status_cb
+    assert captured["step_callback"] is step_cb
 
 
 def test_create_agent_uses_injected_session_db(monkeypatch):
