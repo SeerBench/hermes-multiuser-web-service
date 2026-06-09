@@ -82,6 +82,9 @@ on any machine lands the user in the same conversation history.
    npm run build       # outputs to ../gateway/web/_static/
    ```
 
+   For subsequent updates on a deployed box, `./update-web.sh` automates
+   pull → rebuild → restart — see [Updating a deployment](#updating-a-deployment).
+
 6. **Issue users keys from new-api**: in the new-api admin panel,
    create user accounts and API keys, then share each key with the
    end-user out-of-band.
@@ -136,11 +139,22 @@ All endpoints return JSON unless noted.  The single auth mode is the
 | `POST` | `/api/auth/login` | none | validate new-api key + set cookie |
 | `POST` | `/api/auth/logout` | cookie | expire cookie + delete server-side row |
 | `GET`  | `/api/me` | yes | return current `user_id` + timestamps |
-| `GET`  | `/api/conversations` | yes | list user's session IDs, titled / preview |
+| `GET`  | `/api/conversations` | yes | list user's sessions (`?archived=1` for the archived bucket) |
+| `GET`  | `/api/conversations/{id}` | yes | full transcript for one session |
+| `PATCH`  | `/api/conversations/{id}` | yes | rename (`{"title": "..."}`) |
+| `DELETE` | `/api/conversations/{id}` | yes | delete the session + its flags |
+| `POST` | `/api/conversations/{id}/flags` | yes | pin / archive (`{"pinned": bool, "archived": bool}`) |
+| `POST` | `/api/uploads` | yes | multipart file upload into the user's sandbox `uploads/` |
 | `POST` | `/api/chat` | yes | SSE stream of agent response |
 | `GET`  | `/api/healthz` | none | liveness probe |
 | `GET`  | `/` | none | SPA shell |
 | `GET`  | `/static/*`, `/assets/*` | none | SPA assets |
+
+The four `/api/conversations/{id}` mutations enforce ownership: a session
+owned by another user is reported as `404` so the surface never leaks the
+existence of someone else's session id.  Pin / archive state lives in a
+fork-owned `conversation_flags` table in `web_users.db` — the shared
+`sessions` table is never modified.
 
 There is **no** `/api/auth/register` (accounts live in new-api), no
 `/api/keys/*` (keys are minted by new-api), and no `/api/usage`
@@ -177,8 +191,17 @@ The response is `text/event-stream`.  Each SSE frame carries an
 | `tool_start` | `{"tool": "...", "preview": "..."}` | tool call begins |
 | `tool_end` | `{"tool": "...", "duration": 1.2, "error": false}` | tool call returns |
 | `reasoning` | `{"text": "..."}` | model reasoning (provider-dependent) |
+| `status` | `{"kind": "lifecycle"\|"warn", "message": "..."}` | agent lifecycle/warning (compression, rate-limit retries, fallback switches) |
+| `step` | `{"step": 3, "tools": ["web_search"]}` | a new agent loop iteration began |
+| `activity` | `{"kind": "thinking", "text": "..."}` | pre-tool "what it's about to do" hint |
 | `done` | `{"session_id": "...", "usage": {...}}` | terminal frame |
 | `error` | `{"message": "...", "code": "..."}` | fatal mid-stream error |
+
+The `status` / `step` / `activity` frames are what the SPA renders as the
+collapsible **execution timeline** under each assistant turn — they expose
+what the agent is doing between tokens (compressing context, switching
+providers, looping through tool calls) instead of leaving the user staring
+at a spinner.
 
 On 401 (cookie missing/expired or master key rotated) the SPA opens
 the key-prompt modal again; the original message is resent
@@ -203,6 +226,18 @@ client disconnect) causes the server to call `agent.interrupt()` on the
 running AIAgent so the executor thread doesn't keep consuming tokens.
 Whatever tokens **did** get consumed are still billed by new-api on the
 upstream side.
+
+### Attachments
+
+The composer's 📎 button uploads files via `POST /api/uploads`. Each file
+is streamed into the user's sandbox at `<workspace>/uploads/<name>`
+(filename sanitized, de-duped, size-capped) — `confine_path` guarantees it
+can't escape the per-user workspace. The endpoint returns workspace-relative
+paths (`uploads/<name>`); the SPA appends a reference block to the chat
+message so the agent reads them on demand with `web_file_read` /
+`web_file_search`. Nothing is sent inline to the model up front, and the
+absolute host path is never exposed. Uploads are plain files in the
+workspace — no separate retention or cleanup beyond `web_workspaces/`.
 
 ---
 
@@ -314,6 +349,86 @@ Real bottlenecks (in order of arrival):
    `WEB_CHAT_MAX_CONCURRENT_AGENTS` conservative on small boxes.
 3. **SQLite write lock** — fine under ~5 RPS; switch to Postgres
    above that.
+
+---
+
+## Updating a deployment
+
+Shipping new code to a running box is **not** just `git pull` + restart.
+Two things bite every time:
+
+1. **The SPA bundle is `.gitignore`'d.** `gateway/web/_static/` is built,
+   never committed, so a plain `git pull` leaves the browser serving the
+   *old* UI even though the backend updated — the classic "I pulled but
+   nothing changed" trap. You must rebuild it (`cd web-chat && npm run
+   build`). Note `startweb.sh` only auto-builds when the bundle is
+   **missing**; it will not rebuild a stale one.
+2. **Schema changes are automatic, but deps are not.** New tables
+   (e.g. `conversation_flags`) are created on startup via
+   `CREATE TABLE IF NOT EXISTS` — no migration step. But if
+   `pyproject.toml` / `uv.lock` changed you must reinstall Python deps,
+   and if `web-chat/package*.json` changed you must reinstall npm deps
+   before building.
+
+### One command: `update-web.sh`
+
+`update-web.sh` (repo root) automates the whole flow on a native (venv)
+box: activate venv → `git pull --ff-only` from the fork remote → rebuild
+the SPA → restart the gateway → health-check `/api/healthz`. It is
+idempotent and handles the traps above (always rebuilds the bundle; only
+runs `npm ci` when the SPA manifests changed; restores the repo-root
+`package.json` if npm's postinstall dirties it; stops the port's old
+process before relaunch and skips a duplicate launch if a supervisor
+already respawned it).
+
+```bash
+# On the server, in the repo checkout, after pushing to the fork:
+./update-web.sh                      # pull → rebuild → relaunch → verify
+```
+
+Restart strategy (pick the one matching how the box runs the gateway):
+
+| You run the gateway via… | Use |
+|---|---|
+| foreground / tmux / `nohup` (default) | `./update-web.sh` (stops the old process, relaunches `hermes gateway run` in the background, logs to `~/.hermes/web-gateway.log`) |
+| **systemd** | `./update-web.sh --systemd <unit-name>` (restarts via `systemctl`, no second process) |
+| a custom supervisor | `./update-web.sh --restart-cmd '<your restart command>'` |
+| you'll restart it yourself | `./update-web.sh --no-restart` (pull + build only) |
+
+Other useful flags: `--test` (run the fork web test suite and abort on
+failure before restarting), `--stash` (auto-stash a dirty tree for the
+pull), `--no-pull` (rebuild + restart the current checkout),
+`--remote` / `--branch`, `--host` / `--port` (override the health-check
+target). `./update-web.sh --help` lists them all.
+
+> The default background relaunch suits foreground/tmux/nohup setups. If
+> the box is **systemd**-managed, always pass `--systemd <unit>` — the
+> script has respawn detection as a safety net, but the explicit path is
+> cleanest and avoids a kill-then-double-launch race.
+
+### Manual equivalent
+
+If you'd rather not use the script:
+
+```bash
+git pull --ff-only                       # pull the new code
+cd web-chat && npm run build && cd ..    # REQUIRED: rebuild the SPA bundle
+#   (run `npm ci` first only if web-chat/package*.json changed)
+#   (if `pyproject.toml`/`uv.lock` changed: uv pip install -e ".[web-chat]")
+# then restart the gateway however you run it (systemctl restart … / re-run startweb.sh)
+```
+
+### After updating
+
+- Verify: `git log --oneline -1`, a fresh `gateway/web/_static/index.html`
+  mtime, and `curl -s http://<host>:<port>/api/healthz`.
+- Tell testers to **hard-refresh** (Ctrl-Shift-R) — vite emits
+  hash-named assets and `index.html` is served `no-cache`, so a normal
+  reload picks up the new bundle, but a hard refresh avoids any
+  cached-JS confusion.
+- Rollback: `git reset --hard <previous-commit>` then rebuild the SPA and
+  restart. `web_users.db` / `state.db` are forward-compatible — the new
+  `conversation_flags` table is simply ignored by older code.
 
 ---
 
