@@ -163,6 +163,7 @@ hermes_cli/main.py                 0 行改动
 git clone https://github.com/SeerBench/hermes-multiuser-web-service.git
 cd hermes-multiuser-web-service
 ./setup-hermes.sh                                 # uv venv + .[all,dev]
+uv venv
 source .venv/bin/activate
 uv pip install -e ".[web-chat]"                   # 装上 cryptography(用于 KeyVault)
 
