@@ -50,6 +50,86 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 logger = logging.getLogger("hermes.web.chat_runner")
 
 
+def _emit_agent_create_trace(
+    user_id: str,
+    model: str,
+    session_id: Optional[str],
+    enabled_toolsets: List[str],
+) -> None:
+    """Fork debug trace (necessary point) — one line per web_chat turn.
+
+    Called from ``_create_agent`` while the per-user HERMES_HOME override is
+    active (we run inside ``ctx.run``), so the web-backend gate is evaluated
+    against *this* user's resolved config — the single most useful signal for
+    the recurring "web_search not exposed?" hunt.  Writes one concise line per
+    turn under ``./logs`` (see ``gateway/web/debug_log.py``) so it can be
+    rsync'd off the test box and read / diff'd on the dev box.  Pairs with the
+    ``outbound_tools.jsonl`` dump in ``agent/chat_completion_helpers.py``: this
+    records what the *gate* decides at agent-construction time, that records
+    what actually reaches the wire — together they localize where (if anywhere)
+    ``web_search`` drops.
+
+    Skipped under pytest (``PYTEST_CURRENT_TEST``) so the suite never writes
+    diagnostics into the source tree (matches the convention in
+    ``hermes_cli/auth.py``); the gateway runtime never sets that var, so the
+    trace is effectively always-on in real deployments.  Best-effort — every
+    failure is swallowed so a broken diagnostic can't break a chat turn.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    try:
+        from gateway.web import debug_log as _debug_log
+        from hermes_constants import get_hermes_home as _get_hermes_home
+
+        try:
+            # Mirror check_web_{search,extract}_available WITHOUT their WARNING
+            # side effect: the registry gate already logs that on the real
+            # tool-resolution pass; calling the gate here too would double the
+            # warning every turn.  So we call the underlying resolvers and
+            # reproduce the boolean ourselves.
+            from tools.web_tools import (
+                _get_search_backend as _gsb,
+                _get_extract_backend as _geb,
+                _is_backend_available as _iba,
+            )
+
+            search_backend = _gsb()
+            extract_backend = _geb()
+            search_ok: Optional[bool] = bool(_iba(search_backend))
+            extract_ok: Optional[bool] = bool(_iba(extract_backend))
+        except Exception as web_exc:
+            search_backend = extract_backend = None
+            search_ok = extract_ok = None
+            logger.debug("web backend probe failed in trace: %r", web_exc)
+
+        hh = str(_get_hermes_home())
+        _debug_log.get_file_logger(
+            "hermes.web.chat_runner.trace", "web_chat.log"
+        ).info(
+            "turn user=%s model=%s hermes_home=%s toolsets=%d "
+            "web_search=%s(%s) web_extract=%s(%s)",
+            user_id, model, hh, len(enabled_toolsets),
+            search_ok, search_backend, extract_ok, extract_backend,
+        )
+        _debug_log.append_jsonl(
+            "web_chat_tools.jsonl",
+            {
+                "event": "agent_create",
+                "user": user_id,
+                "model": model,
+                "session_id": session_id,
+                "hermes_home": hh,
+                "toolsets": enabled_toolsets,
+                "web_search_available": search_ok,
+                "search_backend": search_backend,
+                "web_extract_available": extract_ok,
+                "extract_backend": extract_backend,
+            },
+        )
+    except Exception as trace_exc:  # diagnostics must never break a turn
+        logger.debug("web_chat debug trace failed: %r", trace_exc)
+
+
 # Platform-level system-prompt addendum.  Appended ahead of any SPA-supplied
 # ``system_prompt`` so the agent always knows what surface it is running on,
 # what fork-specific tools exist, and how Brave / secrets are handled.
@@ -205,6 +285,11 @@ class WebChatAgentRunner:
 
         user_config = _load_gateway_config()
         enabled_toolsets = sorted(_get_platform_tools(user_config, "web_chat"))
+
+        # Fork debug trace (necessary point) — one diagnostic line per turn
+        # into ./logs, evaluated under this user's HERMES_HOME context.  See
+        # the helper for the full rationale; it self-skips under pytest.
+        _emit_agent_create_trace(user_id, model, session_id, enabled_toolsets)
 
         max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
 

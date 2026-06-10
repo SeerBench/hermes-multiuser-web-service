@@ -277,9 +277,134 @@ def interruptible_api_call(agent, api_kwargs: dict):
 
 
 
+# TEMP debug — serialize concurrent web_chat agent threads writing the dump
+# file so JSONL records never interleave.  Remove with the helper below.
+_DUMP_TOOLS_FILE_LOCK = threading.Lock()
+
+
+def _resolve_dump_path(override: str) -> Path:
+    """Where the outbound-tools JSONL lands.
+
+    An explicit ``HERMES_DEBUG_DUMP_TOOLS_FILE`` wins (absolute, or relative to
+    cwd).  Otherwise default to ``<log_dir>/outbound_tools.jsonl`` where
+    ``log_dir`` is ``HERMES_DEBUG_LOG_DIR`` or the repo-relative ``./logs`` —
+    the same directory the fork's ``gateway/web/debug_log.py`` uses, so the
+    test-server diagnostics all sync together under one tree you can ``rsync``
+    to the dev box.  ``parents[1]`` of this file (``agent/…``) is the repo root.
+    (Self-contained on purpose: this temp dump must not import fork code, so the
+    upstream ``agent/`` package stays clean and the whole block deletes cleanly.)
+    """
+    if override:
+        return Path(override).expanduser()
+    log_root = (os.getenv("HERMES_DEBUG_LOG_DIR") or "").strip()
+    base = (
+        Path(log_root).expanduser()
+        if log_root
+        else (Path(__file__).resolve().parents[1] / "logs")
+    )
+    return base / "outbound_tools.jsonl"
+
+
+def _debug_dump_outbound_tools(agent, tools: list) -> None:
+    """TEMP debug switch — dump the outbound tools array for one request.
+
+    Two independent, off-by-default sinks (zero cost when both env vars are
+    unset, so this is safe to ship to a running deployment):
+
+    1. ``HERMES_DEBUG_DUMP_TOOLS`` — log sink (WARNING):
+         - "1" / "true" / "names" → tool COUNT + sorted tool names.
+         - "full"                 → additionally log the full JSON tool schema.
+       Enabling this *also* turns the file sink on at its default path (below),
+       so flipping one env var on a test box leaves a syncable JSONL behind
+       with no extra config.
+
+    2. file sink — append one JSON object per request (JSONL).  Path resolves
+       (see ``_resolve_dump_path``): ``HERMES_DEBUG_DUMP_TOOLS_FILE`` if set,
+       else ``<HERMES_DEBUG_LOG_DIR or ./logs>/outbound_tools.jsonl``.  The
+       repo-relative ``./logs`` default is deliberate — it sits inside the tree
+       you ``rsync`` between the test server and the dev box (and matches
+       ``gateway/web/debug_log.py``), so the dump is easy to pull and diff.
+       The sink also fires on its own when only the FILE var is set, so you can
+       keep the dump OUT of the noisy gateway log and just diff a clean file.
+       Each record holds ``ts`` / ``platform`` / ``user`` / ``api_mode`` /
+       ``model`` / ``count`` / ``tools`` (names).  When
+       ``HERMES_DEBUG_DUMP_TOOLS=full`` the record also carries a ``schema``
+       field with the full tool list (verbosity is shared with the log sink).
+
+    Why both carry ``platform`` + ``user``: the native CLI path (where
+    tool-calling is known good through the same proxy) and the ``web_chat`` path
+    share this one chokepoint, so one file collects both — run a turn in each,
+    then ``jq`` / diff the ``tools`` arrays.  If ``web_search`` is in the
+    ``platform=cli`` record but missing from the ``platform=web_chat`` record,
+    the gap is in web_chat tool resolution/registration, not the proxy/model.
+
+    ``tools`` here is ``agent.tools`` — exactly what hermes hands the transport.
+    Transport-level schema rewriting (e.g. Moonshot) only reshapes a tool's
+    parameters, never drops a tool, so presence/absence is faithful to the wire.
+
+    REMOVE (helper + lock + the call in build_api_kwargs) once the
+    web_search-not-exposed investigation is closed.
+    """
+    mode = (os.getenv("HERMES_DEBUG_DUMP_TOOLS") or "").strip().lower()
+    file_override = (os.getenv("HERMES_DEBUG_DUMP_TOOLS_FILE") or "").strip()
+    log_on = mode not in ("", "0", "false", "no", "off")
+    # File sink fires when the dump is enabled OR an explicit path is given;
+    # when enabled with no explicit path it defaults under ./logs.
+    file_on = log_on or bool(file_override)
+    if not log_on and not file_on:
+        return
+    try:
+        names = sorted(
+            n for n in (
+                (t.get("function", t) or {}).get("name")
+                for t in (tools or [])
+                if isinstance(t, dict)
+            ) if n
+        )
+        platform = getattr(agent, "platform", None)
+        user_id = getattr(agent, "_user_id", None)
+        api_mode = getattr(agent, "api_mode", None)
+        model = getattr(agent, "model", None)
+
+        if log_on:
+            logger.warning(
+                "[DUMP_TOOLS] platform=%s user=%s api_mode=%s model=%s count=%d tools=%s",
+                platform, user_id, api_mode, model, len(names), names,
+            )
+            if mode == "full":
+                logger.warning(
+                    "[DUMP_TOOLS] full schema:\n%s",
+                    json.dumps(tools or [], ensure_ascii=False, indent=2),
+                )
+
+        if file_on:
+            record = {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "platform": platform,
+                "user": user_id,
+                "api_mode": api_mode,
+                "model": model,
+                "count": len(names),
+                "tools": names,
+            }
+            if mode == "full":
+                record["schema"] = tools or []
+            line = json.dumps(record, ensure_ascii=False) + "\n"
+            target = _resolve_dump_path(file_override)
+            with _DUMP_TOOLS_FILE_LOCK:
+                # Best-effort parent dir; open per-write so an operator can
+                # rotate/delete the file mid-run without restarting the gateway.
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(target, "a", encoding="utf-8") as fh:
+                    fh.write(line)
+    except Exception as exc:  # never let debug logging break a real request
+        logger.warning("[DUMP_TOOLS] failed to dump tools: %r", exc)
+
+
 def build_api_kwargs(agent, api_messages: list) -> dict:
     """Build the keyword arguments dict for the active API mode."""
     tools_for_api = agent.tools
+    _debug_dump_outbound_tools(agent, tools_for_api)
 
     if agent.api_mode == "anthropic_messages":
         _transport = agent._get_transport()
