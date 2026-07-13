@@ -41,7 +41,8 @@
 2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
 3. pgvector cosine 检索（替换关键词 MVP）  
 4. 50 用户压测、`update-web.sh` 扩展 platform-api 部署流程  
-5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（5 cases）+ CI `web-chat-verify.yml`
+5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（5 cases）+ CI `web-chat-verify.yml`  
+6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉~~；文件进度 + Onboarding 待做
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -455,6 +456,86 @@ flowchart TD
 
 ---
 
+## web-chat SPA — 用户体验待办（按人气 × 实用度）
+
+> **现状快照（2026-07-13）**：Chat 核心链路（SSE、工具事件、重试/编辑、附件、斜杠命令、会话 CRUD）已可用；Platform 六页（Auth/Chat/Settings/Files/Memory/Skills/Admin）为 **功能骨架**，多处仍偏「工程师 UI」。README 提到的 `QuotaBadge` **尚未实现**。
+
+**排序说明**：P0 = 多数用户每天都会碰到且明显影响留存；P1 = ChatGPT 类产品的常见预期；P2 = 提升专业用户/运营效率；P3 = 锦上添花。与 § MVP 明确不做 冲突的项（PWA、OAuth、多 Workspace UI）不列入。
+
+### P0 — 高人气 × 高实用（建议下一迭代）
+
+| 优先级 | 功能 | 用户痛点 | 现状 / 缺口 |
+|--------|------|----------|-------------|
+| ★★★ | **`pending_bind` 全局引导** | 注册后发消息遇 403，不知要去设置页绑 key | 仅 Settings 有 bind 表单；Chat 无顶栏警告 |
+| ★★★ | **移动端会话侧栏** | ≤720px 侧栏 `display:none`，无法切换/新建对话 | `styles.css` 隐藏 `.chat-side` 且无抽屉按钮 |
+| ★★★ | **对话列表搜索** | 会话多了找不到历史 | 无标题/预览过滤 |
+| ★★☆ | **知识库解析进度 UI** | 上传后不知是否在索引 | API 有 `status`；Files 页只显示静态文案 |
+| ★★☆ | **注册后 Onboarding** | 新用户不知道下一步（绑 key → 首条消息） | 注册成功直接进 Chat，无分步引导 |
+
+- [x] Chat / App 顶栏：`upstream_status=pending_bind` 时展示可点击的绑定引导（跳转 Settings）
+- [x] 移动端：汉堡菜单 + 会话抽屉（新建 / 切换 / 归档入口）
+- [x] `ConversationList`：按标题/预览实时筛选
+- [ ] `FilesPage`：轮询 `GET .../files/{id}/status`，展示 processing / ready / failed + 错误信息
+- [ ] 首次登录向导（3 步：绑 key → 可选上传文件 → 发送首条消息）
+
+### P1 — 高人气 × 中等实用
+
+| 优先级 | 功能 | 说明 |
+|--------|------|------|
+| ★★★ | **Markdown 代码块高亮 + 复制** | 开发者用户刚需；现 `marked` 纯文本渲染 |
+| ★★☆ | **导出当前对话** | 下载 Markdown / 复制全文（比单条 copy 更常用） |
+| ★★☆ | **Composer 拖拽/粘贴上传** | 仅有 📎 按钮；无 drag-drop / paste 图片 |
+| ★★☆ | **手动深色/浅色主题** | 仅 `prefers-color-scheme`；无设置项 |
+| ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
+| ★☆☆ | **模型选择器** | 高级用户期望 UI 选模型；可对接 `/model` 或 gateway 配置 |
+
+- [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
+- [ ] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板
+- [ ] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
+- [ ] Settings：主题 `system | light | dark`（`localStorage` + `data-theme`）
+- [ ] `POST /api/v1/auth/change-password` + Settings 表单
+- [ ] 设置页或 Chat 顶栏：模型下拉（读 gateway `/api/me` 或 slash `/model` 封装）
+
+### P2 — 中等人气 × 提升专业度
+
+| 优先级 | 功能 | 说明 |
+|--------|------|------|
+| ★★☆ | **用量 / 配额展示** | README 承诺 quota；`QuotaBadge` 未实现；可链 new-api 或平台 stats |
+| ★★☆ | **知识库试搜索** | 用户想验证文件是否可被 Agent 检索；API 已有 `knowledge/search` |
+| ★★☆ | **Skill 详情预览** | 仅开关列表；无法浏览 SKILL 摘要/说明 |
+| ★★☆ | **Admin 分页 + 用户搜索** | 用户增多后表格不可用；API 未分页 |
+| ★☆☆ | **Admin 审计日志 UI** | `audit_logs` 已写库，前端无查看 |
+| ★☆☆ | **Admin 全局 Skill 浏览** | API `GET /admin/skills` 已有；UI 未展示 |
+
+- [ ] Settings：`QuotaBadge` 或用量卡片（余额/本月 token，依赖上游接口设计）
+- [ ] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
+- [ ] `SkillsPage`：点击 skill 名 → 侧栏/模态展示 description + 来源路径
+- [ ] `AdminPage`：email 过滤、分页控件；后端补 `limit/offset` 若需要
+- [ ] `AdminPage`：`#/admin/audit` 只读表格（时间、操作、目标）
+- [ ] `AdminPage`：全局 Skill 只读列表（调用 `platform.adminSkills()`）
+
+### P3 — 体验抛光
+
+- [ ] 全局 Toast / 非阻塞错误提示（替换部分 `auth-error` 静态文案）
+- [ ] `MemoryPage`：Markdown 预览分栏（编辑 | 预览）
+- [ ] `FilesPage`：拖拽上传区、上传百分比进度条
+- [ ] 键盘快捷键面板（`?`）：发送、新建对话、聚焦输入框
+- [ ] 账户：修改邮箱、注销账号（需 API + 合规文案）
+- [ ] 无障碍：焦点陷阱、跳过导航、`aria-live` 流式区域
+- [ ] 更新 `web-chat/README.md`（移除不存在的 `QuotaBadge` 描述，对齐实际页面树）
+
+### 已有能力（无需重复立项）
+
+- [x] SSE 流式、停止生成、token 用量展示
+- [x] 消息复制 / 重试 / 编辑
+- [x] 工具事件折叠、`image_generate` 缩略图
+- [x] 推理过程 `ReasoningPanel`、活动日志 `ActivityLog`
+- [x] 斜杠命令补全、会话置顶/归档/重命名/删除
+- [x] 中英双语 `LanguageToggle`
+- [x] Platform 六路由 + Legacy Key 备路径
+
+---
+
 ## MVP 明确不做
 
 - [-] OAuth / SSO / 企业组织多租户
@@ -591,3 +672,4 @@ flowchart TD
 | 2026-07-13 | 初版：基于 AI SaaS Platform Plan 生成 |
 | 2026-07-13 | 增加双路径认证：平台注册（主）+ Legacy Key（备）+ bind-key 混合 Fallback |
 | 2026-07-13 | **E2E**：`test_chat_e2e.py`（register→bind→chat SSE）+ `test_isolation_extended.py`（5 cases）；platform 测试 14 cases |
+| 2026-07-13 | **web-chat UX 待办**：按用户视角补充 P0–P3 功能缺口（§ web-chat SPA） |

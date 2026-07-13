@@ -48,7 +48,13 @@ const mockUser = {
   email: 'chat@example.com',
 }
 
-function renderChat(props: { signedIn?: boolean } = {}) {
+function renderChat(
+  props: {
+    signedIn?: boolean
+    needsBindKey?: boolean
+    onGoBindSettings?: () => void
+  } = {},
+) {
   return render(
     <LocaleProvider>
       <ChatPage {...props} />
@@ -124,6 +130,22 @@ describe('ChatPage', () => {
       expect.objectContaining({ message: 'Hi there' }),
       expect.any(AbortSignal),
     )
+  })
+
+  it('blocks send when upstream key is not bound', async () => {
+    const onGoBindSettings = vi.fn()
+    const user = userEvent.setup()
+    mockAuthedChat()
+    renderChat({ signedIn: true, needsBindKey: true, onGoBindSettings })
+
+    await screen.findByPlaceholderText(/message hermes/i)
+    expect(screen.getByText(/disabled until you bind/i)).toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText(/message hermes/i), 'Hi')
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+
+    expect(streamChat).not.toHaveBeenCalled()
+    expect(onGoBindSettings).toHaveBeenCalled()
   })
 
   it('surfaces SSE error events on the assistant turn', async () => {

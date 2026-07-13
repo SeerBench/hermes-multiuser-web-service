@@ -54,9 +54,13 @@ type KeyModalState =
 
 export function ChatPage({
   signedIn = false,
+  needsBindKey = false,
+  onGoBindSettings,
 }: {
   platformMode?: boolean
   signedIn?: boolean
+  needsBindKey?: boolean
+  onGoBindSettings?: () => void
 } = {}) {
   const t = useT()
   const { setLocale } = useLocale()
@@ -70,6 +74,7 @@ export function ChatPage({
   const [historyBanner, setHistoryBanner] = useState<string | null>(null)
   const [archived, setArchived] = useState<ConversationSummary[]>([])
   const [pending, setPending] = useState<PendingAttachment[]>([])
+  const [sideOpen, setSideOpen] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -269,6 +274,10 @@ export function ChatPage({
       historyOverride?: ChatMessage[],
       attachments?: UploadedFile[],
     ) => {
+      if (needsBindKey) {
+        onGoBindSettings?.()
+        return
+      }
       const userTurn: Turn = {
         id: newTurnId(),
         role: 'user',
@@ -395,7 +404,10 @@ export function ChatPage({
               .then(setConvos)
               .catch(() => undefined)
           } else if (ev.type === 'error') {
-            if (ev.code === 'unauthorized' || ev.code === 'session_expired') {
+            if (
+              ev.code === 'unauthorized' ||
+              ev.code === 'session_expired'
+            ) {
               setTurns((prev) => prev.slice(0, -2))
               setKeyModal({
                 open: true,
@@ -403,6 +415,11 @@ export function ChatPage({
                   ev.code === 'session_expired' ? 'session-expired' : 'first-message',
                 pendingMessage: message,
               })
+              return
+            }
+            if (ev.code === 'upstream_key_required') {
+              setTurns((prev) => prev.slice(0, -2))
+              onGoBindSettings?.()
               return
             }
             setTurns((prev) =>
@@ -437,7 +454,7 @@ export function ChatPage({
         abortRef.current = null
       }
     },
-    [sessionId, turns, t],
+    [sessionId, turns, t, needsBindKey, onGoBindSettings],
   )
 
   // ── Slash command handling ────────────────────────────────────────────
@@ -688,17 +705,37 @@ export function ChatPage({
     ? t('composer.placeholder.slash')
     : t('composer.placeholder')
 
+  const closeSidebar = () => setSideOpen(false)
+
+  const selectConversation = (id: string) => {
+    void switchConversation(id)
+    closeSidebar()
+  }
+
+  const handleNewChat = () => {
+    startNewConversation()
+    closeSidebar()
+  }
+
   return (
     <div className="chat-page">
-      <aside className="chat-side">
-        <button type="button" className="chat-new" onClick={startNewConversation}>
+      {sideOpen && (
+        <button
+          type="button"
+          className="chat-side-backdrop"
+          aria-label={t('chat.closeSidebar')}
+          onClick={closeSidebar}
+        />
+      )}
+      <aside className={`chat-side${sideOpen ? ' chat-side-open' : ''}`}>
+        <button type="button" className="chat-new" onClick={handleNewChat}>
           {t('chat.new')}
         </button>
         <ConversationList
           conversations={convos}
           archived={archived}
           activeId={sessionId}
-          onSelect={(id) => void switchConversation(id)}
+          onSelect={selectConversation}
           onRename={(id, title) => void handleRename(id, title)}
           onDelete={(id) => void handleDelete(id)}
           onSetFlags={(id, flags) => void handleSetFlags(id, flags)}
@@ -707,6 +744,26 @@ export function ChatPage({
       </aside>
 
       <section className="chat-main">
+        <div className="chat-main-toolbar">
+          <button
+            type="button"
+            className="chat-sidebar-toggle"
+            aria-label={t('chat.openSidebar')}
+            onClick={() => setSideOpen(true)}
+          >
+            ☰
+          </button>
+        </div>
+        {needsBindKey && (
+          <div className="chat-banner chat-banner-warn" role="status">
+            <span>{t('bindBanner.chatHint')}</span>
+            {onGoBindSettings && (
+              <button type="button" className="link-btn" onClick={onGoBindSettings}>
+                {t('bindBanner.action')}
+              </button>
+            )}
+          </div>
+        )}
         {historyBanner && (
           <div className="chat-banner chat-banner-error" role="alert">
             {historyBanner}

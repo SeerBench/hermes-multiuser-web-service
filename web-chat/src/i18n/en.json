@@ -19,6 +19,8 @@
   "lang.option.zh": "中文",
 
   "chat.new": "+ New chat",
+  "chat.openSidebar": "Open conversations",
+  "chat.closeSidebar": "Close conversations",
   "chat.empty.title": "Start a new conversation.",
   "chat.empty.subtitle": "Your messages and the agent's reply will appear here.",
   "chat.role.user": "you",
@@ -75,6 +77,9 @@
   "command.system.prefix": "command result",
 
   "convo.empty": "No conversations yet.",
+  "convo.search.label": "Search conversations",
+  "convo.search.placeholder": "Search conversations…",
+  "convo.search.empty": "No matching conversations.",
   "convo.untitled": "(untitled)",
   "convo.msgs.suffix": "msgs",
   "convo.timeago.just_now": "just now",
@@ -159,5 +164,9 @@
   "settings.bindKey.submit": "Bind key",
   "settings.bindKey.busy": "Binding…",
   "settings.bindKey.ok": "Key bound successfully.",
-  "settings.bindKey.fail": "Could not bind key."
+  "settings.bindKey.fail": "Could not bind key.",
+
+  "bindBanner.message": "Bind your upstream API key before chatting — billing and LLM access go through new-api.",
+  "bindBanner.action": "Bind key in Settings",
+  "bindBanner.chatHint": "Chat is disabled until you bind an API key."
 }

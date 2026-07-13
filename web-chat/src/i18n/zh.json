@@ -19,6 +19,8 @@
   "lang.option.zh": "中文",
 
   "chat.new": "+ 新对话",
+  "chat.openSidebar": "打开对话列表",
+  "chat.closeSidebar": "关闭对话列表",
   "chat.empty.title": "开始新的对话。",
   "chat.empty.subtitle": "你的消息和助手的回复会显示在这里。",
   "chat.role.user": "你",
@@ -75,6 +77,9 @@
   "command.system.prefix": "命令结果",
 
   "convo.empty": "暂无历史对话。",
+  "convo.search.label": "搜索对话",
+  "convo.search.placeholder": "搜索对话…",
+  "convo.search.empty": "没有匹配的对话。",
   "convo.untitled": "(无标题)",
   "convo.msgs.suffix": "条消息",
   "convo.timeago.just_now": "刚刚",
@@ -159,5 +164,9 @@
   "settings.bindKey.submit": "绑定密钥",
   "settings.bindKey.busy": "绑定中…",
   "settings.bindKey.ok": "密钥绑定成功。",
-  "settings.bindKey.fail": "密钥绑定失败。"
+  "settings.bindKey.fail": "密钥绑定失败。",
+
+  "bindBanner.message": "开始对话前请先绑定上游 API 密钥 — LLM 调用与计费经由 new-api。",
+  "bindBanner.action": "前往设置绑定密钥",
+  "bindBanner.chatHint": "绑定 API 密钥后才能使用对话功能。"
 }

@@ -7,6 +7,7 @@ import { MemoryPage } from './pages/MemoryPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { AdminPage } from './pages/AdminPage'
 import { KeyPromptModal } from './components/KeyPromptModal'
+import { PendingBindBanner } from './components/PendingBindBanner'
 import { LocaleProvider, useT } from './i18n'
 import { LanguageToggle } from './components/LanguageToggle'
 import { auth } from './api'
@@ -93,6 +94,10 @@ function AppShell() {
   }
 
   const showAuthGate = platformMode && !authLoading && !user && !legacyKeyOpen
+  const needsBindKey =
+    platformMode &&
+    Boolean(user) &&
+    user?.upstream_status === 'pending_bind'
 
   return (
     <div className="app">
@@ -150,6 +155,9 @@ function AppShell() {
           <LanguageToggle compact />
         </nav>
       </header>
+      {needsBindKey && (
+        <PendingBindBanner onGoSettings={() => goto('settings')} />
+      )}
       <main className="app-main">
         {authLoading ? (
           <p className="page-hint">{t('common.loading')}</p>
@@ -168,6 +176,8 @@ function AppShell() {
                 key={`chat-${pageKey}`}
                 platformMode={platformMode}
                 signedIn={Boolean(user)}
+                needsBindKey={needsBindKey}
+                onGoBindSettings={() => goto('settings')}
               />
             )}
             {route === 'settings' && (
