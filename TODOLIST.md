@@ -13,14 +13,14 @@
 | Phase | 状态 | 说明 |
 |-------|------|------|
 | 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
-| 1 身份鉴权 | **~85%** | 注册/登录/bind-key/双路径认证/SPA AuthPage 已有；速率限制、完整 E2E chat 测试待补 |
-| 2 隔离加固 | **~70%** | UUID 贯穿 + 基础隔离测试；legacy 映射表、全量隔离 E2E 待补 |
+| 1 身份鉴权 | **~90%** | 注册/登录/bind-key/双路径认证/SPA AuthPage 已有；**chat E2E 已补**；速率限制待补 |
+| 2 隔离加固 | **~85%** | UUID 贯穿 + 隔离 E2E（会话/记忆/知识库/禁用用户）；legacy 映射表待补 |
 | 3 文件 RAG | **~75%** | 同步 ingestion + 关键词检索 + `web_knowledge_search`；MinIO/Redis Worker/pgvector 待补 |
 | 4 Memory/Skill | **~90%** | API + UI + ephemeral skill hint 已有；`platform_settings` 运营配置待补 |
 | 5 Admin | **~85%** | API + UI + `create_admin.py` 已有；分页、审计 UI 待补 |
 | 6 硬化上线 | **~40%** | `platform-saas.md` + `deploy/README.md` 已有；压测、备份脚本、CI Compose job 待补 |
 
-**测试**：`scripts/run_tests.sh tests/platform/`（6 cases）+ `tests/gateway/test_web_users.py`（26 cases）已通过。
+**测试**：`scripts/run_tests.sh tests/platform/`（**20 cases**）+ `tests/gateway/test_web_users.py`（26 cases）已通过。
 
 **关键产物**
 
@@ -37,11 +37,11 @@
 
 **下一步优先（未做项）**
 
-1. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
-2. pgvector cosine 检索（替换关键词 MVP）  
-3. Platform 登录 → `POST /api/chat` 全链路 E2E  
-4. 登录速率限制、隔离测试补全、50 用户压测  
-5. `update-web.sh` 扩展 platform-api 部署流程  
+1. 登录速率限制（Redis 计数器）  
+2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
+3. pgvector cosine 检索（替换关键词 MVP）  
+4. 50 用户压测、`update-web.sh` 扩展 platform-api 部署流程  
+5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（5 cases）+ CI `web-chat-verify.yml`
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -205,7 +205,7 @@ flowchart TD
 - [x] `gateway/web/user_store_factory.py` — `PLATFORM_DATABASE_URL` 时切换 `PlatformStore`
 - [x] `gateway/platforms/web_chat.py` — `create_user_store()`；`/api/me` 含 `email`、`upstream_status`
 - [x] Chat 请求：`pending_bind` 且无 key 时 403；有 key 时 `enter_upstream_key()`
-- [~] 集成测试：Platform 登录 → Cookie → `POST /api/chat`（**未单独 E2E**，session 共享已单测）
+- [x] 集成测试：Platform 登录 → bind-key → Cookie → `POST /api/chat` SSE（`tests/platform/test_chat_e2e.py`）
 
 ### 1.4 前端 Auth 改造
 
@@ -248,11 +248,12 @@ flowchart TD
 ### 2.3 隔离测试
 
 - [x] `tests/platform/test_isolation.py` — UUID 工作区路径隔离 + session cookie 共享
+- [x] `tests/platform/test_isolation_extended.py` — 跨用户会话（读/改/删/列表）、记忆（读/写）、知识库（搜索/列表/删除）、禁用用户
 - [ ] 扩展 `test_concurrent_requests_dont_swap_user_contexts`（UUID 身份）
-- [ ] 用户 A 无法 `GET /api/conversations/{B_session_id}`
-- [ ] 用户 A 无法读用户 B 的 memory（Platform API）
-- [ ] 用户 A 无法检索用户 B 的 `document_chunks`
-- [ ] 禁用用户无法登录和 chat
+- [x] 用户 A 无法 `GET /api/conversations/{B_session_id}`
+- [x] 用户 A 无法读用户 B 的 memory（Platform API）
+- [x] 用户 A 无法检索用户 B 的 `document_chunks`
+- [x] 禁用用户无法登录和 chat
 - [ ] Legacy key 不能访问其他 UUID 用户知识库
 - [ ] bind-key 后会话统一
 
@@ -558,12 +559,12 @@ flowchart TD
 |----|------|----------|------|
 | R1 | new-api Admin API 不稳定 | `ManualProvisioner` + bind-key + Legacy key | [~] 已缓解，待生产验证 |
 | R9 | 双登录路径身份混乱 | UUID 主路径 + Legacy 折叠入口 | [~] 已缓解；`legacy_user_id_map` 未做 |
-| R2 | 双服务鉴权不一致 | `platform_sessions` + session 单测 | [~] 已缓解；缺 chat E2E |
+| R2 | 双服务鉴权不一致 | `platform_sessions` + session 单测 + **chat E2E** | [~] 已缓解 |
 | R3 | user_id UUID 迁移 | 新部署无负担 | [x] |
 | R4 | RAG 质量参差 | 关键词 MVP + 引用来源 | [~] |
 | R5 | Embedding 成本 | 可选 API + 离线回退 | [~] |
 | R6 | SQLite 并发瓶颈 | 未压测 | [ ] |
-| R7 | ContextVar 跨租户泄漏 | 并发测试保留 + 新隔离测试 | [~] |
+| R7 | ContextVar 跨租户泄漏 | 并发测试保留 + **隔离 E2E** | [~] 已缓解 |
 | R8 | 双 API 前端路由混乱 | nginx + `platformClient.ts` + Vite 双代理 | [x] |
 
 ---
@@ -589,4 +590,4 @@ flowchart TD
 |------|------|
 | 2026-07-13 | 初版：基于 AI SaaS Platform Plan 生成 |
 | 2026-07-13 | 增加双路径认证：平台注册（主）+ Legacy Key（备）+ bind-key 混合 Fallback |
-| 2026-07-13 | **执行同步**：Phase 0–5 MVP 骨架落地；`platform_api/`、`gateway/web/platform/`、`deploy/`、`tests/platform/`、SPA 新页面已勾选；标注 MinIO/Redis Worker/pgvector/压测等待办 |
+| 2026-07-13 | **E2E**：`test_chat_e2e.py`（register→bind→chat SSE）+ `test_isolation_extended.py`（5 cases）；platform 测试 14 cases |
