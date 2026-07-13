@@ -67,7 +67,12 @@ cd web-chat && npm run build
 
 ## 测试
 
+自动化：
+
 ```bash
 scripts/run_tests.sh tests/platform/
 scripts/run_tests.sh tests/gateway/test_web_*.py
+scripts/verify-web-chat.sh
 ```
+
+人工验收步骤见 [`platform-manual-testing.zh-CN.md`](platform-manual-testing.zh-CN.md)。
