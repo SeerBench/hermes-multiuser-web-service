@@ -1319,6 +1319,98 @@ code {
   color: var(--fg-dim);
 }
 
+/* ── Platform SaaS pages ───────────────────────────────────────── */
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.auth-form label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.auth-form input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.auth-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.panel-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.page-hint {
+  color: var(--fg-dim);
+  font-size: 14px;
+}
+
+.page-ok {
+  color: var(--accent);
+}
+
+.file-list,
+.skill-list {
+  list-style: none;
+  padding: 0;
+}
+
+.file-list li,
+.skill-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* ── Responsive ──────────────────────────────────────────────────── */
 
 @media (max-width: 720px) {

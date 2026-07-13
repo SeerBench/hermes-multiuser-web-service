@@ -2,6 +2,10 @@
 
 Instructions for AI coding assistants and developers working on the hermes-agent codebase.
 
+## Important
+
+在任何代码修改之前，先创建 ARCHITECTURE.md、MVP_PLAN.md、DATABASE_DESIGN.md 三个设计文档，经确认后再开发。
+
 ## Development Environment
 
 ```bash

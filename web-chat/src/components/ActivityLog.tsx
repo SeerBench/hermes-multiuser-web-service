@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useT } from '../i18n'
-import type { Translator } from '../i18n'
+import { activityItemLabel } from '../activityLabels'
 
 // One entry in a turn's "what is the agent doing behind the scenes" feed.
 // Sourced from the new SSE ``status`` / ``step`` / ``activity`` events.
@@ -12,18 +12,6 @@ export type ActivityItem =
 type Props = {
   items: ActivityItem[]
   streaming: boolean
-}
-
-function itemLabel(t: Translator, item: ActivityItem): string {
-  if (item.kind === 'step') {
-    return item.tools.length
-      ? t('activity.step.tools', { n: item.step, tools: item.tools.join(', ') })
-      : t('activity.step', { n: item.step })
-  }
-  if (item.kind === 'thinking') {
-    return t('activity.thinking', { text: item.text })
-  }
-  return item.text
 }
 
 /**
@@ -41,7 +29,7 @@ export function ActivityLog({ items, streaming }: Props) {
   const summary = open
     ? t('activity.hide')
     : streaming
-      ? itemLabel(t, latest)
+      ? activityItemLabel(t, latest)
       : t('activity.summary', { n: items.length })
 
   return (
@@ -67,7 +55,7 @@ export function ActivityLog({ items, streaming }: Props) {
                 item.kind === 'status' && item.tone === 'warn' ? ' activity-warn' : ''
               }`}
             >
-              {itemLabel(t, item)}
+              {activityItemLabel(t, item)}
             </li>
           ))}
         </ul>

@@ -107,6 +107,7 @@ from gateway.web.users import (
     UserStore,
     UserStoreError,
 )
+from gateway.web.user_store_factory import create_user_store
 
 logger = logging.getLogger("hermes.gateway.web_chat")
 
@@ -323,7 +324,7 @@ class WebChatAdapter(BasePlatformAdapter):
             from gateway.web.aux_byo_router import install_aux_byo_router
             install_aux_byo_router()
 
-            self._user_store = UserStore()
+            self._user_store = create_user_store()
             self._key_vault = KeyVault()
             self._session_db = self._ensure_session_db()
             self._runner = WebChatAgentRunner(session_db=self._session_db)
@@ -687,7 +688,28 @@ class WebChatAdapter(BasePlatformAdapter):
             "user_id": user["user_id"],
             "created_at": user["created_at"],
             "last_seen_at": user["last_seen_at"],
+            **({"email": user["email"]} if user.get("email") else {}),
+            **({"upstream_status": user["upstream_status"]} if user.get("upstream_status") else {}),
         })
+
+    def _build_skill_hint(self, user_id: str) -> Optional[str]:
+        """Ephemeral system hint listing enabled skills for this user."""
+        try:
+            from gateway.web.platform.store import PlatformStore
+        except ImportError:
+            return None
+        if not isinstance(self._user_store, PlatformStore):
+            return None
+        names = self._user_store.list_enabled_skill_names(user_id)
+        if not names:
+            return None
+        lines = ["## Enabled skills for this session"]
+        for name in names:
+            lines.append(f"- `{name}`")
+        lines.append(
+            "Use `skill_manage(action='view', name=...)` when a skill's procedure is needed."
+        )
+        return "\n".join(lines)
 
     # ── /api/conversations ─────────────────────────────────────────────
 
@@ -1117,6 +1139,13 @@ class WebChatAdapter(BasePlatformAdapter):
     async def _handle_chat(self, request: "web.Request") -> "web.StreamResponse":
         user_id = get_request_user_id(request)
         upstream_key = get_request_upstream_key(request)
+        user_row = self._user_store.get_user(user_id) if user_id else None
+        if user_row and user_row.get("upstream_status") == "pending_bind" and not upstream_key:
+            return self._json_error(
+                "upstream API key required — bind your key in Settings",
+                status=403,
+                code="upstream_key_required",
+            )
         if not upstream_key:
             # Cookie is good but the encrypted key didn't decrypt — the
             # master key was rotated, or the row is corrupt.  Force a
@@ -1135,6 +1164,11 @@ class WebChatAdapter(BasePlatformAdapter):
             return self._json_error("message required")
         session_id = body.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
         ephemeral_system_prompt = body.get("system_prompt") or None
+        skill_hint = self._build_skill_hint(user_id)
+        if skill_hint:
+            ephemeral_system_prompt = (
+                (ephemeral_system_prompt + "\n\n") if ephemeral_system_prompt else ""
+            ) + skill_hint
         conversation_history = body.get("conversation_history") or []
         if not isinstance(conversation_history, list):
             return self._json_error("conversation_history must be a list")

@@ -406,6 +406,8 @@ TOOLSETS = {
             # workspace via gateway.web.sandbox.confine_path.
             "web_file_read", "web_file_write", "web_file_patch",
             "web_file_search",
+            # Knowledge base search (requires PLATFORM_DATABASE_URL).
+            "web_knowledge_search",
         ],
         "includes": []
     },

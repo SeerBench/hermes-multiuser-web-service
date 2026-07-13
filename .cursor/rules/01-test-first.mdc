@@ -1,0 +1,44 @@
+---
+description: TEST-FIRST POLICY — all new features start from tests; failing tests block acceptance
+alwaysApply: true
+---
+
+# TEST-FIRST POLICY (NON-NEGOTIABLE)
+
+**All new features MUST start from tests. Code that does not pass tests is NOT accepted.**
+
+## Workflow
+
+1. **Write or update tests first** — define expected behavior before implementation.
+2. **Run tests** — prove they fail (red) for the right reason.
+3. **Implement** — minimal code to pass (green).
+4. **Re-run full relevant suite** — no merge without green tests.
+
+## Rules
+
+- No production code for a new feature without:
+  - at least one **happy-path** test, and
+  - one **isolation/security** edge-case test where applicable.
+- No PR/commit that breaks existing tests. Change tests only when behavior intentionally changes — document why.
+- **Never call `pytest` directly** for CI-parity work — use `scripts/run_tests.sh` (`AGENTS.md`).
+- Tenant-isolation changes MUST extend or preserve `test_concurrent_requests_dont_swap_user_contexts`.
+
+## Test paths
+
+```bash
+# Fork gateway / web_chat
+scripts/run_tests.sh tests/gateway/test_web_*.py tests/hermes_state/test_user_id_filtering.py
+
+# Platform API (when present)
+scripts/run_tests.sh tests/platform/
+```
+
+## Anti-patterns
+
+```python
+# BAD — feature shipped with no test
+def new_endpoint(): ...
+
+# GOOD — test defines contract first
+def test_register_creates_tenant_and_workspace(client): ...
+```

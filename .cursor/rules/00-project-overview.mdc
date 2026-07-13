@@ -1,0 +1,39 @@
+---
+description: Project identity, docs map, quick commands, submit checklist
+alwaysApply: true
+---
+
+# Hermes Multi-User AI SaaS Platform
+
+Fork: `SeerBench/hermes-multiuser-web-service` (Hermes Agent + multi-user web layer).
+
+| Doc | Purpose |
+|-----|---------|
+| `TODOLIST.md` | Implementation checklist |
+| `.cursor/plans/ai_saas_platform_plan_d3c7e048.plan.md` | Architecture plan |
+| `CLAUDE.md` | Fork-specific ops & Strategy 2 |
+| `AGENTS.md` | Upstream Hermes engineering guide |
+| `.cursor/rules/*.mdc` | Cursor agent rules (split from `.cursorrules`) |
+
+**Default web port:** `8643` (not `8642` api_server, not `9119` dashboard).
+
+## Quick commands
+
+```bash
+./setup-hermes.sh && source .venv/bin/activate
+uv pip install -e ".[web-chat]"
+scripts/run_tests.sh tests/gateway/test_web_*.py tests/hermes_state/test_user_id_filtering.py
+./startweb.sh --host 127.0.0.1
+cd web-chat && npm install && npm run build
+```
+
+## Before submitting changes
+
+- [ ] Tests first — see `01-test-first.mdc`
+- [ ] `scripts/run_tests.sh` green for touched areas
+- [ ] No Hermes core edits outside Strategy 2 allowlist
+- [ ] Per-user paths use `enter_user_context`
+- [ ] No secrets in code/logs; keys encrypted at rest
+- [ ] `TODOLIST.md` updated if completing a tracked task
+
+User-facing replies: **中文**. Code identifiers & architecture terms: **English**.

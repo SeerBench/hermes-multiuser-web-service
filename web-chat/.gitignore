@@ -21,3 +21,6 @@ dist-ssr
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Vitest coverage output
+coverage/

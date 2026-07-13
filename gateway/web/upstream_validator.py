@@ -89,6 +89,33 @@ class ValidationResult:
     status: Optional[int] = None
 
 
+def validate_key_against_upstream_sync(
+    api_key: str,
+    base_url: str,
+    *,
+    probe_model: Optional[str] = None,
+    timeout_seconds: float = _VALIDATE_TIMEOUT_SECONDS,
+    path: str = "/v1/models",
+) -> ValidationResult:
+    """Synchronous wrapper for bind-key and other sync call sites."""
+    import asyncio
+    import concurrent.futures
+
+    coro = validate_key_against_upstream(
+        api_key,
+        base_url,
+        probe_model=probe_model,
+        timeout_seconds=timeout_seconds,
+        path=path,
+    )
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 async def validate_key_against_upstream(
     api_key: str,
     base_url: str,

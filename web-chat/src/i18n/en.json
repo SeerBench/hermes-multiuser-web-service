@@ -3,6 +3,10 @@
 
   "nav.chat": "Chat",
   "nav.settings": "Settings",
+  "nav.files": "Files",
+  "nav.memory": "Memory",
+  "nav.skills": "Skills",
+  "nav.admin": "Admin",
 
   "common.loading": "Loading…",
   "common.cancel": "Cancel",
@@ -113,5 +117,47 @@
   "settings.preferences.language": "Interface language",
   "settings.about.title": "About this service",
   "settings.about.body": "Authentication and billing are handled by the upstream new-api gateway. Your API key was issued by your administrator; to request more capacity or a new key, contact them directly. This interface only stores the cookie session — your key is encrypted at rest and never displayed back.",
-  "settings.error.generic": "Failed to load settings."
+  "settings.error.generic": "Failed to load settings.",
+
+  "auth.title": "Welcome",
+  "auth.subtitle": "Sign in or create an account to use the AI agent.",
+  "auth.login": "Sign in",
+  "auth.register": "Register",
+  "auth.email": "Email",
+  "auth.password": "Password",
+  "auth.submit": "Continue",
+  "auth.submitting": "Please wait…",
+  "auth.legacyKey": "Sign in with API key instead",
+  "auth.error.generic": "Authentication failed.",
+
+  "files.noWorkspace": "No workspace — sign in first.",
+  "files.hint": "Upload PDF, DOCX, or text files for knowledge-base search.",
+  "files.delete": "Delete",
+
+  "memory.noWorkspace": "No workspace — sign in first.",
+  "memory.longTerm": "Long-term memory (MEMORY.md)",
+  "memory.profile": "User profile (USER.md)",
+  "memory.save": "Save",
+  "memory.saved": "Saved.",
+
+  "skills.noWorkspace": "No workspace — sign in first.",
+  "skills.hint": "Enable or disable skills for your agent sessions.",
+  "skills.enabled": "Enabled",
+
+  "admin.stats": "Users: {users} · Files: {files} · Chunks: {chunks}",
+  "admin.email": "Email",
+  "admin.role": "Role",
+  "admin.status": "Upstream",
+  "admin.enable": "Enable",
+  "admin.disable": "Disable",
+
+  "settings.account.email": "Email",
+  "settings.account.upstream": "Upstream status",
+  "settings.bindKey.title": "Bind API key",
+  "settings.bindKey.hint": "Paste the new-api key issued by your administrator to enable chat.",
+  "settings.bindKey.placeholder": "sk-…",
+  "settings.bindKey.submit": "Bind key",
+  "settings.bindKey.busy": "Binding…",
+  "settings.bindKey.ok": "Key bound successfully.",
+  "settings.bindKey.fail": "Could not bind key."
 }

@@ -1,0 +1,46 @@
+---
+description: FastAPI platform-api conventions — control plane, PG, RAG, admin
+globs: platform-api/**,tests/platform/**,deploy/**
+alwaysApply: false
+---
+
+# Platform API (`platform-api/`)
+
+FastAPI **control plane** — not the Agent SSE layer (that stays in `web_chat`).
+
+## Responsibilities
+
+- Auth: register, login, logout, bind-key, `/me`
+- Workspaces, files metadata, knowledge search API
+- Memory / skill entitlements (PG + filesystem facade)
+- Admin: users, stats, audit logs
+- `UpstreamProvisioner` integration
+
+## Stack
+
+- FastAPI + SQLAlchemy + Alembic
+- PostgreSQL 16 + pgvector
+- Redis (ingestion queue)
+- MinIO / S3 via boto3
+
+## DB rules
+
+- Every tenant-scoped row has `tenant_id`.
+- Filter `WHERE tenant_id = :tid` in application layer (MVP).
+- Cross-tenant → 404.
+
+## API prefix
+
+`/api/v1/` — nginx routes here; Agent Gateway keeps `/api/chat`, `/api/conversations`.
+
+## Tests
+
+```bash
+scripts/run_tests.sh tests/platform/
+```
+
+Write router tests before handlers. Mock `UpstreamProvisioner` in unit tests; integration tests with testcontainers or docker-compose optional.
+
+## Worker
+
+`platform-api/worker/` — async ingestion: parse → chunk → embed → `document_chunks`. Status on `files.status`.

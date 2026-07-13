@@ -12,11 +12,9 @@ import type {
   ChatMessage,
   CommandSpec,
   ConversationSummary,
-  ServerMessage,
   UploadedFile,
 } from '../api'
 import { ActivityLog } from '../components/ActivityLog'
-import type { ActivityItem } from '../components/ActivityLog'
 import {
   AttachmentList,
   PendingAttachments,
@@ -29,51 +27,22 @@ import { MessageActions } from '../components/MessageActions'
 import { ReasoningPanel } from '../components/ReasoningPanel'
 import { SlashCommandPopover } from '../components/SlashCommandPopover'
 import { ToolEvent } from '../components/ToolEvent'
-import { formatBytes } from '../format'
+import {
+  appendToken,
+  pushActivity,
+  turnHasText,
+  updateAssistant,
+} from '../chatStreamHelpers'
+import {
+  attachmentNote,
+  messagesToTurns,
+  newTurnId,
+  turnToCopyText,
+  type ToolSegment,
+  type Turn,
+} from '../chatTurns'
 import { useLocale, useT } from '../i18n'
-import type { Locale, Translator } from '../i18n'
-
-// ── Domain types ──────────────────────────────────────────────────────────
-
-type ToolSegment = {
-  kind: 'tool'
-  // SSE tool_call id when available — lets us match tool_end back to the
-  // tool_start that opened the segment even when tools interleave.
-  id: string | null
-  tool: string
-  preview: string
-  args: string
-  result_preview?: string
-  duration?: number
-  error?: boolean
-}
-
-type Segment =
-  | { kind: 'text'; text: string }
-  | ToolSegment
-  | { kind: 'system'; text: string; tone?: 'ok' | 'error' }
-
-type Turn = {
-  id: string
-  role: 'user' | 'assistant'
-  segments: Segment[]
-  reasoning?: string
-  status: 'streaming' | 'done' | 'error'
-  errorMessage?: string
-  usage?: Record<string, number>
-  // Behind-the-scenes activity feed (assistant turns): lifecycle status,
-  // loop-iteration steps, pre-tool "thinking" hints.
-  activity: ActivityItem[]
-  // Files attached to a user turn (workspace-relative paths the agent reads).
-  attachments?: UploadedFile[]
-}
-
-// Build the reference block appended to a message when files are attached,
-// so the agent knows to read them with web_file_read.
-function attachmentNote(t: Translator, files: UploadedFile[]): string {
-  const lines = files.map((f) => `- ${f.path} (${formatBytes(f.size)})`)
-  return `\n\n${t('attach.inject.header')}\n${lines.join('\n')}`
-}
+import type { Locale } from '../i18n'
 
 type KeyModalState =
   | { open: false }
@@ -83,110 +52,12 @@ type KeyModalState =
       pendingMessage: string
     }
 
-// `crypto.randomUUID` only exists in secure contexts (HTTPS or
-// localhost).  This gateway is commonly accessed over plain HTTP on a
-// Tailscale / LAN IP, where the API is undefined and calling it throws
-// TypeError.  We only need a key that's unique within this React tree's
-// lifetime, not a real UUID, so a timestamp + random suffix is fine.
-function newTurnId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-// ── messagesToTurns: server history → renderable Turn[] ───────────────────
-
-function messagesToTurns(messages: ServerMessage[]): Turn[] {
-  const turns: Turn[] = []
-  let assistantTurn: Turn | null = null
-
-  // Pre-index tool results by tool_call_id so we can attach them to the
-  // assistant turn's tool segments without a second pass.
-  const toolResults = new Map<string, string>()
-  for (const m of messages) {
-    if (m.role === 'tool' && m.tool_call_id) {
-      toolResults.set(m.tool_call_id, m.content ?? '')
-    }
-  }
-
-  const flushAssistant = () => {
-    if (assistantTurn) {
-      turns.push(assistantTurn)
-      assistantTurn = null
-    }
-  }
-
-  for (const m of messages) {
-    if (m.role === 'user') {
-      flushAssistant()
-      turns.push({
-        id: newTurnId(),
-        role: 'user',
-        segments: [{ kind: 'text', text: m.content ?? '' }],
-        status: 'done',
-        activity: [],
-      })
-      continue
-    }
-    if (m.role !== 'assistant') {
-      // tool messages are merged via toolResults above; system messages
-      // are skipped (we'd surface them as system segments only when the
-      // SPA itself emits them, e.g. /command results).
-      continue
-    }
-    if (!assistantTurn) {
-      assistantTurn = {
-        id: newTurnId(),
-        role: 'assistant',
-        segments: [],
-        status: 'done',
-        activity: [],
-      }
-    }
-    if (m.reasoning) {
-      assistantTurn.reasoning = (assistantTurn.reasoning ?? '') + m.reasoning
-    }
-    if (m.content) {
-      assistantTurn.segments.push({ kind: 'text', text: m.content })
-    }
-    for (const tc of m.tool_calls ?? []) {
-      const id = tc.id ? String(tc.id) : null
-      const fnName = tc.function?.name ?? tc.name ?? '(tool)'
-      const rawArgs = tc.function?.arguments ?? tc.arguments
-      let argsStr = ''
-      if (rawArgs != null) {
-        argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
-      }
-      const result = id ? toolResults.get(id) : undefined
-      assistantTurn.segments.push({
-        kind: 'tool',
-        id,
-        tool: fnName,
-        preview: argsStr.slice(0, 280),
-        args: argsStr,
-        result_preview: result,
-        duration: 0,
-        error: false,
-      })
-    }
-  }
-  flushAssistant()
-  return turns
-}
-
-// Stitch a turn's text into a single string for clipboard copy.
-function turnToCopyText(turn: Turn): string {
-  return turn.segments
-    .filter((s): s is Exclude<Segment, ToolSegment> => s.kind !== 'tool')
-    .map((s) => s.text)
-    .join('\n')
-    .trim()
-}
-
-// ── ChatPage ──────────────────────────────────────────────────────────────
-
-export function ChatPage() {
+export function ChatPage({
+  signedIn = false,
+}: {
+  platformMode?: boolean
+  signedIn?: boolean
+} = {}) {
   const t = useT()
   const { setLocale } = useLocale()
   const [convos, setConvos] = useState<ConversationSummary[]>([])
@@ -208,7 +79,16 @@ export function ChatPage() {
     let cancelled = false
     void (async () => {
       try {
-        await auth.me()
+        if (!signedIn) {
+          await auth.me()
+        } else {
+          // Platform session — cookie already issued; load conversations.
+          try {
+            await auth.me()
+          } catch {
+            // Gateway may still accept the shared platform session cookie.
+          }
+        }
         if (cancelled) return
         try {
           setConvos(await convosApi.list())
@@ -222,6 +102,7 @@ export function ChatPage() {
         }
       } catch (err) {
         if (cancelled) return
+        if (signedIn) return
         if (err instanceof ApiError && err.status === 401) {
           setKeyModal({ open: true, reason: 'first-message', pendingMessage: '' })
         }
@@ -230,7 +111,7 @@ export function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [signedIn])
 
   // Auto-scroll on new content.
   useEffect(() => {
@@ -1004,34 +885,4 @@ export function ChatPage() {
       )}
     </div>
   )
-}
-
-function updateAssistant(prev: Turn[], fn: (t: Turn) => Turn): Turn[] {
-  if (prev.length === 0) return prev
-  const last = prev[prev.length - 1]
-  if (last.role !== 'assistant') return prev
-  return [...prev.slice(0, -1), fn(last)]
-}
-
-function pushActivity(prev: Turn[], item: ActivityItem): Turn[] {
-  return updateAssistant(prev, (turn) => ({
-    ...turn,
-    activity: [...turn.activity, item],
-  }))
-}
-
-function appendToken(turn: Turn, text: string): Turn {
-  if (!text) return turn
-  const segments = [...turn.segments]
-  const last = segments[segments.length - 1]
-  if (last && last.kind === 'text') {
-    segments[segments.length - 1] = { kind: 'text', text: last.text + text }
-  } else {
-    segments.push({ kind: 'text', text })
-  }
-  return { ...turn, segments }
-}
-
-function turnHasText(turn: Turn): boolean {
-  return turn.segments.some((s) => (s.kind === 'text' || s.kind === 'system') && s.text)
 }
