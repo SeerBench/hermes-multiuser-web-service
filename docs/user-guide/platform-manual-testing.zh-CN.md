@@ -47,7 +47,14 @@ python scripts/create_admin.py --email admin@example.com --password 'changeme123
 
 ## 模式 A：Platform 全链路（推荐）
 
-需要 **platform-api + gateway + 前端**，共 3 个终端。
+**一键启动**（platform-api + gateway，SQLite 控制面）：
+
+```bash
+./startplatform.sh --host 127.0.0.1
+# 使用 PostgreSQL：./startplatform.sh --postgres --host 127.0.0.1
+```
+
+或手动分终端启动（等价于脚本内部流程）：
 
 ### 终端 1 — platform-api（:8700）
 

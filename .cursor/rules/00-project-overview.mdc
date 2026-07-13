@@ -21,9 +21,10 @@ Fork: `SeerBench/hermes-multiuser-web-service` (Hermes Agent + multi-user web la
 
 ```bash
 ./setup-hermes.sh && source .venv/bin/activate
-uv pip install -e ".[web-chat]"
+uv pip install -e ".[web-chat,platform]"
 scripts/run_tests.sh tests/gateway/test_web_*.py tests/hermes_state/test_user_id_filtering.py
-./startweb.sh --host 127.0.0.1
+./startplatform.sh --host 127.0.0.1   # Platform SaaS（platform-api + gateway）
+./startweb.sh --host 127.0.0.1        # Legacy key-only
 cd web-chat && npm install && npm run build
 ```
 
