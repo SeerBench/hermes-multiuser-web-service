@@ -58,6 +58,12 @@ export function parseSseFrame(frame: string): ChatEvent | null {
         kind: String(data.kind ?? 'thinking'),
         text: String(data.text ?? ''),
       }
+    case 'title':
+      return {
+        type: 'title',
+        session_id: String(data.session_id ?? ''),
+        title: String(data.title ?? ''),
+      }
     case 'done':
       return {
         type: 'done',

@@ -28,6 +28,16 @@ class InstallFromCatalogBody(BaseModel):
     overwrite: bool = False
 
 
+class SkillCreateBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    skill_md: str = Field(..., min_length=1)
+    category: str = Field(default="productivity", min_length=1, max_length=64)
+
+
+class SkillWriteBody(BaseModel):
+    skill_md: str = Field(..., min_length=1)
+
+
 @router.get("/{workspace_id}/skills")
 def list_skills(workspace_id: str, user_id: str = Depends(get_current_user_id)) -> List[dict[str, Any]]:
     ws = _get_workspace(workspace_id, user_id)
@@ -88,6 +98,74 @@ def install_from_catalog(
         target_id=body.name.strip(),
         workspace_id=workspace_id,
     )
+    return result
+
+
+@router.post("/{workspace_id}/skills")
+def create_skill(
+    workspace_id: str,
+    body: SkillCreateBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Create a new user-owned skill in the caller's workspace."""
+    _get_workspace(workspace_id, user_id)
+    from gateway.web.tools.sandboxed_skill_manage import create_user_skill
+
+    with enter_user_context(user_id):
+        result = create_user_skill(
+            body.name.strip(),
+            body.skill_md,
+            category=body.category.strip(),
+        )
+    if not result.get("success"):
+        code = result.get("code")
+        err = str(result.get("error") or "create failed")
+        if code == "already_installed":
+            raise HTTPException(status_code=409, detail=err)
+        raise HTTPException(status_code=400, detail=err)
+    return result
+
+
+@router.put("/{workspace_id}/skills/{skill_name}")
+def replace_skill(
+    workspace_id: str,
+    skill_name: str,
+    body: SkillWriteBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Replace SKILL.md for a user skill (forks global into workspace)."""
+    _get_workspace(workspace_id, user_id)
+    from gateway.web.tools.sandboxed_skill_manage import write_user_skill
+
+    with enter_user_context(user_id):
+        result = write_user_skill(skill_name.strip(), body.skill_md)
+    if not result.get("success"):
+        err = str(result.get("error") or "write failed")
+        if "not found" in err.lower():
+            raise HTTPException(status_code=404, detail=err)
+        raise HTTPException(status_code=400, detail=err)
+    return result
+
+
+@router.delete("/{workspace_id}/skills/{skill_name}")
+def remove_skill(
+    workspace_id: str,
+    skill_name: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Delete a user-owned skill; global catalog skills are read-only."""
+    _get_workspace(workspace_id, user_id)
+    from gateway.web.tools.sandboxed_skill_manage import delete_user_skill
+
+    with enter_user_context(user_id):
+        result = delete_user_skill(skill_name.strip())
+    if not result.get("success"):
+        err = str(result.get("error") or "delete failed")
+        if "not found" in err.lower():
+            raise HTTPException(status_code=404, detail=err)
+        if "read-only" in err.lower() or "global" in err.lower():
+            raise HTTPException(status_code=403, detail=err)
+        raise HTTPException(status_code=400, detail=err)
     return result
 
 

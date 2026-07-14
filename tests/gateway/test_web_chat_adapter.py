@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -336,6 +336,38 @@ async def test_chat_successful_run_emits_done(adapter_app, monkeypatch):
     text = await resp.text()
     assert "event: done" in text
     assert "event: error" not in text
+
+
+@pytest.mark.asyncio
+async def test_chat_done_invokes_maybe_auto_title(adapter_app, monkeypatch):
+    """After a successful turn, web_chat requests auto-title generation."""
+    await _patch_validator(monkeypatch, valid=True)
+    await adapter_app.client.post("/api/auth/login", json={"api_key": "sk-good"})
+
+    async def _ok(**kw):
+        return (
+            {
+                "session_id": kw.get("session_id") or "web_abc",
+                "final_response": "Hello there, here is an answer.",
+                "failed": False,
+            },
+            {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+        )
+
+    adapter_app.adapter._runner.run = _ok
+
+    with patch("agent.title_generator.maybe_auto_title") as mock_title:
+        resp = await adapter_app.client.post(
+            "/api/chat",
+            json={"message": "What is Hermes?"},
+        )
+        assert resp.status == 200
+        body = await resp.text()
+        assert "event: done" in body
+        mock_title.assert_called_once()
+        args = mock_title.call_args
+        assert args.args[2] == "What is Hermes?"
+        assert "answer" in args.args[3].lower()
 
 
 @pytest.mark.asyncio

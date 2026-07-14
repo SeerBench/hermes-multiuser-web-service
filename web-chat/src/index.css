@@ -30,6 +30,9 @@
 }
 
 :root {
+  /* Responsive breakpoints (shared with JS via matchMedia) */
+  --bp-mobile: 768px;
+  --bp-desktop: 1024px;
   /* Align with legacy styles.css dark defaults */
   --radius: 0.5rem;
   --background: #0f1014;

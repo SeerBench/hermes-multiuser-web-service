@@ -45,6 +45,33 @@ def init_engine(database_url: str) -> Engine:
 def create_schema(engine: Engine) -> None:
     """Create all tables (MVP — Alembic migrations live under platform-api/)."""
     Base.metadata.create_all(bind=engine)
+    migrate_schema(engine)
+
+
+def migrate_schema(engine: Engine) -> None:
+    """Additive migrations for existing SQLite/PostgreSQL deployments."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "files" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("files")}
+        with engine.begin() as conn:
+            if "origin" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE files ADD COLUMN origin VARCHAR(16) "
+                        "NOT NULL DEFAULT 'platform'"
+                    )
+                )
+            if "category_id" not in cols:
+                conn.execute(
+                    text("ALTER TABLE files ADD COLUMN category_id VARCHAR(36)")
+                )
+    if "workspaces" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("workspaces")}
+        with engine.begin() as conn:
+            if "settings_json" not in cols:
+                conn.execute(text("ALTER TABLE workspaces ADD COLUMN settings_json TEXT"))
 
 
 @contextmanager

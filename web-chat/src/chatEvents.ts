@@ -26,5 +26,6 @@ export type ChatEvent =
   | { type: 'status'; kind: 'lifecycle' | 'warn'; message: string }
   | { type: 'step'; step: number; tools: string[] }
   | { type: 'activity'; kind: string; text: string }
+  | { type: 'title'; session_id: string; title: string }
   | { type: 'done'; session_id: string; usage: Record<string, number> }
   | { type: 'error'; message: string; code?: string }

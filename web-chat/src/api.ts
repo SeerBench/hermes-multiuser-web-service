@@ -203,6 +203,7 @@ export type ChatRequest = {
   session_id?: string
   session_key?: string
   system_prompt?: string
+  model?: string
   conversation_history?: ChatMessage[]
 }
 

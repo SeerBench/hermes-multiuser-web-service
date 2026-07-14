@@ -28,9 +28,37 @@ export type PlatformFile = {
   filename: string
   mime_type?: string
   size_bytes?: number
+  storage_key?: string
+  origin?: string
+  category_id?: string | null
+  tag_ids?: string[]
   status: string
   error_message?: string | null
   created_at: number
+}
+
+export type FileCategory = {
+  id: string
+  name: string
+  sort_order: number
+  created_at: number
+}
+
+export type FileTag = {
+  id: string
+  name: string
+  created_at: number
+}
+
+export type WorkspaceModels = {
+  models: { id: string; owned_by?: string }[]
+  preferred_model?: string | null
+  default_model?: string
+}
+
+export type WorkspacePreferences = {
+  preferred_model?: string | null
+  default_model?: string
 }
 
 export type SkillRow = {
@@ -189,17 +217,114 @@ export const platform = {
       { method: 'PATCH', body: JSON.stringify(patch) },
     ),
 
-  listFiles: (workspaceId: string) =>
-    platformRequest<PlatformFile[]>(`/workspaces/${workspaceId}/files`),
+  listFiles: (
+    workspaceId: string,
+    opts?: {
+      sort?: 'created_at' | 'size' | 'name'
+      order?: 'asc' | 'desc'
+      category_id?: string
+      tag?: string
+    },
+  ) => {
+    const q = new URLSearchParams()
+    if (opts?.sort) q.set('sort', opts.sort)
+    if (opts?.order) q.set('order', opts.order)
+    if (opts?.category_id) q.set('category_id', opts.category_id)
+    if (opts?.tag) q.set('tag', opts.tag)
+    const qs = q.toString()
+    return platformRequest<PlatformFile[]>(
+      `/workspaces/${workspaceId}/files${qs ? `?${qs}` : ''}`,
+    )
+  },
 
-  uploadFiles: (workspaceId: string, files: File[]) => {
+  uploadFiles: (workspaceId: string, files: File[], ingest = true) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f, f.name)
+    const qs = ingest ? '' : '?ingest=false'
     return platformRequest<PlatformFile[]>(
-      `/workspaces/${workspaceId}/files`,
+      `/workspaces/${workspaceId}/files${qs}`,
       { method: 'POST', body: fd },
     )
   },
+
+  patchFile: (
+    workspaceId: string,
+    fileId: string,
+    patch: { category_id?: string | null; tag_ids?: string[] },
+  ) =>
+    platformRequest<PlatformFile>(
+      `/workspaces/${workspaceId}/files/${fileId}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    ),
+
+  ingestFile: (workspaceId: string, fileId: string) =>
+    platformRequest<PlatformFile>(
+      `/workspaces/${workspaceId}/files/${fileId}/ingest`,
+      { method: 'POST' },
+    ),
+
+  listFileCategories: (workspaceId: string) =>
+    platformRequest<FileCategory[]>(`/workspaces/${workspaceId}/file-categories`),
+
+  createFileCategory: (workspaceId: string, name: string) =>
+    platformRequest<FileCategory>(`/workspaces/${workspaceId}/file-categories`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFileCategory: (workspaceId: string, categoryId: string) =>
+    platformRequest<{ status: string }>(
+      `/workspaces/${workspaceId}/file-categories/${categoryId}`,
+      { method: 'DELETE' },
+    ),
+
+  listFileTags: (workspaceId: string) =>
+    platformRequest<FileTag[]>(`/workspaces/${workspaceId}/file-tags`),
+
+  createFileTag: (workspaceId: string, name: string) =>
+    platformRequest<FileTag>(`/workspaces/${workspaceId}/file-tags`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFileTag: (workspaceId: string, tagId: string) =>
+    platformRequest<{ status: string }>(
+      `/workspaces/${workspaceId}/file-tags/${tagId}`,
+      { method: 'DELETE' },
+    ),
+
+  listModels: (workspaceId: string) =>
+    platformRequest<WorkspaceModels>(`/workspaces/${workspaceId}/models`),
+
+  getPreferences: (workspaceId: string) =>
+    platformRequest<WorkspacePreferences>(`/workspaces/${workspaceId}/preferences`),
+
+  patchPreferences: (workspaceId: string, patch: { preferred_model?: string }) =>
+    platformRequest<WorkspacePreferences>(`/workspaces/${workspaceId}/preferences`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  createSkill: (
+    workspaceId: string,
+    body: { name: string; skill_md: string; category?: string },
+  ) =>
+    platformRequest<Record<string, unknown>>(`/workspaces/${workspaceId}/skills`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  replaceSkill: (workspaceId: string, skillName: string, skill_md: string) =>
+    platformRequest<Record<string, unknown>>(
+      `/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}`,
+      { method: 'PUT', body: JSON.stringify({ skill_md }) },
+    ),
+
+  deleteSkill: (workspaceId: string, skillName: string) =>
+    platformRequest<Record<string, unknown>>(
+      `/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}`,
+      { method: 'DELETE' },
+    ),
 
   deleteFile: (workspaceId: string, fileId: string) =>
     platformRequest<{ status: string }>(

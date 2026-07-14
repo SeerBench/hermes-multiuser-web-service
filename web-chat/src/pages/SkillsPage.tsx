@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import { PageShell } from '../components/PageShell'
+import { MarkdownEditor } from '../components/MarkdownEditor'
 import { useT } from '../i18n'
 import {
   PlatformApiError,
@@ -29,6 +31,21 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
+import { Input } from '@/components/ui/input'
+
+const SKILL_TEMPLATE = `---
+name: my-skill
+description: Short one-line description.
+version: "1.0"
+---
+
+# My Skill
+
+## When to Use
+
+## Procedure
+`
+
 export function SkillsPage() {
   const t = useT()
   const workspaceId = getStoredWorkspaceId()
@@ -38,6 +55,11 @@ export function SkillsPage() {
   const [selected, setSelected] = useState<SkillDetail | null>(null)
   const [detailBusy, setDetailBusy] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState('')
+  const [createContent, setCreateContent] = useState(SKILL_TEMPLATE)
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -67,13 +89,69 @@ export function SkillsPage() {
     setDetailBusy(true)
     setError(null)
     setDetailOpen(true)
+    setEditing(false)
     try {
-      setSelected(await platform.getSkill(workspaceId, name))
+      const detail = await platform.getSkill(workspaceId, name)
+      setSelected(detail)
+      setEditContent(detail.content)
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
       setDetailOpen(false)
     } finally {
       setDetailBusy(false)
+    }
+  }
+
+  const saveEdit = async () => {
+    if (!workspaceId || !selected) return
+    setBusy(true)
+    try {
+      await platform.replaceSkill(workspaceId, selected.name, editContent)
+      await reload()
+      const detail = await platform.getSkill(workspaceId, selected.name)
+      setSelected(detail)
+      setEditing(false)
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeSkill = async (name: string) => {
+    if (!workspaceId) return
+    if (!window.confirm(t('skills.deleteConfirm', { name }))) return
+    setBusy(true)
+    try {
+      await platform.deleteSkill(workspaceId, name)
+      setDetailOpen(false)
+      setSelected(null)
+      await reload()
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createSkill = async () => {
+    if (!workspaceId || !createName.trim()) return
+    setBusy(true)
+    try {
+      await platform.createSkill(workspaceId, {
+        name: createName.trim(),
+        skill_md: createContent,
+      })
+      await reload()
+      const created = createName.trim()
+      setCreateOpen(false)
+      setCreateName('')
+      setCreateContent(SKILL_TEMPLATE)
+      await openDetail(created)
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -104,11 +182,15 @@ export function SkillsPage() {
   )
 
   return (
-    <div className="panel-page mx-auto max-w-3xl space-y-6 p-4">
-      <div>
-        <h2 className="text-xl font-semibold">{t('nav.skills')}</h2>
-        <p className="text-muted-foreground mt-1 text-sm">{t('skills.hint')}</p>
-      </div>
+    <PageShell
+      title={t('nav.skills')}
+      hint={t('skills.hint')}
+      actions={
+        <Button type="button" onClick={() => setCreateOpen(true)}>
+          {t('skills.create')}
+        </Button>
+      }
+    >
 
       {error && (
         <Alert variant="destructive">
@@ -130,6 +212,8 @@ export function SkillsPage() {
                 onSelect={() => void openDetail(s.name)}
                 onToggle={() => void toggle(s.name, s.enabled !== false)}
                 enabledLabel={t('skills.enabled')}
+                onDelete={() => void removeSkill(s.name)}
+                deleteLabel={t('skills.delete')}
               />
             ))}
           </CardContent>
@@ -204,22 +288,58 @@ export function SkillsPage() {
           {selected && !detailBusy && (
             <>
               <ScrollArea className="max-h-[min(55vh,480px)] flex-1 px-6 py-4">
-                {selected.description && (
+                {selected.description && !editing && (
                   <p className="text-muted-foreground mb-3 text-sm">
                     {selected.description}
                   </p>
                 )}
-                {selected.source === 'user' && (
+                {selected.source === 'user' && !editing && (
                   <p className="text-muted-foreground mb-3 text-xs">
                     {t('skills.detail.userHint')}
                   </p>
                 )}
-                <pre className="bg-muted overflow-auto rounded-md p-3 text-xs leading-relaxed whitespace-pre-wrap">
-                  {selected.content}
-                </pre>
+                {editing && selected.source === 'user' ? (
+                  <MarkdownEditor
+                    value={editContent}
+                    onChange={setEditContent}
+                    minHeight={320}
+                  />
+                ) : (
+                  <MarkdownEditor
+                    value={selected.content}
+                    readOnly
+                    minHeight={280}
+                  />
+                )}
               </ScrollArea>
-              {selected.source === 'global' && (
-                <DialogFooter className="border-t border-border px-6 py-3">
+              <DialogFooter className="border-t border-border px-6 py-3 gap-2">
+                {selected.source === 'user' && (
+                  <>
+                    {editing ? (
+                      <Button type="button" disabled={busy} onClick={() => void saveEdit()}>
+                        {t('skills.save')}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setEditing(true)}
+                      >
+                        {t('skills.edit')}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={busy}
+                      onClick={() => void removeSkill(selected.name)}
+                    >
+                      {t('skills.delete')}
+                    </Button>
+                  </>
+                )}
+                {selected.source === 'global' && (
                   <Button
                     type="button"
                     disabled={busy}
@@ -227,13 +347,36 @@ export function SkillsPage() {
                   >
                     {busy ? t('skills.installing') : t('skills.install')}
                   </Button>
-                </DialogFooter>
-              )}
+                )}
+              </DialogFooter>
             </>
           )}
         </DialogContent>
       </Dialog>
-    </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t('skills.create')}</DialogTitle>
+            <DialogDescription>{t('skills.createHint')}</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            placeholder={t('skills.createName')}
+          />
+          <MarkdownEditor value={createContent} onChange={setCreateContent} minHeight={280} />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="button" disabled={busy || !createName.trim()} onClick={() => void createSkill()}>
+              {t('skills.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageShell>
   )
 }
 
@@ -245,6 +388,8 @@ type ItemProps = {
   enabledLabel: string
   onInstall?: () => void
   installLabel?: string
+  onDelete?: () => void
+  deleteLabel?: string
 }
 
 function SkillListItem({
@@ -255,6 +400,8 @@ function SkillListItem({
   enabledLabel,
   onInstall,
   installLabel,
+  onDelete,
+  deleteLabel,
 }: ItemProps) {
   return (
     <div
@@ -280,6 +427,11 @@ function SkillListItem({
         )}
       </button>
       <div className="flex shrink-0 items-center gap-3">
+        {onDelete && deleteLabel && (
+          <Button type="button" size="sm" variant="destructive" disabled={busy} onClick={onDelete}>
+            {deleteLabel}
+          </Button>
+        )}
         {onInstall && installLabel && (
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onInstall}>
             {installLabel}

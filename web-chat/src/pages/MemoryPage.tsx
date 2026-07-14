@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
+import { PageShell } from '../components/PageShell'
+import { MarkdownEditor } from '../components/MarkdownEditor'
 import { useT } from '../i18n'
 import {
   PlatformApiError,
   getStoredWorkspaceId,
   platform,
 } from '../platformClient'
+import { Button } from '@/components/ui/button'
 
 export function MemoryPage() {
   const t = useT()
   const workspaceId = getStoredWorkspaceId()
   const [longTerm, setLongTerm] = useState('')
   const [profile, setProfile] = useState('')
+  const [savedLong, setSavedLong] = useState('')
+  const [savedProfile, setSavedProfile] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -22,11 +27,15 @@ export function MemoryPage() {
       .then((m) => {
         setLongTerm(m.long_term)
         setProfile(m.profile)
+        setSavedLong(m.long_term)
+        setSavedProfile(m.profile)
       })
       .catch((err) =>
         setError(err instanceof PlatformApiError ? err.message : String(err)),
       )
   }, [workspaceId])
+
+  const dirty = longTerm !== savedLong || profile !== savedProfile
 
   const save = async () => {
     if (!workspaceId) return
@@ -38,6 +47,8 @@ export function MemoryPage() {
         long_term: longTerm,
         profile: profile,
       })
+      setSavedLong(longTerm)
+      setSavedProfile(profile)
       setStatus(t('memory.saved'))
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
@@ -51,29 +62,35 @@ export function MemoryPage() {
   }
 
   return (
-    <div className="panel-page">
-      <h2>{t('nav.memory')}</h2>
-      <label>
-        {t('memory.longTerm')}
-        <textarea
-          rows={12}
+    <PageShell
+      title={t('nav.memory')}
+      hint={t('memory.intro')}
+      actions={
+        <Button type="button" disabled={busy || !dirty} onClick={() => void save()}>
+          {t('memory.save')}
+        </Button>
+      }
+    >
+      <section className="memory-section">
+        <h3>{t('memory.longTerm')}</h3>
+        <MarkdownEditor
           value={longTerm}
-          onChange={(e) => setLongTerm(e.target.value)}
+          onChange={setLongTerm}
+          editLabel={t('memory.edit')}
+          previewLabel={t('memory.preview')}
         />
-      </label>
-      <label>
-        {t('memory.profile')}
-        <textarea
-          rows={8}
+      </section>
+      <section className="memory-section">
+        <h3>{t('memory.profile')}</h3>
+        <MarkdownEditor
           value={profile}
-          onChange={(e) => setProfile(e.target.value)}
+          onChange={setProfile}
+          editLabel={t('memory.edit')}
+          previewLabel={t('memory.preview')}
         />
-      </label>
+      </section>
       {error && <p className="auth-error">{error}</p>}
       {status && <p className="page-ok">{status}</p>}
-      <button type="button" disabled={busy} onClick={save}>
-        {t('memory.save')}
-      </button>
-    </div>
+    </PageShell>
   )
 }

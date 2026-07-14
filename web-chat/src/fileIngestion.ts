@@ -1,7 +1,7 @@
 import type { PlatformFile } from './platformClient'
 
 /** 文件 ingestion 已结束的状态。 */
-export const TERMINAL_FILE_STATUSES = new Set(['ready', 'failed'])
+export const TERMINAL_FILE_STATUSES = new Set(['ready', 'failed', 'skipped'])
 
 export const FILE_INGEST_POLL_MS = 2000
 

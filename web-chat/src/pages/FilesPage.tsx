@@ -1,19 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatBytes } from '../format'
 import {
   FILE_INGEST_POLL_MS,
   isTerminalFileStatus,
   mergeFileUpdates,
 } from '../fileIngestion'
+import { PageShell } from '../components/PageShell'
 import { useT } from '../i18n'
 import {
   PlatformApiError,
   getStoredWorkspaceId,
   platform,
+  type FileCategory,
+  type FileTag,
   type PlatformFile,
 } from '../platformClient'
+import { uploadWithProgress } from '../uploadWithProgress'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 function FileStatusBadge({ file }: { file: PlatformFile }) {
@@ -35,6 +40,7 @@ function FileStatusBadge({ file }: { file: PlatformFile }) {
         title={file.error_message ?? undefined}
         className={cn(
           file.status === 'ready' && 'bg-emerald-600/20 text-emerald-500 hover:bg-emerald-600/20',
+          file.status === 'skipped' && 'bg-muted text-muted-foreground',
           inFlight && 'gap-1.5',
         )}
       >
@@ -48,27 +54,49 @@ function FileStatusBadge({ file }: { file: PlatformFile }) {
   )
 }
 
+type SortKey = 'created_at' | 'size' | 'name'
+
 export function FilesPage() {
   const t = useT()
   const workspaceId = getStoredWorkspaceId()
   const [files, setFiles] = useState<PlatformFile[]>([])
+  const [categories, setCategories] = useState<FileCategory[]>([])
+  const [tags, setTags] = useState<FileTag[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sort, setSort] = useState<SortKey>('created_at')
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc')
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [newCategory, setNewCategory] = useState('')
+  const [newTag, setNewTag] = useState('')
+  const [uploadPct, setUploadPct] = useState<number | null>(null)
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
     try {
-      setFiles(await platform.listFiles(workspaceId))
+      const [fileRows, catRows, tagRows] = await Promise.all([
+        platform.listFiles(workspaceId, {
+          sort,
+          order,
+          category_id: categoryFilter ?? undefined,
+          tag: tagFilter ?? undefined,
+        }),
+        platform.listFileCategories(workspaceId),
+        platform.listFileTags(workspaceId),
+      ])
+      setFiles(fileRows)
+      setCategories(catRows)
+      setTags(tagRows)
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
     }
-  }, [workspaceId])
+  }, [workspaceId, sort, order, categoryFilter, tagFilter])
 
   useEffect(() => {
-    reload()
+    void reload()
   }, [reload])
 
-  // 对 pending / processing 文件轮询 status 端点，直到 ready 或 failed。
   useEffect(() => {
     if (!workspaceId) return
     let cancelled = false
@@ -99,21 +127,43 @@ export function FilesPage() {
     }
   }, [workspaceId])
 
-  const onUpload = async (list: FileList | null) => {
+  const categoryName = useMemo(() => {
+    const m = new Map(categories.map((c) => [c.id, c.name]))
+    return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
+  }, [categories])
+
+  const tagName = useMemo(() => {
+    const m = new Map(tags.map((tg) => [tg.id, tg.name]))
+    return (ids?: string[]) =>
+      (ids ?? []).map((id) => m.get(id) ?? id).join(', ') || '—'
+  }, [tags])
+
+  const onUpload = async (list: FileList | null, ingest = true) => {
     if (!workspaceId || !list?.length) return
     setBusy(true)
     setError(null)
+    setUploadPct(0)
     try {
-      const uploaded = await platform.uploadFiles(workspaceId, Array.from(list))
+      const picked = Array.from(list)
+      const qs = ingest ? '' : '?ingest=false'
+      const uploaded = (await uploadWithProgress(
+        `/api/v1/workspaces/${workspaceId}/files${qs}`,
+        picked,
+        {
+          credentials: 'include',
+          onProgress: (ev) => setUploadPct(ev.percent),
+        },
+      )) as PlatformFile[]
       setFiles((prev) => {
         const ids = new Set(uploaded.map((u) => u.id))
         const rest = prev.filter((f) => !ids.has(f.id))
         return [...uploaded, ...rest]
       })
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
+      setUploadPct(null)
     }
   }
 
@@ -130,45 +180,229 @@ export function FilesPage() {
     }
   }
 
+  const onIngest = async (id: string) => {
+    if (!workspaceId) return
+    setBusy(true)
+    try {
+      const updated = await platform.ingestFile(workspaceId, id)
+      setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)))
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addCategory = async () => {
+    if (!workspaceId || !newCategory.trim()) return
+    try {
+      await platform.createFileCategory(workspaceId, newCategory.trim())
+      setNewCategory('')
+      await reload()
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    }
+  }
+
+  const addTag = async () => {
+    if (!workspaceId || !newTag.trim()) return
+    try {
+      await platform.createFileTag(workspaceId, newTag.trim())
+      setNewTag('')
+      await reload()
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    }
+  }
+
   if (!workspaceId) {
     return <p className="page-hint">{t('files.noWorkspace')}</p>
   }
 
   return (
-    <div className="panel-page">
-      <h2>{t('nav.files')}</h2>
-      <p className="page-hint">{t('files.hint')}</p>
-      <input
-        type="file"
-        multiple
-        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md"
-        disabled={busy}
-        onChange={(e) => {
-          void onUpload(e.target.files)
-          e.target.value = ''
-        }}
-      />
-      {error && <p className="auth-error">{error}</p>}
-      <ul className="file-list">
-        {files.map((f) => (
-          <li key={f.id}>
-            <span className="file-list-main">
-              <span className="file-list-name">{f.filename}</span>
-              <small className="file-list-meta">{formatBytes(f.size_bytes ?? 0)}</small>
-              <FileStatusBadge file={f} />
-            </span>
-            <Button
+    <PageShell title={t('nav.files')} hint={t('files.hint')}>
+      <div className="files-layout">
+        <aside className="files-sidebar">
+          <h3>{t('files.categories')}</h3>
+          <button
+            type="button"
+            className={cn('files-filter', !categoryFilter && 'files-filter--active')}
+            onClick={() => setCategoryFilter(null)}
+          >
+            {t('files.all')}
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
               type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => void onDelete(f.id)}
+              className={cn(
+                'files-filter',
+                categoryFilter === c.id && 'files-filter--active',
+              )}
+              onClick={() => setCategoryFilter(c.id)}
             >
-              {t('files.delete')}
+              {c.name}
+            </button>
+          ))}
+          <div className="files-sidebar-form">
+            <Input
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder={t('files.newCategory')}
+            />
+            <Button type="button" size="sm" variant="outline" onClick={() => void addCategory()}>
+              +
             </Button>
-          </li>
-        ))}
-      </ul>
-    </div>
+          </div>
+
+          <h3>{t('files.tags')}</h3>
+          <div className="files-tag-cloud">
+            <button
+              type="button"
+              className={cn('files-tag', !tagFilter && 'files-tag--active')}
+              onClick={() => setTagFilter(null)}
+            >
+              {t('files.all')}
+            </button>
+            {tags.map((tg) => (
+              <button
+                key={tg.id}
+                type="button"
+                className={cn('files-tag', tagFilter === tg.name && 'files-tag--active')}
+                onClick={() => setTagFilter(tg.name)}
+              >
+                {tg.name}
+              </button>
+            ))}
+          </div>
+          <div className="files-sidebar-form">
+            <Input
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              placeholder={t('files.newTag')}
+            />
+            <Button type="button" size="sm" variant="outline" onClick={() => void addTag()}>
+              +
+            </Button>
+          </div>
+        </aside>
+
+        <div className="files-main">
+          <div className="files-toolbar">
+            <label>
+              {t('files.sort')}
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+              >
+                <option value="created_at">{t('files.sort.date')}</option>
+                <option value="size">{t('files.sort.size')}</option>
+                <option value="name">{t('files.sort.name')}</option>
+              </select>
+            </label>
+            <label>
+              {t('files.order')}
+              <select
+                value={order}
+                onChange={(e) => setOrder(e.target.value as 'asc' | 'desc')}
+              >
+                <option value="desc">{t('files.order.desc')}</option>
+                <option value="asc">{t('files.order.asc')}</option>
+              </select>
+            </label>
+            <label className="files-upload-btn">
+              <span>{t('files.upload')}</span>
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.docx,.xlsx,.pptx,.txt,.md"
+                disabled={busy}
+                hidden
+                onChange={(e) => {
+                  void onUpload(e.target.files, true)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <label className="files-upload-btn files-upload-btn--secondary">
+              <span>{t('files.uploadStoreOnly')}</span>
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.docx,.xlsx,.pptx,.txt,.md"
+                disabled={busy}
+                hidden
+                onChange={(e) => {
+                  void onUpload(e.target.files, false)
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            {uploadPct != null && (
+              <span className="files-upload-progress">
+                {t('files.uploadProgress', { pct: uploadPct })}
+              </span>
+            )}
+          </div>
+
+          {error && <p className="auth-error">{error}</p>}
+
+          <div className="files-table-wrap">
+            <table className="files-table">
+              <thead>
+                <tr>
+                  <th>{t('files.col.name')}</th>
+                  <th>{t('files.col.size')}</th>
+                  <th>{t('files.col.category')}</th>
+                  <th>{t('files.col.tags')}</th>
+                  <th>{t('files.col.origin')}</th>
+                  <th>{t('files.col.status')}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((f) => (
+                  <tr key={f.id}>
+                    <td>{f.filename}</td>
+                    <td>{formatBytes(f.size_bytes ?? 0)}</td>
+                    <td>{categoryName(f.category_id)}</td>
+                    <td>{tagName(f.tag_ids)}</td>
+                    <td>{f.origin ?? 'platform'}</td>
+                    <td>
+                      <FileStatusBadge file={f} />
+                    </td>
+                    <td className="files-row-actions">
+                      {f.status === 'skipped' && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => void onIngest(f.id)}
+                        >
+                          {t('files.ingest')}
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void onDelete(f.id)}
+                      >
+                        {t('files.delete')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {files.length === 0 && (
+              <p className="page-hint files-empty">{t('files.empty')}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </PageShell>
   )
 }

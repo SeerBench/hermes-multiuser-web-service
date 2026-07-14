@@ -12,6 +12,20 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = ResizeObserverStub as typeof ResizeObserver
 }
 
+// Breakpoint hooks (ChatComposer, App mobile nav) use matchMedia.
+if (typeof window.matchMedia === 'undefined') {
+  window.matchMedia = (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })
+}
+
 afterEach(() => {
   cleanup()
 })

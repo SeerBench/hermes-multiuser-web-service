@@ -1030,6 +1030,80 @@ _WEB_SKILL_PATCH_SCHEMA = {
 }
 
 
+# ── Platform API helpers (dict results, no JSON string) ────────────────
+
+
+def create_user_skill(
+    name: str,
+    skill_md: str,
+    *,
+    category: str = "productivity",
+) -> Dict[str, Any]:
+    """Create a brand-new skill under the active user's workspace."""
+    ws = get_user_workspace()
+    if ws is None:
+        return {"success": False, "error": "outside user context"}
+
+    if not _SKILL_NAME_RE.match(name):
+        return {"success": False, "error": f"invalid skill name {name!r}"}
+    if category not in _ALLOWED_CATEGORIES:
+        return {"success": False, "error": f"category {category!r} is not allowed"}
+
+    if _find_skill(name):
+        return {"success": False, "error": "skill already exists", "code": "already_installed"}
+
+    ok, meta_or_err = _validate_skill_md(skill_md, expected_name=name)
+    if not ok:
+        return {"success": False, "error": meta_or_err}
+
+    skill_md_bytes = skill_md.encode("utf-8")
+    if len(skill_md_bytes) > MAX_FILE_BYTES:
+        return {
+            "success": False,
+            "error": f"SKILL.md exceeds the {MAX_FILE_BYTES}-byte per-file limit",
+        }
+
+    target_dir = ws / "skills" / category / name
+    try:
+        confined_target = confine_path(target_dir)
+    except PathSandboxViolation as exc:
+        return {"success": False, "error": f"target dir outside workspace: {exc}"}
+    except RuntimeError:
+        return {"success": False, "error": "outside user context"}
+
+    confined_target.mkdir(parents=True, exist_ok=True)
+    (confined_target / "SKILL.md").write_bytes(skill_md_bytes)
+    return {
+        "success": True,
+        "name": name,
+        "category": category,
+        "source": "user",
+        "bytes_written": len(skill_md_bytes),
+    }
+
+
+def write_user_skill(name: str, skill_md: str) -> Dict[str, Any]:
+    """Full SKILL.md rewrite; forks global skills into the workspace."""
+    import json as _json
+
+    raw = _handle_web_skill_edit({"name": name, "skill_md": skill_md})
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return {"success": False, "error": "internal skill edit failure"}
+
+
+def delete_user_skill(name: str) -> Dict[str, Any]:
+    """Delete a user-owned skill; refuses global skills."""
+    import json as _json
+
+    raw = _handle_web_skill_delete({"name": name})
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return {"success": False, "error": "internal skill delete failure"}
+
+
 # ── Registration ───────────────────────────────────────────────────────
 
 

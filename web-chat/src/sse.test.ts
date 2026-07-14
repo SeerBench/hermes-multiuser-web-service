@@ -66,6 +66,15 @@ describe('parseSseFrame', () => {
       kind: 'thinking',
       text: 'x',
     })
+    expect(
+      parseSseFrame(
+        'event: title\ndata: {"session_id":"s1","title":"Hello world"}\n',
+      ),
+    ).toEqual({
+      type: 'title',
+      session_id: 's1',
+      title: 'Hello world',
+    })
     expect(parseSseFrame('event: status\ndata: {"kind":"warn","message":"slow"}\n')).toEqual({
       type: 'status',
       kind: 'warn',

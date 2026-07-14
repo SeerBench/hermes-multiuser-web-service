@@ -14,19 +14,16 @@ import type {
   ConversationSummary,
   UploadedFile,
 } from '../api'
-import { ActivityLog } from '../components/ActivityLog'
-import {
-  AttachmentList,
-  PendingAttachments,
-} from '../components/AttachmentChips'
+import { ChatComposer } from '../components/ChatComposer'
 import type { PendingAttachment } from '../components/AttachmentChips'
+import { ChatTurnBubble } from '../components/ChatTurnBubble'
+import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
 import { KeyPromptModal } from '../components/KeyPromptModal'
-import { MarkdownContent } from '../components/MarkdownContent'
-import { MessageActions } from '../components/MessageActions'
-import { ReasoningPanel } from '../components/ReasoningPanel'
-import { SlashCommandPopover } from '../components/SlashCommandPopover'
-import { ToolEvent } from '../components/ToolEvent'
+import {
+  getStoredWorkspaceId,
+  platform,
+} from '../platformClient'
 import {
   appendToken,
   pushActivity,
@@ -41,8 +38,16 @@ import {
   type ToolSegment,
   type Turn,
 } from '../chatTurns'
+import { provisionalTitleFromMessage } from '../conversationTitle'
+import {
+  getChatWidth,
+  setChatWidth,
+  widthClass,
+  type LayoutWidth,
+} from '../layoutWidthStorage'
 import { useLocale, useT } from '../i18n'
 import type { Locale } from '../i18n'
+import { cn } from '@/lib/utils'
 
 type KeyModalState =
   | { open: false }
@@ -53,6 +58,7 @@ type KeyModalState =
     }
 
 export function ChatPage({
+  platformMode = false,
   signedIn = false,
   needsBindKey = false,
   onGoBindSettings,
@@ -75,9 +81,32 @@ export function ChatPage({
   const [archived, setArchived] = useState<ConversationSummary[]>([])
   const [pending, setPending] = useState<PendingAttachment[]>([])
   const [sideOpen, setSideOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('')
+  const [models, setModels] = useState<{ id: string; owned_by?: string }[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [enabledSkillsCount, setEnabledSkillsCount] = useState(0)
+  const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
+  const [transcriptScrolling, setTranscriptScrolling] = useState(false)
+  const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const scrollHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /** Reveal scrollbar only while the transcript is being scrolled. */
+  const onTranscriptScroll = useCallback(() => {
+    setTranscriptScrolling(true)
+    if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current)
+    scrollHideTimerRef.current = setTimeout(() => {
+      setTranscriptScrolling(false)
+      scrollHideTimerRef.current = null
+    }, 800)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current)
+    }
+  }, [])
 
   // Probe auth + initial data.
   useEffect(() => {
@@ -117,6 +146,45 @@ export function ChatPage({
       cancelled = true
     }
   }, [signedIn])
+
+  // Platform: load models + skill count for composer chrome.
+  useEffect(() => {
+    if (!platformMode || !workspaceId) return
+    setModelsLoading(true)
+    void platform
+      .listModels(workspaceId)
+      .then((res) => {
+        setModels(res.models ?? [])
+        const pref =
+          res.preferred_model?.trim() ||
+          res.default_model?.trim() ||
+          res.models[0]?.id ||
+          ''
+        setSelectedModel(pref)
+      })
+      .catch(() => undefined)
+      .finally(() => setModelsLoading(false))
+
+    void platform
+      .listSkills(workspaceId)
+      .then((rows) =>
+        setEnabledSkillsCount(rows.filter((s) => s.enabled !== false).length),
+      )
+      .catch(() => undefined)
+  }, [platformMode, workspaceId])
+
+  const handleModelChange = useCallback(
+    async (model: string) => {
+      setSelectedModel(model)
+      if (!workspaceId) return
+      try {
+        await platform.patchPreferences(workspaceId, { preferred_model: model })
+      } catch {
+        // keep local selection even if persist fails
+      }
+    },
+    [workspaceId],
+  )
 
   // Auto-scroll on new content.
   useEffect(() => {
@@ -187,15 +255,47 @@ export function ChatPage({
 
   const handleRename = useCallback(
     async (id: string, title: string) => {
+      setConvos((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c)),
+      )
       try {
         await convosApi.rename(id, title)
       } catch {
-        // Non-fatal — leave the old title in place.
+        // Non-fatal — leave the optimistic title; refresh may correct.
       }
       refreshConvos()
       loadArchived()
     },
     [refreshConvos, loadArchived],
+  )
+
+  const activeConvo = useMemo(
+    () =>
+      convos.find((c) => c.id === sessionId) ??
+      archived.find((c) => c.id === sessionId) ??
+      null,
+    [convos, archived, sessionId],
+  )
+
+  const toggleChatWidth = useCallback(() => {
+    setChatWidthState((prev) => {
+      const next: LayoutWidth = prev === 'lg' ? 'full' : 'lg'
+      setChatWidth(next)
+      return next
+    })
+  }, [])
+
+  const ensureProvisionalTitle = useCallback(
+    async (sid: string, message: string) => {
+      const existing =
+        convos.find((c) => c.id === sid)?.title ??
+        archived.find((c) => c.id === sid)?.title
+      if (existing) return
+      const provisional = provisionalTitleFromMessage(message)
+      if (!provisional) return
+      await handleRename(sid, provisional)
+    },
+    [convos, archived, handleRename],
   )
 
   const handleDelete = useCallback(
@@ -323,6 +423,7 @@ export function ChatPage({
             message: wireMessage,
             session_id: sessionId ?? undefined,
             conversation_history: history,
+            model: selectedModel || undefined,
           },
           controller.signal,
         )) {
@@ -390,6 +491,13 @@ export function ChatPage({
                 }),
               })),
             )
+          } else if (ev.type === 'title') {
+            setSessionId(ev.session_id)
+            setConvos((prev) =>
+              prev.map((c) =>
+                c.id === ev.session_id ? { ...c, title: ev.title } : c,
+              ),
+            )
           } else if (ev.type === 'done') {
             setSessionId(ev.session_id)
             setTurns((prev) =>
@@ -399,10 +507,18 @@ export function ChatPage({
                 usage: ev.usage,
               })),
             )
+            void ensureProvisionalTitle(ev.session_id, message)
             void convosApi
               .list()
               .then(setConvos)
               .catch(() => undefined)
+            // LLM auto-title may land a few seconds later — refresh again.
+            window.setTimeout(() => {
+              void convosApi
+                .list()
+                .then(setConvos)
+                .catch(() => undefined)
+            }, 4000)
           } else if (ev.type === 'error') {
             if (
               ev.code === 'unauthorized' ||
@@ -454,7 +570,7 @@ export function ChatPage({
         abortRef.current = null
       }
     },
-    [sessionId, turns, t, needsBindKey, onGoBindSettings],
+    [sessionId, turns, t, needsBindKey, onGoBindSettings, selectedModel, ensureProvisionalTitle],
   )
 
   // ── Slash command handling ────────────────────────────────────────────
@@ -604,6 +720,20 @@ export function ChatPage({
       await runServerCommand(cmd.name, args)
     },
     [commandCatalog, t, runClientCommand, runServerCommand, appendSystemSegment],
+  )
+
+  const onAttachWorkspaceFiles = useCallback(
+    (files: { name: string; path: string; size: number }[]) => {
+      const entries: PendingAttachment[] = files.map((f) => ({
+        id: newTurnId(),
+        name: f.name,
+        size: f.size,
+        status: 'done',
+        path: f.path,
+      }))
+      setPending((prev) => [...prev, ...entries])
+    },
+    [],
   )
 
   const uploading = pending.some((p) => p.status === 'uploading')
@@ -769,168 +899,89 @@ export function ChatPage({
             {historyBanner}
           </div>
         )}
-        <div className="chat-transcript" ref={transcriptRef}>
-          {turns.length === 0 ? (
-            <div className="chat-empty">
-              <h2>{t('chat.empty.title')}</h2>
-              <p>{t('chat.empty.subtitle')}</p>
-            </div>
-          ) : (
-            turns.map((turn) => (
-              <article key={turn.id} className={`turn turn-${turn.role}`}>
-                <header className="turn-role">
-                  {turn.role === 'user' ? t('chat.role.user') : t('chat.role.assistant')}
-                  {turn.usage && turn.role === 'assistant' && (
-                    <span className="turn-usage" aria-label="token usage">
-                      ↑{turn.usage.input_tokens ?? 0} ↓{turn.usage.output_tokens ?? 0}
-                    </span>
-                  )}
-                </header>
-                {turn.role === 'assistant' && (
-                  <ActivityLog
-                    items={turn.activity}
-                    streaming={turn.status === 'streaming'}
-                  />
-                )}
-                {turn.reasoning && (
-                  <ReasoningPanel
-                    text={turn.reasoning}
-                    streaming={turn.status === 'streaming'}
-                  />
-                )}
-                {turn.segments.map((seg, i) => {
-                  if (seg.kind === 'tool') {
-                    return (
-                      <ToolEvent
-                        key={`${turn.id}-seg-${i}`}
-                        tool={seg.tool}
-                        preview={seg.preview}
-                        args={seg.args}
-                        result_preview={seg.result_preview}
-                        duration={seg.duration}
-                        error={seg.error}
-                      />
-                    )
-                  }
-                  if (seg.kind === 'system') {
-                    return (
-                      <div
-                        key={`${turn.id}-seg-${i}`}
-                        className={`turn-system${
-                          seg.tone === 'error' ? ' turn-system-error' : ''
-                        }`}
-                      >
-                        <span className="turn-system-prefix">
-                          {t('command.system.prefix')}
-                        </span>
-                        <pre>{seg.text}</pre>
-                      </div>
-                    )
-                  }
-                  // text segment
-                  return (
-                    <div key={`${turn.id}-seg-${i}`} className="turn-text">
-                      {turn.role === 'assistant' ? (
-                        <MarkdownContent text={seg.text || '…'} />
-                      ) : (
-                        <div className="turn-content">{seg.text}</div>
-                      )}
-                    </div>
-                  )
-                })}
-                {turn.attachments && turn.attachments.length > 0 && (
-                  <AttachmentList items={turn.attachments} />
-                )}
-                {turn.status === 'streaming' && turn.segments.length === 0 && (
-                  <div className="turn-text">
-                    <em>…</em>
-                  </div>
-                )}
-                {turn.status === 'error' && (
-                  <div className="turn-error">{turn.errorMessage}</div>
-                )}
-                {turn.status === 'done' && (
-                  <MessageActions
-                    copyText={turnToCopyText(turn)}
-                    onRetry={
-                      turn.role === 'assistant' ? () => handleRetry(turn) : undefined
-                    }
-                    onEdit={
-                      turn.role === 'user' ? () => handleEdit(turn) : undefined
-                    }
-                  />
-                )}
-              </article>
-            ))
+        {/* Header + transcript + composer share one centered lg/full column */}
+        <div className={cn('chat-column', widthClass(chatWidth))}>
+          {turns.length > 0 && sessionId && (
+            <ConversationHeader
+              title={
+                activeConvo?.title?.trim() ||
+                t('convo.untitled')
+              }
+              pinned={Boolean(activeConvo?.pinned)}
+              chatWidth={chatWidth}
+              onRename={(title) => void handleRename(sessionId, title)}
+              onTogglePin={() =>
+                void handleSetFlags(sessionId, {
+                  pinned: !activeConvo?.pinned,
+                })
+              }
+              onToggleChatWidth={toggleChatWidth}
+            />
           )}
-        </div>
-
-        <form className="composer" onSubmit={submit}>
-          <div className="composer-input-wrap">
-            {showPopover && (
-              <SlashCommandPopover
-                query={slashQuery ?? ''}
-                commands={commandCatalog}
-                onSelect={(cmd) => {
-                  const hint = cmd.args_hint && cmd.args_hint.startsWith('<')
-                  // For required args, leave the trailing space so the
-                  // user starts typing the argument immediately.
-                  setInput(`/${cmd.name}${hint ? ' ' : ''}`)
-                }}
-                onClose={() => setInput('')}
-              />
+          <div
+            className={cn(
+              'chat-transcript',
+              transcriptScrolling && 'chat-transcript--scrolling',
             )}
-            <PendingAttachments items={pending} onRemove={removePending} />
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={composerPlaceholder}
-              rows={3}
-              disabled={streaming}
-            />
-          </div>
-          <div className="composer-actions">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                void onPickFiles(e.target.files)
-                // Reset so picking the same file again re-triggers onChange.
-                e.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              className="composer-attach"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming}
-              title={t('attach.button')}
-              aria-label={t('attach.button')}
-            >
-              📎
-            </button>
-            {streaming ? (
-              <button type="button" onClick={stop} className="composer-stop">
-                {t('composer.stop')}
-              </button>
+            ref={transcriptRef}
+            onScroll={onTranscriptScroll}
+          >
+            {turns.length === 0 ? (
+              <div className="chat-empty">
+                <h2>{t('chat.empty.title')}</h2>
+                <p>{t('chat.empty.subtitle')}</p>
+              </div>
             ) : (
-              <button
-                type="submit"
-                disabled={
-                  (!input.trim() &&
-                    !pending.some((p) => p.status === 'done')) ||
-                  uploading
-                }
-                className="composer-send"
-              >
-                {t('composer.send')}
-              </button>
+              turns.map((turn) => (
+                <ChatTurnBubble
+                  key={turn.id}
+                  turn={turn}
+                  onRetry={
+                    turn.role === 'assistant'
+                      ? () => handleRetry(turn)
+                      : undefined
+                  }
+                  onEdit={
+                    turn.role === 'user' ? () => handleEdit(turn) : undefined
+                  }
+                />
+              ))
             )}
           </div>
-        </form>
+
+          <ChatComposer
+            input={input}
+            onInputChange={setInput}
+            onSubmit={submit}
+            onKeyDown={onKeyDown}
+            streaming={streaming}
+            uploading={uploading}
+            pending={pending}
+            onRemovePending={removePending}
+            onPickFiles={onPickFiles}
+            onAttachWorkspaceFiles={onAttachWorkspaceFiles}
+            onStop={stop}
+            placeholder={composerPlaceholder}
+            showSlashPopover={showPopover}
+            slashQuery={slashQuery}
+            commandCatalog={commandCatalog}
+            onSlashSelect={(cmd) => {
+              const hint = cmd.args_hint && cmd.args_hint.startsWith('<')
+              setInput(`/${cmd.name}${hint ? ' ' : ''}`)
+            }}
+            onSlashClose={() => setInput('')}
+            platformMode={platformMode}
+            workspaceId={workspaceId}
+            models={models}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            modelsLoading={modelsLoading}
+            enabledSkillsCount={enabledSkillsCount}
+            onNavigate={(route) => {
+              window.location.hash = `#/${route}`
+            }}
+          />
+        </div>
       </section>
 
       {keyModal.open && (

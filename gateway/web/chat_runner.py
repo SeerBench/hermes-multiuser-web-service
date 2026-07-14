@@ -241,6 +241,7 @@ class WebChatAgentRunner:
         user_id: str,
         ephemeral_system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
+        model_override: Optional[str] = None,
         stream_delta_callback: Optional[Callable] = None,
         tool_progress_callback: Optional[Callable] = None,
         tool_start_callback: Optional[Callable] = None,
@@ -285,7 +286,11 @@ class WebChatAgentRunner:
         if upstream_key:
             runtime_kwargs = {**runtime_kwargs, "api_key": upstream_key}
         reasoning_config = GatewayRunner._load_reasoning_config()
-        model = self._model_name_override or _resolve_gateway_model()
+        model = (
+            (model_override or "").strip()
+            or self._model_name_override
+            or _resolve_gateway_model()
+        )
 
         user_config = _load_gateway_config()
         enabled_toolsets = sorted(_get_platform_tools(user_config, "web_chat"))
@@ -354,6 +359,7 @@ class WebChatAgentRunner:
         step_callback: Optional[Callable] = None,
         agent_ref: Optional[list] = None,
         gateway_session_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int]]:
         """Create a fresh agent and drive one conversation turn.
 
@@ -387,6 +393,7 @@ class WebChatAgentRunner:
                 user_id=user_id,
                 ephemeral_system_prompt=ephemeral_system_prompt,
                 session_id=session_id,
+                model_override=model_override,
                 stream_delta_callback=stream_delta_callback,
                 tool_progress_callback=tool_progress_callback,
                 tool_start_callback=tool_start_callback,

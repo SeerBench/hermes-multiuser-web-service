@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from platform_api.routers import admin, auth, files, health, memory, skills, workspaces
+from platform_api.routers import admin, auth, files, health, memory, models, skills, workspaces
 
 app = FastAPI(title="Hermes Platform API", version="0.1.0")
 
@@ -21,6 +21,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(workspaces.router, prefix="/api/v1")
 app.include_router(files.router, prefix="/api/v1")
+app.include_router(models.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")

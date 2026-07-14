@@ -20,6 +20,7 @@ import {
   type PlatformUser,
 } from './platformClient'
 import { parseRoute, routeHref, type Route } from './routing'
+import { subscribeViewport } from './lib/breakpoints'
 import {
   isOnboardingComplete,
   markOnboardingComplete,
@@ -59,6 +60,9 @@ function AppShell() {
     const initial = parseRoute(window.location.hash)
     return initial === 'settings' ? 'chat' : initial
   })
+  const [mobileNav, setMobileNav] = useState(false)
+
+  useEffect(() => subscribeViewport(setMobileNav), [])
 
   const refreshAuth = useCallback(async () => {
     setAuthLoading(true)
@@ -268,6 +272,32 @@ function AppShell() {
           </>
         )}
       </main>
+      {user && mobileNav && (
+        <nav className="app-mobile-nav" aria-label={t('nav.mobile')}>
+          {(
+            [
+              ['chat', t('nav.chat')],
+              ...(platformMode
+                ? [
+                    ['files', t('nav.files')],
+                    ['memory', t('nav.memory')],
+                    ['skills', t('nav.skills')],
+                  ]
+                : []),
+              ['settings', t('nav.settings')],
+            ] as const
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              className={activeTab === tab ? 'app-mobile-nav--active' : undefined}
+              onClick={() => goto(tab as MainTab)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
       {onboardingOpen && user && (
         <OnboardingModal
           user={user}

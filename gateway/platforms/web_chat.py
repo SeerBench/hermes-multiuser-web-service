@@ -1130,8 +1130,62 @@ class WebChatAdapter(BasePlatformAdapter):
                     "path": f"{_UPLOAD_DIR_NAME}/{dest.name}",
                     "size": size,
                 })
+                self._maybe_register_chat_upload(
+                    user_id=user_id,
+                    storage_key=f"{_UPLOAD_DIR_NAME}/{dest.name}",
+                    filename=dest.name,
+                    size=size,
+                )
 
         return web.json_response({"files": saved})
+
+    def _maybe_register_chat_upload(
+        self,
+        *,
+        user_id: str,
+        storage_key: str,
+        filename: str,
+        size: int,
+    ) -> None:
+        """Bridge chat uploads into platform FileRecord when store supports it."""
+        store = getattr(self, "_user_store", None)
+        if store is None or not hasattr(store, "get_default_workspace"):
+            return
+        ws = store.get_default_workspace(user_id)
+        if not ws:
+            return
+        try:
+            from platform_api.services.file_registry import register_sandbox_file
+
+            register_sandbox_file(
+                workspace_id=ws["id"],
+                storage_key=storage_key,
+                filename=filename,
+                size_bytes=size,
+                origin="chat",
+                auto_ingest=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[%s] chat upload registry failed user=%s: %s",
+                self.name,
+                user_id,
+                exc,
+            )
+
+    def _resolve_user_preferred_model(self, user_id: str) -> Optional[str]:
+        store = getattr(self, "_user_store", None)
+        if store is None or not hasattr(store, "get_default_workspace"):
+            return None
+        ws = store.get_default_workspace(user_id)
+        if not ws:
+            return None
+        try:
+            from platform_api.routers.models import resolve_workspace_model
+
+            return resolve_workspace_model(ws["id"], user_id)
+        except Exception:
+            return None
 
     @staticmethod
     def _dedupe_upload_path(dest: "Any", uploads_dir: "Any"):
@@ -1187,6 +1241,9 @@ class WebChatAdapter(BasePlatformAdapter):
         if not isinstance(conversation_history, list):
             return self._json_error("conversation_history must be a list")
         gateway_session_key = body.get("session_key") or f"web::{user_id}"
+        request_model = (body.get("model") or "").strip() or None
+        if not request_model:
+            request_model = self._resolve_user_preferred_model(user_id)
 
         if self._agent_semaphore is None:
             return self._json_error("server not ready", status=503)
@@ -1350,6 +1407,7 @@ class WebChatAdapter(BasePlatformAdapter):
                         conversation_history=conversation_history,
                         ephemeral_system_prompt=ephemeral_system_prompt,
                         session_id=session_id,
+                        model_override=request_model,
                         stream_delta_callback=stream_delta_cb,
                         tool_start_callback=tool_start_cb,
                         tool_complete_callback=tool_complete_cb,
@@ -1411,6 +1469,32 @@ class WebChatAdapter(BasePlatformAdapter):
                             "usage": usage,
                         },
                     })
+                    # Auto-title first exchanges (background). Client refreshes
+                    # the conversation list to pick up the new title.
+                    try:
+                        from agent.title_generator import maybe_auto_title
+
+                        assistant_text = (
+                            result.get("final_response")
+                            or result.get("response")
+                            or ""
+                        )
+                        if isinstance(assistant_text, str) and assistant_text.strip():
+                            history_for_title = list(conversation_history or []) + [
+                                {"role": "user", "content": user_message},
+                                {"role": "assistant", "content": assistant_text},
+                            ]
+                            maybe_auto_title(
+                                self._session_db,
+                                effective_session_id,
+                                user_message,
+                                assistant_text,
+                                history_for_title,
+                            )
+                    except Exception:
+                        logger.debug(
+                            "[%s] maybe_auto_title failed", self.name, exc_info=True,
+                        )
 
                 await event_queue.put(None)
                 try:
