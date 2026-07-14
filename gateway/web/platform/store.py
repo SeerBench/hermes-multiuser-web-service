@@ -75,7 +75,12 @@ class PlatformStore:
     # ── UserStore-compatible surface ───────────────────────────────────
 
     def upsert_user(self, user_id: str) -> None:
-        """Legacy key-login path: ensure a minimal user row exists."""
+        """Legacy key-login path: ensure user + Default workspace exist.
+
+        Gateway ``POST /api/auth/login`` calls this for API-key users.  Without
+        a Workspace row, platform-mode SPA pages (Files / Memory / Skills)
+        have nowhere to attach and show「未登录或无工作区」.
+        """
         now = datetime.now(timezone.utc)
         with session_scope(self._engine) as db:
             user = db.get(User, user_id)
@@ -83,22 +88,46 @@ class PlatformStore:
                 tenant = Tenant(name=f"legacy-{user_id[:8]}", plan="free")
                 db.add(tenant)
                 db.flush()
+                user = User(
+                    id=user_id,
+                    tenant_id=tenant.id,
+                    email=f"{user_id}@legacy.local",
+                    password_hash="!",
+                    role="user",
+                    status="active",
+                    upstream_status="ready",
+                    disabled=False,
+                    created_at=now,
+                    last_seen_at=now,
+                )
+                db.add(user)
+                db.flush()
                 db.add(
-                    User(
-                        id=user_id,
+                    Workspace(
                         tenant_id=tenant.id,
-                        email=f"{user_id}@legacy.local",
-                        password_hash="!",
-                        role="user",
-                        status="active",
-                        upstream_status="ready",
-                        disabled=False,
-                        created_at=now,
-                        last_seen_at=now,
+                        owner_id=user.id,
+                        name="Default",
                     )
                 )
+                db.flush()
+                ensure_workspace(user.id)
             else:
                 user.last_seen_at = now
+                # Backfill workspace for key-login users created before
+                # workspace was part of upsert_user.
+                existing_ws = db.execute(
+                    select(Workspace).where(Workspace.owner_id == user.id)
+                ).scalars().first()
+                if existing_ws is None:
+                    db.add(
+                        Workspace(
+                            tenant_id=user.tenant_id,
+                            owner_id=user.id,
+                            name="Default",
+                        )
+                    )
+                    db.flush()
+                    ensure_workspace(user.id)
 
     def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._session_factory() as db:
@@ -374,6 +403,30 @@ class PlatformStore:
                 "tenant_id": ws.tenant_id,
                 "name": ws.name,
             }
+
+    def ensure_default_workspace(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Return Default workspace, creating it when missing (API-key users)."""
+        existing = self.get_default_workspace(user_id)
+        if existing:
+            return existing
+        with session_scope(self._engine) as db:
+            user = db.get(User, user_id)
+            if not user:
+                return None
+            ws = db.execute(
+                select(Workspace).where(Workspace.owner_id == user.id)
+            ).scalars().first()
+            if ws is None:
+                db.add(
+                    Workspace(
+                        tenant_id=user.tenant_id,
+                        owner_id=user.id,
+                        name="Default",
+                    )
+                )
+                db.flush()
+                ensure_workspace(user.id)
+        return self.get_default_workspace(user_id)
 
     def list_enabled_skill_names(self, user_id: str) -> List[str]:
         """Skill names enabled for chat hints (entitlements + defaults)."""

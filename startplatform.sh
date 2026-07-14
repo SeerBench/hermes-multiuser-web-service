@@ -171,6 +171,8 @@ fi
 
 export UPSTREAM_PROVISIONER="${UPSTREAM_PROVISIONER:-manual}"
 export PLATFORM_API_PORT="$PLATFORM_PORT"
+# Gateway proxies SPA /api/v1/* → platform-api (no nginx required locally).
+export PLATFORM_API_URL="${PLATFORM_API_URL:-http://127.0.0.1:${PLATFORM_PORT}}"
 
 if [[ -z "${NEW_API_BASE_URL:-}" ]]; then
     warn "NEW_API_BASE_URL not set — gateway may refuse to start"
@@ -191,38 +193,11 @@ else
     warn "SPA bundle absent — UI falls back to placeholder HTML"
 fi
 
-detect_tailscale_ip() {
-    if command -v tailscale >/dev/null 2>&1; then
-        local ts_ip
-        ts_ip="$(tailscale ip --4 2>/dev/null | head -n1 | tr -d '[:space:]')"
-        if [[ -n "$ts_ip" && "$ts_ip" =~ ^100\. ]]; then
-            echo "$ts_ip"
-            return
-        fi
-    fi
-    if command -v ip >/dev/null 2>&1; then
-        local iface_ip
-        iface_ip="$(ip -4 -o addr show tailscale0 2>/dev/null \
-                    | awk '{print $4}' | cut -d/ -f1 | head -n1)"
-        if [[ -n "$iface_ip" && "$iface_ip" =~ ^100\. ]]; then
-            echo "$iface_ip"
-            return
-        fi
-    fi
-    echo ""
-}
-
 if [[ -n "$HOST_OVERRIDE" ]]; then
     HOST="$HOST_OVERRIDE"
 else
-    TS_IP="$(detect_tailscale_ip)"
-    if [[ -n "$TS_IP" ]]; then
-        HOST="$TS_IP"
-        ok "Tailscale detected — gateway bind $HOST"
-    else
-        HOST="127.0.0.1"
-        warn "binding gateway to 127.0.0.1 (pass --host 0.0.0.0 for LAN)"
-    fi
+    HOST="127.0.0.1"
+    warn "binding gateway to 127.0.0.1 (pass --host 0.0.0.0 for LAN)"
 fi
 PORT="${PORT_OVERRIDE:-$DEFAULT_GATEWAY_PORT}"
 HEALTH_HOST="$HOST"
@@ -346,6 +321,8 @@ printf '\n%s%s%s\n' "$C_BOLD" "════════════════�
 printf '%s%sHermes Platform SaaS%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
 printf '%s  SPA / Gateway:%s  %s\n' "$C_DIM" "$C_RESET" "$GATEWAY_URL"
 printf '%s  Platform API:%s   %s (api/v1)\n' "$C_DIM" "$C_RESET" "$PLATFORM_URL"
+printf '%s  /api/v1 proxy:%s  gateway → %s\n' "$C_DIM" "$C_RESET" "${PLATFORM_API_URL}"
+printf '%s  Open SPA:%s       %s  (register / login)\n' "$C_DIM" "$C_RESET" "$GATEWAY_URL"
 printf '%s  platform log:%s   tail -f %s\n' "$C_DIM" "$C_RESET" "$PLATFORM_LOG"
 printf '%sCtrl+C stops gateway + platform-api.%s\n\n' "$C_DIM" "$C_RESET"
 printf '%s%s%s\n' "$C_BOLD" "════════════════════════════════════════════════════════════════" "$C_RESET"

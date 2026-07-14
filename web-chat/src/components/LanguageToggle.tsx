@@ -1,43 +1,36 @@
-import { useLocale, useT } from '../i18n'
-import type { Locale } from '../i18n'
+import { useLocale } from '../i18n'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
+  /** Slightly smaller for the app header. */
   compact?: boolean
 }
 
-const OPTIONS: { value: Locale; key: string }[] = [
-  { value: 'en', key: 'lang.option.en' },
-  { value: 'zh', key: 'lang.option.zh' },
-]
-
 /**
- * Two-state segmented control for switching the UI language.
- * Used both in the app header (compact) and in Settings (labelled).
+ * Single toggle for ZH ↔ EN.
+ * Label/tooltip are always in the *target* language so the control
+ * remains understandable regardless of the current UI locale.
  */
 export function LanguageToggle({ className, compact }: Props) {
   const { locale, setLocale } = useLocale()
-  const t = useT()
+
+  const nextIsEnglish = locale === 'zh'
+  const label = nextIsEnglish ? 'English' : '中文'
+  const tip = nextIsEnglish ? 'Use English' : '使用中文'
 
   return (
-    <div
-      className={`lang-toggle${compact ? ' lang-toggle-compact' : ''}${
-        className ? ` ${className}` : ''
-      }`}
-      role="group"
-      aria-label={t('lang.toggle.label')}
+    <Button
+      type="button"
+      size={compact ? 'xs' : 'sm'}
+      variant="outline"
+      className={cn(className)}
+      title={tip}
+      aria-label={tip}
+      onClick={() => setLocale(nextIsEnglish ? 'en' : 'zh')}
     >
-      {OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          className={locale === opt.value ? 'lang-toggle-active' : ''}
-          aria-pressed={locale === opt.value}
-          onClick={() => setLocale(opt.value)}
-        >
-          {t(opt.key)}
-        </button>
-      ))}
-    </div>
+      {label}
+    </Button>
   )
 }

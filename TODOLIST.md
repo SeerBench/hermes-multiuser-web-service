@@ -16,7 +16,7 @@
 | 1 身份鉴权 | **~90%** | 注册/登录/bind-key/双路径认证/SPA AuthPage 已有；**chat E2E 已补**；速率限制待补 |
 | 2 隔离加固 | **~85%** | UUID 贯穿 + 隔离 E2E（会话/记忆/知识库/禁用用户）；legacy 映射表待补 |
 | 3 文件 RAG | **~75%** | 同步 ingestion + 关键词检索 + `web_knowledge_search`；MinIO/Redis Worker/pgvector 待补 |
-| 4 Memory/Skill | **~90%** | API + UI + ephemeral skill hint 已有；`platform_settings` 运营配置待补 |
+| 4 Memory/Skill | **~95%** | API + UI + catalog install + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
 | 5 Admin | **~85%** | API + UI + `create_admin.py` 已有；分页、审计 UI 待补 |
 | 6 硬化上线 | **~40%** | `platform-saas.md` + `deploy/README.md` 已有；压测、备份脚本、CI Compose job 待补 |
 
@@ -42,7 +42,7 @@
 3. pgvector cosine 检索（替换关键词 MVP）  
 4. 50 用户压测、`update-web.sh` 扩展 platform-api 部署流程  
 5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（5 cases）+ CI `web-chat-verify.yml`  
-6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉~~；文件进度 + Onboarding 待做
+6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉 + 文件进度 + Onboarding~~
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -337,9 +337,12 @@ flowchart TD
 ### 4.3 Skill 配置 API
 
 - [x] `GET  /api/v1/workspaces/{id}/skills` — 全局 + 用户 + entitlement
+- [x] `GET  /api/v1/workspaces/{id}/skills/{name}` — 预览 SKILL.md（user overlay）
+- [x] `POST /api/v1/workspaces/{id}/skills/install-from-catalog` — 全局库复制到 workspace
 - [x] `PATCH /api/v1/workspaces/{id}/skills/{name}` — `{enabled, config?}`
 - [x] 读全局库 `$HERMES_HOME/skills/`
 - [x] 读用户库 `<workspace>/skills/`
+- [x] Agent：`web_skill_edit` / `web_skill_patch`（全局 fork-on-write）
 
 ### 4.4 Skill UI
 
@@ -437,7 +440,7 @@ flowchart TD
 ### 文件与知识库
 
 - [x] 上传 PDF / Word / Excel / PPT（+ TXT / MD）
-- [~] 解析进度展示（状态字段有；**无实时进度 UI**）
+- [~] 解析进度展示（~~无实时进度 UI~~ → Files 页轮询 status + 状态徽章）
 - [x] 「我的文件」列表与删除
 - [x] Agent 通过 `web_knowledge_search` 检索个人知识库
 
@@ -475,8 +478,8 @@ flowchart TD
 - [x] Chat / App 顶栏：`upstream_status=pending_bind` 时展示可点击的绑定引导（跳转 Settings）
 - [x] 移动端：汉堡菜单 + 会话抽屉（新建 / 切换 / 归档入口）
 - [x] `ConversationList`：按标题/预览实时筛选
-- [ ] `FilesPage`：轮询 `GET .../files/{id}/status`，展示 processing / ready / failed + 错误信息
-- [ ] 首次登录向导（3 步：绑 key → 可选上传文件 → 发送首条消息）
+- [x] `FilesPage`：轮询 `GET .../files/{id}/status`，展示 processing / ready / failed + 错误信息
+- [x] 首次登录向导（3 步：绑 key → 可选上传文件 → 发送首条消息）
 
 ### P1 — 高人气 × 中等实用
 
@@ -485,14 +488,14 @@ flowchart TD
 | ★★★ | **Markdown 代码块高亮 + 复制** | 开发者用户刚需；现 `marked` 纯文本渲染 |
 | ★★☆ | **导出当前对话** | 下载 Markdown / 复制全文（比单条 copy 更常用） |
 | ★★☆ | **Composer 拖拽/粘贴上传** | 仅有 📎 按钮；无 drag-drop / paste 图片 |
-| ★★☆ | **手动深色/浅色主题** | 仅 `prefers-color-scheme`；无设置项 |
+| ★★☆ | **手动深色/浅色主题** | 仅 `prefers-color-scheme`；shadcn token + `.dark` 已就绪，缺 Settings 开关 |
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
 | ★☆☆ | **模型选择器** | 高级用户期望 UI 选模型；可对接 `/model` 或 gateway 配置 |
 
 - [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
 - [ ] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板
 - [ ] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
-- [ ] Settings：主题 `system | light | dark`（`localStorage` + `data-theme`）
+- [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
 - [ ] `POST /api/v1/auth/change-password` + Settings 表单
 - [ ] 设置页或 Chat 顶栏：模型下拉（读 gateway `/api/me` 或 slash `/model` 封装）
 
@@ -509,7 +512,8 @@ flowchart TD
 
 - [ ] Settings：`QuotaBadge` 或用量卡片（余额/本月 token，依赖上游接口设计）
 - [ ] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
-- [ ] `SkillsPage`：点击 skill 名 → 侧栏/模态展示 description + 来源路径
+- [x] `SkillsPage`：技能库分区 + 安装到 workspace + 侧栏预览 SKILL.md
+- [ ] Admin：全局 Skill 浏览（可与 Skills catalog 共用扫描逻辑）
 - [ ] `AdminPage`：email 过滤、分页控件；后端补 `limit/offset` 若需要
 - [ ] `AdminPage`：`#/admin/audit` 只读表格（时间、操作、目标）
 - [ ] `AdminPage`：全局 Skill 只读列表（调用 `platform.adminSkills()`）
@@ -608,6 +612,8 @@ flowchart TD
 | GET | `/workspaces/{id}/memory` | 4 | [x] |
 | PATCH | `/workspaces/{id}/memory` | 4 | [x] |
 | GET | `/workspaces/{id}/skills` | 4 | [x] |
+| GET | `/workspaces/{id}/skills/{name}` | 4 | [x] |
+| POST | `/workspaces/{id}/skills/install-from-catalog` | 4 | [x] |
 | PATCH | `/workspaces/{id}/skills/{name}` | 4 | [x] |
 | GET | `/admin/users` | 5 | [x] |
 | PATCH | `/admin/users/{id}` | 5 | [x] |

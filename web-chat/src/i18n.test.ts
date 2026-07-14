@@ -14,11 +14,13 @@ describe('i18n translate', () => {
 
   it('resolves english keys', () => {
     expect(translate('en', 'nav.chat')).toBe('Chat')
+    expect(translate('en', 'app.title')).toBe('Hermes Workspace')
     expect(translate('en', 'convo.timeago.minutes', { n: 5 })).toBe('5m ago')
   })
 
   it('resolves chinese keys', () => {
     expect(translate('zh', 'nav.chat')).toBe('对话')
+    expect(translate('zh', 'app.title')).toBe('Hermes 工作台')
   })
 
   it('falls back to english then key', () => {

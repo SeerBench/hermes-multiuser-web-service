@@ -16,6 +16,8 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 @router.get("")
 def list_workspaces(user_id: str = Depends(get_current_user_id)) -> List[dict[str, Any]]:
     store = get_store()
+    # API-key (gateway) logins historically lacked a Workspace row — backfill.
+    store.ensure_default_workspace(user_id)
     with store._session_factory() as db:
         rows = db.execute(
             select(Workspace).where(Workspace.owner_id == user_id)

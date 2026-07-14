@@ -20,17 +20,31 @@ vi.mock('../platformClient', () => ({
   },
 }))
 
+vi.mock('../api', () => ({
+  auth: { login: vi.fn() },
+  ApiError: class extends Error {
+    status: number
+    code?: string
+    constructor(message: string, status: number, code?: string) {
+      super(message)
+      this.status = status
+      this.code = code
+    }
+  },
+}))
+
+import { auth } from '../api'
 import { platform } from '../platformClient'
 
 function renderAuth() {
   const onSuccess = vi.fn()
-  const onLegacyKey = vi.fn()
+  const onLegacySuccess = vi.fn()
   render(
     <LocaleProvider>
-      <AuthPage onSuccess={onSuccess} onLegacyKey={onLegacyKey} />
+      <AuthPage onSuccess={onSuccess} onLegacySuccess={onLegacySuccess} />
     </LocaleProvider>,
   )
-  return { onSuccess, onLegacyKey }
+  return { onSuccess, onLegacySuccess }
 }
 
 describe('AuthPage', () => {
@@ -49,11 +63,27 @@ describe('AuthPage', () => {
     expect(onSuccess).toHaveBeenCalled()
   })
 
-  it('offers legacy API key path', async () => {
+  it('switches to API key login and submits', async () => {
     const user = userEvent.setup()
-    const { onLegacyKey } = renderAuth()
+    vi.mocked(auth.login).mockResolvedValue({ user_id: 'legacy-u' })
+    const { onLegacySuccess } = renderAuth()
 
-    await user.click(screen.getByRole('button', { name: /api key/i }))
-    expect(onLegacyKey).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /use api key/i }))
+    await user.type(screen.getByLabelText(/api key/i), 'sk-test')
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }))
+
+    expect(auth.login).toHaveBeenCalledWith('sk-test')
+    expect(onLegacySuccess).toHaveBeenCalledWith('legacy-u')
+  })
+
+  it('can switch back to account login from API key form', async () => {
+    const user = userEvent.setup()
+    renderAuth()
+
+    await user.click(screen.getByRole('button', { name: /use api key/i }))
+    expect(screen.getByLabelText(/api key/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /account sign-in/i }))
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
   })
 })

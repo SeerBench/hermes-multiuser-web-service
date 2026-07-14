@@ -108,6 +108,7 @@ from gateway.web.users import (
     UserStoreError,
 )
 from gateway.web.user_store_factory import create_user_store
+from gateway.web.platform_api_proxy import install_platform_api_proxy
 
 logger = logging.getLogger("hermes.gateway.web_chat")
 
@@ -466,6 +467,9 @@ class WebChatAdapter(BasePlatformAdapter):
         app.router.add_post("/api/command", self._handle_run_command)
         app.router.add_post("/api/uploads", self._handle_upload)
         app.router.add_post("/api/chat", self._handle_chat)
+        # Local sidecar: forward control-plane routes to platform-api so the
+        # SPA on :8643 can reach /api/v1 without a separate nginx.
+        install_platform_api_proxy(app)
         # SPA shell + static assets.
         from pathlib import Path as _Path
         static_dir = _Path(__file__).resolve().parent.parent / "web" / "_static"
@@ -474,10 +478,20 @@ class WebChatAdapter(BasePlatformAdapter):
             assets_dir = static_dir / "assets"
             if assets_dir.is_dir():
                 app.router.add_static("/assets/", path=str(assets_dir), name="spa_assets")
+            # Vite ``public/`` files land at _static root (logo, favicon…).
+            self._spa_static_dir = static_dir
+            for name in ("logo.svg", "logo.png", "favicon.png", "favicon.ico"):
+                path = static_dir / name
+                if path.is_file():
+                    app.router.add_get(
+                        f"/{name}",
+                        self._make_spa_public_file_handler(path),
+                    )
             self._spa_index_path = index_html
             app.router.add_get("/", self._handle_spa_index)
         else:
             self._spa_index_path = None
+            self._spa_static_dir = None
             app.router.add_get("/", self._handle_spa_shell)
 
     # ── Helpers ────────────────────────────────────────────────────────
@@ -1430,6 +1444,29 @@ class WebChatAdapter(BasePlatformAdapter):
             return
 
     # ── SPA shell ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_spa_public_file_handler(path: "Path"):
+        """Serve a single file from ``_static`` (logo / favicon) anonymously."""
+        from pathlib import Path as _Path
+
+        file_path = _Path(path)
+        suffix = file_path.suffix.lower()
+        content_type = {
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".ico": "image/x-icon",
+            ".webp": "image/webp",
+        }.get(suffix, "application/octet-stream")
+
+        async def _handler(_: "web.Request") -> "web.Response":
+            return web.Response(
+                body=file_path.read_bytes(),
+                content_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+
+        return _handler
 
     async def _handle_spa_index(self, request: "web.Request") -> "web.Response":
         if self._spa_index_path is None or not self._spa_index_path.is_file():

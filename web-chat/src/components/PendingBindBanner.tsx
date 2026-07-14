@@ -1,4 +1,6 @@
 import { useT } from '../i18n'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
 type Props = {
   onGoSettings: () => void
@@ -8,11 +10,14 @@ type Props = {
 export function PendingBindBanner({ onGoSettings }: Props) {
   const t = useT()
   return (
-    <div className="app-bind-banner" role="status">
-      <p className="app-bind-banner-text">{t('bindBanner.message')}</p>
-      <button type="button" className="app-bind-banner-btn" onClick={onGoSettings}>
-        {t('bindBanner.action')}
-      </button>
-    </div>
+    <Alert className="mx-3 mt-2 rounded-lg border-primary/30 bg-primary/10">
+      <AlertTitle className="sr-only">{t('bindBanner.action')}</AlertTitle>
+      <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-foreground text-sm">{t('bindBanner.message')}</span>
+        <Button type="button" size="sm" onClick={onGoSettings}>
+          {t('bindBanner.action')}
+        </Button>
+      </AlertDescription>
+    </Alert>
   )
 }

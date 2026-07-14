@@ -33,7 +33,7 @@ describe('KeyPromptModal', () => {
       </LocaleProvider>,
     )
 
-    await user.type(screen.getByLabelText(/api key/i), 'sk-bad')
+    await user.type(screen.getByPlaceholderText(/sk-/i), 'sk-bad')
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
     expect(

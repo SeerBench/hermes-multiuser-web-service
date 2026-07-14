@@ -450,6 +450,99 @@ def test_delete_invalid_name(hermes_home, alice_workspace):
     assert result["success"] is False
 
 
+# ── web_skill_edit / web_skill_patch ───────────────────────────────────
+
+
+def test_edit_personal_skill(hermes_home, alice_workspace):
+    _call("web_skill_install", {
+        "name": "mine",
+        "category": "research",
+        "skill_md": _good_skill_md("mine", "v1"),
+    })
+    updated = _good_skill_md("mine", "evolved habit")
+
+    result = _call("web_skill_edit", {"name": "mine", "skill_md": updated})
+
+    assert result["success"] is True
+    assert result["source"] == "user"
+    view = _call("web_skill_view", {"name": "mine"})
+    assert "evolved habit" in view["content"]
+
+
+def test_edit_global_forks_into_workspace(hermes_home, alice_workspace):
+    _seed_global_skill(hermes_home, "research", "arxiv", "global version")
+    updated = _good_skill_md("arxiv", "my fork")
+
+    result = _call("web_skill_edit", {"name": "arxiv", "skill_md": updated})
+
+    assert result["success"] is True
+    assert result["forked"] is True
+    assert result["source"] == "user"
+    # Global library stays untouched.
+    global_md = (hermes_home / "skills" / "research" / "arxiv" / "SKILL.md").read_text()
+    assert "global version" in global_md
+    user_view = _call("web_skill_view", {"name": "arxiv"})
+    assert user_view["source"] == "user"
+    assert "my fork" in user_view["content"]
+
+
+def test_patch_personal_skill(hermes_home, alice_workspace):
+    md = _good_skill_md("mine") + "\nUse tool A always.\n"
+    _call("web_skill_install", {
+        "name": "mine",
+        "category": "research",
+        "skill_md": md,
+    })
+
+    result = _call("web_skill_patch", {
+        "name": "mine",
+        "old_string": "Use tool A always.",
+        "new_string": "Prefer tool B for this workflow.",
+    })
+
+    assert result["success"] is True
+    view = _call("web_skill_view", {"name": "mine"})
+    assert "Prefer tool B" in view["content"]
+    assert "Use tool A always." not in view["content"]
+
+
+def test_patch_global_forks_then_patches(hermes_home, alice_workspace):
+    content = (
+        "---\nname: arxiv\ndescription: \"global skill\"\nversion: 1.0.0\n---\n"
+        "# arxiv\n\nSearch arxiv first.\n"
+    )
+    _seed_global_skill(hermes_home, "research", "arxiv", content=content)
+
+    result = _call("web_skill_patch", {
+        "name": "arxiv",
+        "old_string": "Search arxiv first.",
+        "new_string": "Search arxiv, then summarise abstract.",
+    })
+
+    assert result["success"] is True
+    assert result["forked"] is True
+    view = _call("web_skill_view", {"name": "arxiv"})
+    assert view["source"] == "user"
+    assert "summarise abstract" in view["content"]
+
+
+def test_patch_unique_match_required(hermes_home, alice_workspace):
+    md = _good_skill_md("mine") + "\nfoo\nfoo\n"
+    _call("web_skill_install", {
+        "name": "mine",
+        "category": "research",
+        "skill_md": md,
+    })
+
+    result = _call("web_skill_patch", {
+        "name": "mine",
+        "old_string": "foo",
+        "new_string": "bar",
+    })
+    assert result["success"] is False
+    assert "unique" in result["error"].lower() or "multiple" in result["error"].lower()
+
+
 # ── Outside-context safety ─────────────────────────────────────────────
 
 
@@ -467,6 +560,11 @@ def test_delete_invalid_name(hermes_home, alice_workspace):
             },
         ),
         ("web_skill_delete", {"name": "x"}),
+        ("web_skill_edit", {"name": "x", "skill_md": _good_skill_md("x")}),
+        (
+            "web_skill_patch",
+            {"name": "x", "old_string": "a", "new_string": "b"},
+        ),
     ],
 )
 def test_handler_outside_user_context_returns_internal_error(hermes_home, handler_name, args):

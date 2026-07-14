@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>TEST_TODO — Hermes 工作台验收清单</title>
+  <style>
+    :root {
+      --bg: #0f1014;
+      --bg-elev: #16181e;
+      --bg-row: #1a1c23;
+      --border: #2a2e38;
+      --fg: #e8eaef;
+      --fg-dim: #9aa0ad;
+      --accent: #7c9eff;
+      --accent-soft: rgba(124, 158, 255, 0.12);
+      --ok: #6bcf8e;
+      --warn: #e6b86a;
+      --danger: #e87a7a;
+      --code-bg: #0a0b0e;
+      --radius: 8px;
+      --font: "SF Mono", "Menlo", "Consolas", "Liberation Mono", ui-monospace, monospace;
+      --font-sans: "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+        "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 28px 20px 80px;
+    }
+
+    header.page {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px;
+      margin-bottom: 28px;
+    }
+
+    header.page h1 {
+      margin: 0 0 10px;
+      font-size: 1.35rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+
+    .meta {
+      color: var(--fg-dim);
+      font-size: 13px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .meta strong { color: var(--fg); font-weight: 550; }
+
+    nav.toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0 0;
+    }
+
+    nav.toc a {
+      display: inline-block;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--bg-elev);
+      color: var(--fg-dim);
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    nav.toc a:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    section {
+      margin: 0 0 36px;
+      scroll-margin-top: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      font-weight: 650;
+      color: var(--fg);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      margin: 18px 0 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--fg-dim);
+    }
+
+    p, .note {
+      color: var(--fg-dim);
+      margin: 0 0 12px;
+    }
+
+    .note code, p code, td code, li code {
+      font-family: var(--font);
+      font-size: 0.88em;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: var(--accent);
+    }
+
+    pre {
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-family: var(--font);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #c5cad6;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin: 0 0 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--bg-elev);
+      color: var(--fg-dim);
+      font-weight: 550;
+      white-space: nowrap;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.015); }
+
+    tbody tr:hover { background: var(--accent-soft); }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .check input {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .verdict {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px 22px;
+      margin: 10px 0 0;
+      padding: 12px 14px;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .verdict .check { color: var(--fg); }
+
+    .order {
+      white-space: pre-wrap;
+      font-family: var(--font);
+      font-size: 12.5px;
+      color: #c5cad6;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      line-height: 1.65;
+    }
+
+    .sign {
+      display: grid;
+      gap: 10px;
+      color: var(--fg-dim);
+      margin-top: 8px;
+    }
+
+    .sign label {
+      display: grid;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .sign input[type="text"] {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--fg);
+      padding: 8px 10px;
+      font: inherit;
+      max-width: 420px;
+    }
+
+    .sign input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    footer.page {
+      margin-top: 40px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      color: var(--fg-dim);
+      font-size: 12px;
+    }
+
+    .env-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 20px;
+      margin-top: 8px;
+    }
+
+    @media print {
+      body { background: #fff; color: #111; }
+      :root {
+        --bg: #fff;
+        --bg-elev: #f5f5f5;
+        --border: #ccc;
+        --fg: #111;
+        --fg-dim: #444;
+        --accent: #245;
+        --code-bg: #f8f8f8;
+      }
+      nav.toc { display: none; }
+      a { color: inherit; text-decoration: underline; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="page">
+      <h1>TEST_TODO — 本轮改动人工测试审查清单</h1>
+      <div class="meta">
+        <div><strong>用途</strong>：针对本对话相关改动的验收勾选表（非全站基线）。</div>
+        <div><strong>全链路基线</strong>：
+          <a href="docs/user-guide/platform-manual-testing.zh-CN.md">platform-manual-testing.zh-CN.md</a>
+        </div>
+        <div class="env-row">
+          <label class="check"><input type="text" placeholder="审查人" id="reviewer" style="width:140px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;color:var(--fg);padding:4px 8px;font:inherit" /></label>
+          <label class="check"><input type="text" placeholder="日期" id="review-date" style="width:120px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;color:var(--fg);padding:4px 8px;font:inherit" /></label>
+          <span>环境：
+            <label class="check"><input type="checkbox" data-key="env-local" /> 本地</label>
+            <label class="check"><input type="checkbox" data-key="env-staging" /> 预发</label>
+          </span>
+          <span>构建：
+            <label class="check"><input type="checkbox" data-key="build-vite" /> Vite <code>:5173</code></label>
+            <label class="check"><input type="checkbox" data-key="build-prod" /> 生产 <code>:8643</code></label>
+          </span>
+        </div>
+      </div>
+      <nav class="toc" aria-label="章节">
+        <a href="#overview">一览</a>
+        <a href="#s0">0 启动</a>
+        <a href="#sa">A Files</a>
+        <a href="#sb">B Onboarding</a>
+        <a href="#sc">C/D Skills</a>
+        <a href="#se">E 进化</a>
+        <a href="#sf">F 回归</a>
+        <a href="#sg">G 隔离</a>
+        <a href="#order">顺序</a>
+        <a href="#verdict">结论</a>
+        <a href="#appendix">附录</a>
+      </nav>
+    </header>
+
+    <!-- Overview -->
+    <section id="overview">
+      <h2>本轮改动一览</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>编号</th><th>功能</th><th>用户可感知入口</th><th>关键实现</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>A</td><td>Files 解析进度 UI</td><td><code>#/files</code></td><td>轮询 <code>GET .../files/{file_id}/status</code></td></tr>
+            <tr><td>B</td><td>注册 Onboarding</td><td>注册成功后模态</td><td><code>localStorage</code> key：<code>hermes_onboarding_done:{userId}</code></td></tr>
+            <tr><td>C</td><td>技能库安装到 workspace</td><td><code>#/skills</code></td><td><code>POST .../skills/install-from-catalog</code></td></tr>
+            <tr><td>D</td><td>技能预览</td><td><code>#/skills</code> 侧栏</td><td><code>GET .../skills/{name}</code></td></tr>
+            <tr><td>E</td><td>技能进化（Agent）</td><td>Chat</td><td><code>web_skill_edit</code> / <code>web_skill_patch</code>（全局 fork-on-write）</td></tr>
+            <tr><td>F</td><td>相关回归</td><td>顶栏 / 会话列表 / 移动端</td><td>P0：bind 横幅、搜索、抽屉</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 0 -->
+    <section id="s0">
+      <h2>0. 启动与自检（必做）</h2>
+      <pre><code>./startplatform.sh --host 127.0.0.1
+# 前端调试：cd web-chat &amp;&amp; npm run dev   → http://127.0.0.1:5173
+# 或：cd web-chat &amp;&amp; npm run build     → http://127.0.0.1:8643</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>检查</th><th>通过</th></tr></thead>
+          <tbody>
+            <tr><td>0.1</td><td><code>curl -s http://127.0.0.1:8700/api/v1/healthz</code> → 200</td><td><label class="check"><input type="checkbox" data-key="0.1" /></label></td></tr>
+            <tr><td>0.2</td><td><code>curl -s http://127.0.0.1:8643/api/healthz</code> → 200</td><td><label class="check"><input type="checkbox" data-key="0.2" /></label></td></tr>
+            <tr><td>0.3</td><td>浏览器打开后出现 <strong>注册/登录</strong>（非仅 Legacy Key 弹窗）</td><td><label class="check"><input type="checkbox" data-key="0.3" /></label></td></tr>
+            <tr><td>0.4</td><td>使用 <code>127.0.0.1</code>（避免 Cookie 与 <code>localhost</code> 混用）</td><td><label class="check"><input type="checkbox" data-key="0.4" /></label></td></tr>
+            <tr><td>0.5</td><td>审查前建议无痕窗口，或清空 Cookie + 相关 localStorage</td><td><label class="check"><input type="checkbox" data-key="0.5" /></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>自动化（人工前建议先绿）</h3>
+      <pre><code>scripts/run_tests.sh tests/gateway/test_web_sandboxed_skills.py
+scripts/run_tests.sh tests/platform/test_skills_catalog.py
+cd web-chat &amp;&amp; npm run verify</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>命令结果</th><th>通过</th></tr></thead>
+          <tbody>
+            <tr><td>0.6</td><td>gateway skill 测试通过</td><td><label class="check"><input type="checkbox" data-key="0.6" /></label></td></tr>
+            <tr><td>0.7</td><td>platform skills catalog 测试通过</td><td><label class="check"><input type="checkbox" data-key="0.7" /></label></td></tr>
+            <tr><td>0.8</td><td><code>npm run verify</code> 通过</td><td><label class="check"><input type="checkbox" data-key="0.8" /></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- A -->
+    <section id="sa">
+      <h2>A. Files 解析进度 UI</h2>
+      <p class="note"><strong>账号</strong>：任意已登录 Platform 用户（有 workspace）。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>步骤</th><th>预期结果</th><th>通过</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td>A1</td><td>打开 <code>#/files</code>，上传小 <code>.txt</code> / <code>.md</code></td><td>列表出现文件；状态徽章先「排队中/索引中」，再变「已就绪」</td><td><label class="check"><input type="checkbox" data-key="A1" /></label></td><td></td></tr>
+            <tr><td>A2</td><td>上传过程中不手动刷新</td><td>状态自动更新（约 2s 级轮询）</td><td><label class="check"><input type="checkbox" data-key="A2" /></label></td><td></td></tr>
+            <tr><td>A3</td><td>DevTools → Network</td><td>可见对 <code>.../files/{id}/status</code> 的请求；就绪后对已完成文件不再持续无意义轮询</td><td><label class="check"><input type="checkbox" data-key="A3" /></label></td><td></td></tr>
+            <tr><td>A4</td><td>上传损坏/不支持文件（若可复现失败）</td><td>状态「失败」，展示错误文案</td><td><label class="check"><input type="checkbox" data-key="A4" /></label></td><td>不可复现可标 N/A</td></tr>
+            <tr><td>A5</td><td>删除文件</td><td>条目消失，无未处理错误</td><td><label class="check"><input type="checkbox" data-key="A5" /></label></td><td></td></tr>
+            <tr><td>A6</td><td>切换中/英文</td><td>状态文案切换正确（Queued↔排队中 等）</td><td><label class="check"><input type="checkbox" data-key="A6" /></label></td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict">
+        <strong>结论 A</strong>
+        <label class="check"><input type="checkbox" data-key="A-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="A-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="A-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- B -->
+    <section id="sb">
+      <h2>B. 注册 Onboarding 向导</h2>
+      <p class="note"><strong>账号</strong>：必须用<strong>新邮箱注册</strong>（或删掉 <code>hermes_onboarding_done:{userId}</code>）。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>步骤</th><th>预期结果</th><th>通过</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td>B1</td><td>注册成功</td><td>弹出 Onboarding（快速入门 / Get started），有步骤进度</td><td><label class="check"><input type="checkbox" data-key="B1" /></label></td><td></td></tr>
+            <tr><td>B2</td><td>若 <code>pending_bind</code></td><td>第 1 步为绑 API key，可提交</td><td><label class="check"><input type="checkbox" data-key="B2" /></label></td><td></td></tr>
+            <tr><td>B3</td><td>绑 key 成功</td><td>进入「上传文档（可选）」；顶栏 pending_bind 横幅应消失（刷新后亦消失）</td><td><label class="check"><input type="checkbox" data-key="B3" /></label></td><td></td></tr>
+            <tr><td>B4</td><td>点「前往文件页」</td><td>路由到 <code>#/files</code>，进入下一步</td><td><label class="check"><input type="checkbox" data-key="B4" /></label></td><td></td></tr>
+            <tr><td>B5</td><td>或点「暂时跳过」</td><td>不强制上传，进入「打开对话」步</td><td><label class="check"><input type="checkbox" data-key="B5" /></label></td><td></td></tr>
+            <tr><td>B6</td><td>「打开对话」</td><td>关闭模态，进入 <code>#/chat</code>；localStorage 写入完成标记</td><td><label class="check"><input type="checkbox" data-key="B6" /></label></td><td>Application → Local Storage 核对</td></tr>
+            <tr><td>B7</td><td>同用户刷新 / 再登录</td><td><strong>不再</strong>弹出 Onboarding</td><td><label class="check"><input type="checkbox" data-key="B7" /></label></td><td></td></tr>
+            <tr><td>B8</td><td>注册第二个新用户</td><td><strong>仍会</strong>弹出（按 userId 隔离）</td><td><label class="check"><input type="checkbox" data-key="B8" /></label></td><td></td></tr>
+            <tr><td>B9</td><td>已 bind 用户清掉完成标记后再进</td><td>可再弹出；不应强制停在绑 key（可直接从上传/对话引导开始）</td><td><label class="check"><input type="checkbox" data-key="B9" /></label></td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict">
+        <strong>结论 B</strong>
+        <label class="check"><input type="checkbox" data-key="B-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="B-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="B-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- C/D -->
+    <section id="sc">
+      <h2>C / D. 技能库：浏览、预览、安装</h2>
+      <p class="note"><strong>前置</strong>：全局库至少有一个 skill。本地为空时可临时植入：</p>
+      <pre><code>HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME/skills/research/demo-skill"
+cat &gt; "$HERMES_HOME/skills/research/demo-skill/SKILL.md" &lt;&lt;'EOF'
+---
+name: demo-skill
+description: "Manual test catalog skill for TEST_TODO."
+version: 1.0.0
+---
+# demo-skill
+
+Always include the token HELLO_DEMO in your first reply when this skill applies.
+EOF
+# 植入后需重启 gateway / 或确认 list 能扫到（进程已指向该 HERMES_HOME）</code></pre>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>步骤</th><th>预期结果</th><th>通过</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td>C1</td><td>打开 <code>#/skills</code></td><td>可见「技能库」分区；有全局条目</td><td><label class="check"><input type="checkbox" data-key="C1" /></label></td><td></td></tr>
+            <tr><td>C2</td><td>点击 skill 名称</td><td>右侧预览 SKILL.md、<code>source</code>、描述</td><td><label class="check"><input type="checkbox" data-key="C2" /></label></td><td></td></tr>
+            <tr><td>C3</td><td>「添加到工作区」</td><td>进入「我的技能」；<code>source=user</code>；预览仍可读</td><td><label class="check"><input type="checkbox" data-key="C3" /></label></td><td></td></tr>
+            <tr><td>C4</td><td>磁盘核验</td><td><code>$HERMES_HOME/web_workspaces/&lt;user_id&gt;/skills/.../SKILL.md</code> 存在</td><td><label class="check"><input type="checkbox" data-key="C4" /></label></td><td></td></tr>
+            <tr><td>C5</td><td>同名再次添加（不覆盖）</td><td>明确失败/冲突提示，不静默覆盖</td><td><label class="check"><input type="checkbox" data-key="C5" /></label></td><td>期望 409 或 UI 错误</td></tr>
+            <tr><td>C6</td><td>启用开关切换 + 刷新</td><td>状态保持</td><td><label class="check"><input type="checkbox" data-key="C6" /></label></td><td></td></tr>
+            <tr><td>C7</td><td>用户 B（另一无痕）看 <code>#/skills</code></td><td><strong>看不到</strong> A 的 <code>source=user</code> 私有技能</td><td><label class="check"><input type="checkbox" data-key="C7" /></label></td><td></td></tr>
+            <tr><td>C8</td><td>A 的 Cookie 调 B 的 workspace 安装 API</td><td>404（隔离）</td><td><label class="check"><input type="checkbox" data-key="C8" /></label></td><td>可选 curl</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>可选 curl（替换 Cookie / WS_ID）</h3>
+      <pre><code>curl -s -b 'hermes_session=YOUR_COOKIE' \
+  -X POST "http://127.0.0.1:8700/api/v1/workspaces/WS_ID/skills/install-from-catalog" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo-skill"}'</code></pre>
+      <div class="verdict">
+        <strong>结论 C/D</strong>
+        <label class="check"><input type="checkbox" data-key="CD-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="CD-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="CD-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- E -->
+    <section id="se">
+      <h2>E. 技能进化（Chat Agent）</h2>
+      <p class="note"><strong>前置</strong>：已 bind key；Chat 可正常流式回复。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>步骤</th><th>预期结果</th><th>通过</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr><td>E1</td><td>「列出我可用的技能」</td><td>Agent 走 <code>web_skills_list</code>，能区分 global / user</td><td><label class="check"><input type="checkbox" data-key="E1" /></label></td><td>可用工具事件面板观察</td></tr>
+            <tr><td>E2</td><td>对<strong>仅全局</strong> skill：「把说明改成……」</td><td>使用 <code>web_skill_patch</code> 或 <code>edit</code>；之后在「我的技能」出现私有副本</td><td><label class="check"><input type="checkbox" data-key="E2" /></label></td><td></td></tr>
+            <tr><td>E3</td><td>查全局磁盘</td><td><code>$HERMES_HOME/skills/.../SKILL.md</code> <strong>未改</strong></td><td><label class="check"><input type="checkbox" data-key="E3" /></label></td><td></td></tr>
+            <tr><td>E4</td><td>查用户磁盘</td><td>workspace 下私有 SKILL.md <strong>已改</strong></td><td><label class="check"><input type="checkbox" data-key="E4" /></label></td><td></td></tr>
+            <tr><td>E5</td><td>再对私有副本小改一次</td><td>直接改 user 文件，全局仍不动</td><td><label class="check"><input type="checkbox" data-key="E5" /></label></td><td></td></tr>
+            <tr><td>E6</td><td>「删除我刚装的个人技能」</td><td><code>web_skill_delete</code> 成功</td><td><label class="check"><input type="checkbox" data-key="E6" /></label></td><td></td></tr>
+            <tr><td>E7</td><td>「删除某个全局技能」</td><td>被拒绝 / 提示只读</td><td><label class="check"><input type="checkbox" data-key="E7" /></label></td><td></td></tr>
+            <tr><td>E8</td><td>「用 mkdir / 终端帮我装 skill」</td><td>Agent 应按平台规则拒绝，引导 <code>web_skill_*</code></td><td><label class="check"><input type="checkbox" data-key="E8" /></label></td><td>负面用例</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict">
+        <strong>结论 E</strong>
+        <label class="check"><input type="checkbox" data-key="E-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="E-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="E-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- F -->
+    <section id="sf">
+      <h2>F. 相关回归（本对话前序 P0）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>检查项</th><th>预期</th><th>通过</th></tr></thead>
+          <tbody>
+            <tr><td>F1</td><td>未 bind 时顶栏引导横幅</td><td>可见，可进 Settings 绑 key</td><td><label class="check"><input type="checkbox" data-key="F1" /></label></td></tr>
+            <tr><td>F2</td><td>未 bind 时发 Chat</td><td>被拦截或提示需绑 key（非 Silent 403）</td><td><label class="check"><input type="checkbox" data-key="F2" /></label></td></tr>
+            <tr><td>F3</td><td>会话列表搜索</td><td>标题/预览可过滤</td><td><label class="check"><input type="checkbox" data-key="F3" /></label></td></tr>
+            <tr><td>F4</td><td>视口 ≤720px</td><td>汉堡菜单可开会话抽屉</td><td><label class="check"><input type="checkbox" data-key="F4" /></label></td></tr>
+            <tr><td>F5</td><td>中英文切换</td><td>Onboarding / Files / Skills 无 i18n key 裸露</td><td><label class="check"><input type="checkbox" data-key="F5" /></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict">
+        <strong>结论 F</strong>
+        <label class="check"><input type="checkbox" data-key="F-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="F-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="F-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- G -->
+    <section id="sg">
+      <h2>G. 隔离底线（双账号，建议）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>场景</th><th>预期</th><th>通过</th></tr></thead>
+          <tbody>
+            <tr><td>G1</td><td>A 上传文件</td><td>B 的 <code>#/files</code> 不可见</td><td><label class="check"><input type="checkbox" data-key="G1" /></label></td></tr>
+            <tr><td>G2</td><td>A 安装的个人 skill</td><td>B 看不到 user 源</td><td><label class="check"><input type="checkbox" data-key="G2" /></label></td></tr>
+            <tr><td>G3</td><td>A / B 各自 Chat 会话</td><td>互不可见</td><td><label class="check"><input type="checkbox" data-key="G3" /></label></td></tr>
+            <tr><td>G4</td><td>Onboarding 完成标记</td><td>按 userId，互不影响</td><td><label class="check"><input type="checkbox" data-key="G4" /></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="verdict">
+        <strong>结论 G</strong>
+        <label class="check"><input type="checkbox" data-key="G-pass" /> 通过</label>
+        <label class="check"><input type="checkbox" data-key="G-bug" /> 有缺陷（编号：____）</label>
+        <label class="check"><input type="checkbox" data-key="G-block" /> 阻塞</label>
+      </div>
+    </section>
+
+    <!-- Order -->
+    <section id="order">
+      <h2>建议验收顺序（约 25–40 分钟）</h2>
+      <div class="order">0 健康检查 + 自动化绿
+ → B 新账号注册 + Onboarding 全流程 + bind-key
+ → A 上传文件看进度徽章
+ → C/D 技能库预览 + 安装到 workspace
+ → E Chat 进化技能（fork 后改文案）+ 核对磁盘
+ → G 第二账号隔离
+ → F 移动端 / 搜索 / 横幅快速扫一眼</div>
+    </section>
+
+    <!-- Verdict -->
+    <section id="verdict">
+      <h2>审查结论</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>判定</th><th>勾选</th></tr></thead>
+          <tbody>
+            <tr><td><strong style="color:var(--ok)">通过</strong> — 可合并 / 可进下一步发布准备</td><td><label class="check"><input type="checkbox" data-key="final-pass" /></label></td></tr>
+            <tr><td><strong style="color:var(--warn)">有条件通过</strong> — 仅非阻塞缺陷，已登记</td><td><label class="check"><input type="checkbox" data-key="final-cond" /></label></td></tr>
+            <tr><td><strong style="color:var(--danger)">不通过</strong> — 存在阻塞项，需返工</td><td><label class="check"><input type="checkbox" data-key="final-fail" /></label></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>阻塞项</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>现象</th><th>复现步骤</th><th>期望</th><th>实际</th></tr></thead>
+          <tbody>
+            <tr><td contenteditable="true">&nbsp;</td><td contenteditable="true"></td><td contenteditable="true"></td><td contenteditable="true"></td><td contenteditable="true"></td></tr>
+            <tr><td contenteditable="true">&nbsp;</td><td contenteditable="true"></td><td contenteditable="true"></td><td contenteditable="true"></td><td contenteditable="true"></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>非阻塞项</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>现象</th><th>建议</th></tr></thead>
+          <tbody>
+            <tr><td contenteditable="true">&nbsp;</td><td contenteditable="true"></td><td contenteditable="true"></td></tr>
+            <tr><td contenteditable="true">&nbsp;</td><td contenteditable="true"></td><td contenteditable="true"></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>签核</h3>
+      <div class="sign">
+        <label>审查人 <input type="text" data-text="sign-reviewer" placeholder="姓名" /></label>
+        <label>签名 / 日期 <input type="text" data-text="sign-date" placeholder="签名或日期" /></label>
+        <label>开发确认 <input type="text" data-text="sign-dev" placeholder="姓名" /></label>
+        <label>开发日期 <input type="text" data-text="sign-dev-date" placeholder="日期" /></label>
+      </div>
+    </section>
+
+    <!-- Appendix -->
+    <section id="appendix">
+      <h2>附录：代码触点（对照用）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>功能</th><th>主要文件</th></tr></thead>
+          <tbody>
+            <tr><td>Files 进度</td><td><code>web-chat/src/pages/FilesPage.tsx</code>、<code>fileIngestion.ts</code>、<code>platformClient.getFileStatus</code></td></tr>
+            <tr><td>Onboarding</td><td><code>OnboardingModal.tsx</code>、<code>onboardingStorage.ts</code>、<code>App.tsx</code>、<code>AuthPage.tsx</code></td></tr>
+            <tr><td>Skills API</td><td><code>platform_api/routers/skills.py</code></td></tr>
+            <tr><td>Skills Agent</td><td><code>gateway/web/tools/sandboxed_skill_manage.py</code>、<code>toolsets.py</code>、<code>chat_runner.py</code></td></tr>
+            <tr><td>Skills UI</td><td><code>web-chat/src/pages/SkillsPage.tsx</code></td></tr>
+            <tr><td>i18n / 样式</td><td><code>web-chat/src/i18n/{en,zh}.json</code>、<code>styles.css</code></td></tr>
+            <tr><td>测试</td><td><code>tests/platform/test_skills_catalog.py</code>、<code>tests/gateway/test_web_sandboxed_skills.py</code>、<code>web-chat</code> vitest</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>附录：常见问题（本轮相关）</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>现象</th><th>排查</th></tr></thead>
+          <tbody>
+            <tr><td>没出现 Onboarding</td><td>不是新注册；或已有 <code>hermes_onboarding_done:*</code>；或非 Platform 模式</td></tr>
+            <tr><td>技能库为空</td><td><code>$HERMES_HOME/skills</code> 无内容；gateway 与审查终端的 <code>HERMES_HOME</code> 不一致</td></tr>
+            <tr><td>安装成功但列表仍像 global</td><td>刷新 <code>#/skills</code>；或同名 overlay 未刷新侧栏，重开预览</td></tr>
+            <tr><td>进度一直卡在索引中</td><td>platform ingest 是否报错；看 platform-api 日志 / 文件 <code>error_message</code></td></tr>
+            <tr><td>Chat 无 edit/patch</td><td>确认 <code>hermes-web-chat</code> 工具集已含新工具且 gateway 已重启</td></tr>
+            <tr><td>Cookie 异常</td><td>统一用 <code>127.0.0.1</code>，不要混 <code>localhost</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="page">
+      勾选状态保存在本机 <code>localStorage</code>（键前缀 <code>hermes_test_todo:</code>）。打印时可用浏览器「打印 → 另存为 PDF」。
+      源文件：<code>TEST_TODO.md</code>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var PREFIX = 'hermes_test_todo:';
+
+      function loadChecks() {
+        document.querySelectorAll('input[type="checkbox"][data-key]').forEach(function (el) {
+          var v = localStorage.getItem(PREFIX + el.getAttribute('data-key'));
+          if (v === '1') el.checked = true;
+          el.addEventListener('change', function () {
+            localStorage.setItem(PREFIX + el.getAttribute('data-key'), el.checked ? '1' : '0');
+          });
+        });
+      }
+
+      function loadTexts() {
+        ;['reviewer', 'review-date'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          var key = PREFIX + 'text:' + id;
+          var saved = localStorage.getItem(key);
+          if (saved) el.value = saved;
+          el.addEventListener('input', function () {
+            localStorage.setItem(key, el.value);
+          });
+        });
+        document.querySelectorAll('input[type="text"][data-text]').forEach(function (el) {
+          var key = PREFIX + 'text:' + el.getAttribute('data-text');
+          var saved = localStorage.getItem(key);
+          if (saved) el.value = saved;
+          el.addEventListener('input', function () {
+            localStorage.setItem(key, el.value);
+          });
+        });
+      }
+
+      loadChecks();
+      loadTexts();
+    })();
+  </script>
+</body>
+</html>

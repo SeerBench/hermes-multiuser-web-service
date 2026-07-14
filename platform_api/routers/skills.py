@@ -1,14 +1,13 @@
-"""Skill entitlements + global skill listing."""
+"""Skill entitlements + catalog install into workspace."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, List, Optional
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from gateway.web.platform.models import SkillEntitlement, Workspace
@@ -22,6 +21,11 @@ router = APIRouter(prefix="/workspaces", tags=["skills"])
 class SkillPatch(BaseModel):
     enabled: Optional[bool] = None
     config: Optional[dict[str, Any]] = None
+
+
+class InstallFromCatalogBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    overwrite: bool = False
 
 
 @router.get("/{workspace_id}/skills")
@@ -52,6 +56,78 @@ def list_skills(workspace_id: str, user_id: str = Depends(get_current_user_id)) 
     for s in merged.values():
         s.setdefault("enabled", True)
     return sorted(merged.values(), key=lambda x: x["name"])
+
+
+@router.post("/{workspace_id}/skills/install-from-catalog")
+def install_from_catalog(
+    workspace_id: str,
+    body: InstallFromCatalogBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Copy a global catalog skill into the caller's private workspace."""
+    _get_workspace(workspace_id, user_id)
+    from gateway.web.tools.sandboxed_skill_manage import install_skill_from_catalog
+
+    with enter_user_context(user_id):
+        result = install_skill_from_catalog(body.name.strip(), overwrite=body.overwrite)
+
+    if not result.get("success"):
+        code = result.get("code")
+        err = str(result.get("error") or "install failed")
+        if code == "not_found" or code == "not_in_catalog":
+            raise HTTPException(status_code=404, detail=err)
+        if code == "already_installed":
+            raise HTTPException(status_code=409, detail=err)
+        raise HTTPException(status_code=400, detail=err)
+
+    store = get_store()
+    store.audit(
+        user_id,
+        "skills.install_from_catalog",
+        target_type="skill",
+        target_id=body.name.strip(),
+        workspace_id=workspace_id,
+    )
+    return result
+
+
+@router.get("/{workspace_id}/skills/{skill_name}")
+def get_skill(
+    workspace_id: str,
+    skill_name: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Preview a skill's metadata + SKILL.md (user overlay wins)."""
+    _get_workspace(workspace_id, user_id)
+    with enter_user_context(user_id):
+        from gateway.web.tools.sandboxed_skill_manage import _find_skill
+
+        located = _find_skill(skill_name)
+        if not located:
+            raise HTTPException(status_code=404, detail="not found")
+        skill_dir, source = located
+        skill_md = skill_dir / "SKILL.md"
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    meta: dict[str, Any] = {}
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        try:
+            meta = yaml.safe_load(parts[1]) or {} if len(parts) >= 3 else {}
+        except yaml.YAMLError:
+            meta = {}
+
+    return {
+        "name": str(meta.get("name") or skill_name),
+        "source": source,
+        "category": skill_dir.parent.name,
+        "description": meta.get("description") or "",
+        "path": str(skill_dir),
+        "content": content,
+    }
 
 
 @router.patch("/{workspace_id}/skills/{skill_name}")
@@ -127,6 +203,7 @@ def _scan_skills(root: Path, *, source: str) -> List[dict[str, Any]]:
             out.append({
                 "name": name,
                 "source": source,
+                "category": skill_md.parent.parent.name if skill_md.parent.parent != root else "",
                 "path": str(skill_md.parent),
                 "description": meta.get("description", ""),
             })

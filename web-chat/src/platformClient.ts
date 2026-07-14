@@ -37,8 +37,18 @@ export type SkillRow = {
   name: string
   source: string
   description?: string
+  category?: string
   enabled?: boolean
   config?: Record<string, unknown>
+}
+
+export type SkillDetail = {
+  name: string
+  source: string
+  category?: string
+  description?: string
+  path?: string
+  content: string
 }
 
 const BASE = '/api/v1'
@@ -97,6 +107,14 @@ export function storeWorkspaceId(id: string) {
   }
 }
 
+export function clearWorkspaceId() {
+  try {
+    localStorage.removeItem(WORKSPACE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export const platform = {
   register: (email: string, password: string) =>
     platformRequest<AuthResponse>('/auth/register', {
@@ -141,6 +159,26 @@ export const platform = {
   listSkills: (workspaceId: string) =>
     platformRequest<SkillRow[]>(`/workspaces/${workspaceId}/skills`),
 
+  getSkill: (workspaceId: string, skillName: string) =>
+    platformRequest<SkillDetail>(
+      `/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}`,
+    ),
+
+  installSkillFromCatalog: (
+    workspaceId: string,
+    name: string,
+    opts?: { overwrite?: boolean },
+  ) =>
+    platformRequest<{
+      success: boolean
+      name: string
+      category?: string
+      source: string
+    }>(`/workspaces/${workspaceId}/skills/install-from-catalog`, {
+      method: 'POST',
+      body: JSON.stringify({ name, overwrite: opts?.overwrite ?? false }),
+    }),
+
   patchSkill: (
     workspaceId: string,
     skillName: string,
@@ -167,6 +205,12 @@ export const platform = {
     platformRequest<{ status: string }>(
       `/workspaces/${workspaceId}/files/${fileId}`,
       { method: 'DELETE' },
+    ),
+
+  /** 单文件 ingestion 状态（用于轮询 pending / processing）。 */
+  getFileStatus: (workspaceId: string, fileId: string) =>
+    platformRequest<PlatformFile>(
+      `/workspaces/${workspaceId}/files/${fileId}/status`,
     ),
 
   adminUsers: () => platformRequest<PlatformUser[]>('/admin/users'),

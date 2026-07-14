@@ -1,5 +1,5 @@
 {
-  "app.title": "Hermes Web Chat",
+  "app.title": "Hermes Workspace",
 
   "nav.chat": "Chat",
   "nav.settings": "Settings",
@@ -7,6 +7,9 @@
   "nav.memory": "Memory",
   "nav.skills": "Skills",
   "nav.admin": "Admin",
+  "nav.logout": "Sign out",
+  "nav.logout.tip": "Sign out",
+  "nav.home": "Back to chat",
 
   "common.loading": "Loading…",
   "common.cancel": "Cancel",
@@ -120,12 +123,19 @@
   "settings.not_signed_in": "Not signed in. Return to chat and send a message to sign in with your API key.",
   "settings.preferences.title": "Preferences",
   "settings.preferences.language": "Interface language",
+  "settings.preferences.theme": "Appearance",
+  "settings.preferences.theme.hint": "System follows your OS setting. Light and Dark override it.",
+  "settings.theme.system": "System",
+  "settings.theme.light": "Light",
+  "settings.theme.dark": "Dark",
+  "settings.dialog.title": "Settings",
+  "settings.dialog.subtitle": "Account, API key, language, and appearance.",
   "settings.about.title": "About this service",
   "settings.about.body": "Authentication and billing are handled by the upstream new-api gateway. Your API key was issued by your administrator; to request more capacity or a new key, contact them directly. This interface only stores the cookie session — your key is encrypted at rest and never displayed back.",
   "settings.error.generic": "Failed to load settings.",
 
-  "auth.title": "Welcome",
-  "auth.subtitle": "Sign in or create an account to use the AI agent.",
+  "auth.title": "Hermes Workspace",
+  "auth.subtitle": "Sign in or create an account to start working with your AI agent.",
   "auth.login": "Sign in",
   "auth.register": "Register",
   "auth.email": "Email",
@@ -133,11 +143,20 @@
   "auth.submit": "Continue",
   "auth.submitting": "Please wait…",
   "auth.legacyKey": "Sign in with API key instead",
+  "auth.method.account": "Account",
+  "auth.method.apikey": "API key",
+  "auth.switchToApiKey": "Use API key",
+  "auth.switchToAccount": "Account sign-in",
   "auth.error.generic": "Authentication failed.",
+  "keymodal.switchAccount": "Sign in with email instead",
 
   "files.noWorkspace": "No workspace — sign in first.",
   "files.hint": "Upload PDF, DOCX, or text files for knowledge-base search.",
   "files.delete": "Delete",
+  "files.status.pending": "Queued",
+  "files.status.processing": "Indexing…",
+  "files.status.ready": "Ready",
+  "files.status.failed": "Failed",
 
   "memory.noWorkspace": "No workspace — sign in first.",
   "memory.longTerm": "Long-term memory (MEMORY.md)",
@@ -146,8 +165,18 @@
   "memory.saved": "Saved.",
 
   "skills.noWorkspace": "No workspace — sign in first.",
-  "skills.hint": "Enable or disable skills for your agent sessions.",
+  "skills.hint": "Enable skills, browse the global catalog, and add copies to your workspace to evolve them.",
   "skills.enabled": "Enabled",
+  "skills.section.mine": "My skills",
+  "skills.section.catalog": "Skill catalog",
+  "skills.section.other": "Other",
+  "skills.catalog.hint": "Operator-curated skills. Install a copy into your workspace before evolving it.",
+  "skills.catalog.empty": "No global skills are available yet.",
+  "skills.install": "Add to workspace",
+  "skills.installing": "Adding…",
+  "skills.detail.empty": "Select a skill to preview SKILL.md.",
+  "skills.detail.source": "Source",
+  "skills.detail.userHint": "This is your private copy. Ask the agent to evolve it with web_skill_patch / web_skill_edit.",
 
   "admin.stats": "Users: {users} · Files: {files} · Chunks: {chunks}",
   "admin.email": "Email",
@@ -168,5 +197,17 @@
 
   "bindBanner.message": "Bind your upstream API key before chatting — billing and LLM access go through new-api.",
   "bindBanner.action": "Bind key in Settings",
-  "bindBanner.chatHint": "Chat is disabled until you bind an API key."
+  "bindBanner.chatHint": "Chat is disabled until you bind an API key.",
+
+  "onboarding.title": "Get started",
+  "onboarding.progress": "Step {current} of {total}",
+  "onboarding.step.bind": "Bind your API key",
+  "onboarding.step.files": "Upload documents (optional)",
+  "onboarding.step.chat": "Start your first chat",
+  "onboarding.bind.hint": "Paste the new-api key from your administrator. Chat and billing go through this upstream gateway.",
+  "onboarding.files.hint": "Upload PDF, DOCX, or text files so the agent can search your knowledge base.",
+  "onboarding.files.go": "Go to Files",
+  "onboarding.files.skip": "Skip for now",
+  "onboarding.chat.hint": "You're all set. Open the chat page and send your first message to the agent.",
+  "onboarding.chat.go": "Open Chat"
 }

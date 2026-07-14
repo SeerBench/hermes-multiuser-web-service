@@ -1,5 +1,5 @@
 {
-  "app.title": "Hermes 网页对话",
+  "app.title": "Hermes 工作台",
 
   "nav.chat": "对话",
   "nav.settings": "设置",
@@ -7,6 +7,9 @@
   "nav.memory": "记忆",
   "nav.skills": "技能",
   "nav.admin": "管理",
+  "nav.logout": "退出",
+  "nav.logout.tip": "退出登录",
+  "nav.home": "返回对话",
 
   "common.loading": "加载中…",
   "common.cancel": "取消",
@@ -120,12 +123,19 @@
   "settings.not_signed_in": "尚未登录。返回对话页发送消息即可使用 API 密钥登录。",
   "settings.preferences.title": "偏好",
   "settings.preferences.language": "界面语言",
+  "settings.preferences.theme": "外观",
+  "settings.preferences.theme.hint": "跟随系统将匹配操作系统；浅色/深色会强制覆盖。",
+  "settings.theme.system": "跟随系统",
+  "settings.theme.light": "浅色",
+  "settings.theme.dark": "深色",
+  "settings.dialog.title": "设置",
+  "settings.dialog.subtitle": "账户、API 密钥、语言与外观。",
   "settings.about.title": "关于本服务",
   "settings.about.body": "认证和计费由上游 new-api 网关统一处理。你的 API 密钥由管理员签发,如需更高配额或新密钥请直接联系管理员。本网页只保存登录 Cookie,密钥在服务器端加密保存,永远不会再次显示。",
   "settings.error.generic": "加载设置失败。",
 
-  "auth.title": "欢迎使用",
-  "auth.subtitle": "登录或注册以使用 AI 助手。",
+  "auth.title": "Hermes 工作台",
+  "auth.subtitle": "登录或注册，开始与你的 AI 助手协作。",
   "auth.login": "登录",
   "auth.register": "注册",
   "auth.email": "邮箱",
@@ -133,11 +143,20 @@
   "auth.submit": "继续",
   "auth.submitting": "请稍候…",
   "auth.legacyKey": "改用 API 密钥登录",
+  "auth.method.account": "账户登录",
+  "auth.method.apikey": "API 密钥",
+  "auth.switchToApiKey": "使用 API 密钥",
+  "auth.switchToAccount": "账号登录",
   "auth.error.generic": "认证失败。",
+  "keymodal.switchAccount": "改用邮箱登录",
 
   "files.noWorkspace": "未登录或无工作区。",
   "files.hint": "上传 PDF、DOCX 或文本文件，供知识库检索。",
   "files.delete": "删除",
+  "files.status.pending": "排队中",
+  "files.status.processing": "索引中…",
+  "files.status.ready": "已就绪",
+  "files.status.failed": "失败",
 
   "memory.noWorkspace": "未登录或无工作区。",
   "memory.longTerm": "长期记忆（MEMORY.md）",
@@ -146,8 +165,18 @@
   "memory.saved": "已保存。",
 
   "skills.noWorkspace": "未登录或无工作区。",
-  "skills.hint": "为 Agent 会话启用或禁用技能。",
+  "skills.hint": "启停技能、浏览全局技能库，并安装到工作区后按习惯进化。",
   "skills.enabled": "已启用",
+  "skills.section.mine": "我的技能",
+  "skills.section.catalog": "技能库",
+  "skills.section.other": "其他",
+  "skills.catalog.hint": "运营预置技能。安装到个人工作区后，可在对话中进化私有副本。",
+  "skills.catalog.empty": "暂无全局技能。",
+  "skills.install": "添加到工作区",
+  "skills.installing": "添加中…",
+  "skills.detail.empty": "选择一项技能以预览 SKILL.md。",
+  "skills.detail.source": "来源",
+  "skills.detail.userHint": "这是你的私有副本。可在对话中让 Agent 用 web_skill_patch / web_skill_edit 进化。",
 
   "admin.stats": "用户 {users} · 文件 {files} · 分块 {chunks}",
   "admin.email": "邮箱",
@@ -168,5 +197,17 @@
 
   "bindBanner.message": "开始对话前请先绑定上游 API 密钥 — LLM 调用与计费经由 new-api。",
   "bindBanner.action": "前往设置绑定密钥",
-  "bindBanner.chatHint": "绑定 API 密钥后才能使用对话功能。"
+  "bindBanner.chatHint": "绑定 API 密钥后才能使用对话功能。",
+
+  "onboarding.title": "快速入门",
+  "onboarding.progress": "第 {current} / {total} 步",
+  "onboarding.step.bind": "绑定 API 密钥",
+  "onboarding.step.files": "上传文档（可选）",
+  "onboarding.step.chat": "开始第一次对话",
+  "onboarding.bind.hint": "粘贴管理员发放的 new-api 密钥。对话与计费均通过上游网关。",
+  "onboarding.files.hint": "上传 PDF、DOCX 或文本文件，供 Agent 检索你的知识库。",
+  "onboarding.files.go": "前往文件页",
+  "onboarding.files.skip": "暂时跳过",
+  "onboarding.chat.hint": "一切就绪。打开对话页，向 Agent 发送第一条消息。",
+  "onboarding.chat.go": "打开对话"
 }

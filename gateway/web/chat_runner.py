@@ -156,6 +156,10 @@ are intentionally absent here):
   files) into the user's private skills dir.
 - ``web_skill_delete`` — delete a user-private skill (global skills cannot
   be deleted from chat).
+- ``web_skill_edit`` — rewrite a personal skill's ``SKILL.md``. Global-only
+  skills are forked into the workspace first.
+- ``web_skill_patch`` — targeted find-and-replace (preferred for habit-driven
+  evolution). Also forks global-only skills before mutating.
 
 Skill-install protocol (strict — these rules exist because a previous agent
 violated them and the user lost trust):
