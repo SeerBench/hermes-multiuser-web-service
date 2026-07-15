@@ -263,6 +263,7 @@ function AppShell() {
                   signedIn={Boolean(user)}
                   needsBindKey={needsBindKey}
                   onGoBindSettings={() => goto('settings')}
+                  userAvatarUrl={user?.avatar_url ?? null}
                 />
               )}
               {isWorkspaceRoute(pageRoute) && workspaceBody && (

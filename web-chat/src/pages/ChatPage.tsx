@@ -84,11 +84,14 @@ export function ChatPage({
   signedIn = false,
   needsBindKey = false,
   onGoBindSettings,
+  userAvatarUrl = null,
 }: {
   platformMode?: boolean
   signedIn?: boolean
   needsBindKey?: boolean
   onGoBindSettings?: () => void
+  /** Profile avatar from Settings; shown beside user bubbles when set. */
+  userAvatarUrl?: string | null
 } = {}) {
   const t = useT()
   const { setLocale } = useLocale()
@@ -1024,6 +1027,7 @@ export function ChatPage({
                       >
                         <ChatTurnBubble
                           turn={turn}
+                          userAvatarUrl={userAvatarUrl}
                           onRetry={
                             turn.role === 'assistant'
                               ? () => handleRetry(turn)

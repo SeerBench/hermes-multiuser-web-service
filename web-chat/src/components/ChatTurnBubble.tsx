@@ -4,7 +4,7 @@ import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { ReasoningPanel } from './ReasoningPanel'
 import { ToolEvent } from './ToolEvent'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarImage } from '@/components/ui/avatar'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import {
   Message,
@@ -17,36 +17,36 @@ import { cn } from '@/lib/utils'
 import { useT } from '../i18n'
 import { turnToCopyText, type Turn } from '../chatTurns'
 
-/** One chat turn: shadcn Message + Avatar + Bubble composition. */
+/** One chat turn: shadcn Message + optional user Avatar + Bubble. */
 export function ChatTurnBubble({
   turn,
   onRetry,
   onEdit,
+  userAvatarUrl,
 }: {
   turn: Turn
   onRetry?: () => void
   onEdit?: () => void
+  /** Custom profile image; only shown on user turns when set. */
+  userAvatarUrl?: string | null
 }) {
   const t = useT()
   const isUser = turn.role === 'user'
   const align = isUser ? 'end' : 'start'
   // User: primary bubble; assistant: ghost (markdown flush with the column).
   const variant = isUser ? 'default' : 'ghost'
+  // Hermes never shows an avatar; user only when they set one in Settings.
+  const showAvatar = isUser && Boolean(userAvatarUrl?.trim())
 
   return (
     <Message align={align} className={`turn turn-${turn.role}`}>
-      <MessageAvatar>
-        <Avatar size="sm">
-          <AvatarFallback
-            className={cn(
-              isUser &&
-                'bg-primary text-primary-foreground group-data-[size=sm]/avatar:text-[10px]',
-            )}
-          >
-            {isUser ? t('chat.role.user').slice(0, 1) : 'H'}
-          </AvatarFallback>
-        </Avatar>
-      </MessageAvatar>
+      {showAvatar && (
+        <MessageAvatar>
+          <Avatar size="sm">
+            <AvatarImage src={userAvatarUrl!} alt="" />
+          </Avatar>
+        </MessageAvatar>
+      )}
 
       <MessageContent className={isUser ? 'max-w-[min(100%,42rem)]' : undefined}>
         <MessageHeader>
