@@ -486,31 +486,33 @@ flowchart TD
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
 | ★★★ | **Markdown 代码块高亮 + 复制** | 开发者用户刚需；现 `marked` 纯文本渲染 |
-| ★★☆ | **导出当前对话** | 下载 Markdown / 复制全文（比单条 copy 更常用） |
+| ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
+| ★★☆ | ~~**用量 / 配额展示**~~ | Settings → API 密钥：new-api `usage` + logs（已完成） |
 | ★★☆ | **Composer 拖拽/粘贴上传** | 仅有 📎 按钮；无 drag-drop / paste 图片 |
 | ★★☆ | **手动深色/浅色主题** | 仅 `prefers-color-scheme`；shadcn token + `.dark` 已就绪，缺 Settings 开关 |
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
 | ★☆☆ | **模型选择器** | 高级用户期望 UI 选模型；可对接 `/model` 或 gateway 配置 |
 
 - [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
-- [ ] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板
+- [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
 - [ ] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
-- [ ] `POST /api/v1/auth/change-password` + Settings 表单
+- [x] `POST /api/v1/auth/change-password` + Settings 表单
+- [x] Settings：模型偏好（常用模型筛选）
 - [ ] 设置页或 Chat 顶栏：模型下拉（读 gateway `/api/me` 或 slash `/model` 封装）
 
 ### P2 — 中等人气 × 提升专业度
 
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
-| ★★☆ | **用量 / 配额展示** | README 承诺 quota；`QuotaBadge` 未实现；可链 new-api 或平台 stats |
+| ★★☆ | ~~**用量 / 配额展示**~~ | 已迁至 P1「API 密钥」Tab（`/api/v1/billing/*`） |
 | ★★☆ | **知识库试搜索** | 用户想验证文件是否可被 Agent 检索；API 已有 `knowledge/search` |
 | ★★☆ | **Skill 详情预览** | 仅开关列表；无法浏览 SKILL 摘要/说明 |
 | ★★☆ | **Admin 分页 + 用户搜索** | 用户增多后表格不可用；API 未分页 |
 | ★☆☆ | **Admin 审计日志 UI** | `audit_logs` 已写库，前端无查看 |
 | ★☆☆ | **Admin 全局 Skill 浏览** | API `GET /admin/skills` 已有；UI 未展示 |
 
-- [ ] Settings：`QuotaBadge` 或用量卡片（余额/本月 token，依赖上游接口设计）
+- [x] Settings：用量卡片（余额 / 日志，代理 new-api）
 - [ ] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
 - [x] `SkillsPage`：技能库分区 + 安装到 workspace + 侧栏预览 SKILL.md
 - [ ] Admin：全局 Skill 浏览（可与 Skills catalog 共用扫描逻辑）

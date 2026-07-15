@@ -21,6 +21,14 @@ import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
 import { KeyPromptModal } from '../components/KeyPromptModal'
 import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller'
+import {
   getStoredWorkspaceId,
   platform,
 } from '../platformClient'
@@ -52,6 +60,12 @@ import {
   filterModelsByFavorites,
   PREFERENCES_UPDATED_EVENT,
 } from '../modelFavorites'
+import {
+  conversationToMarkdown,
+  downloadMarkdown,
+  shareOrCopyText,
+} from '../conversationShare'
+import { toast } from 'sonner'
 import { routeHref } from '../routing'
 import { useLocale, useT } from '../i18n'
 import type { Locale } from '../i18n'
@@ -95,27 +109,8 @@ export function ChatPage({
   const [modelsLoading, setModelsLoading] = useState(false)
   const [enabledSkillsCount, setEnabledSkillsCount] = useState(0)
   const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
-  const [transcriptScrolling, setTranscriptScrolling] = useState(false)
   const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
-  const transcriptRef = useRef<HTMLDivElement | null>(null)
-  const scrollHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  /** Reveal scrollbar only while the transcript is being scrolled. */
-  const onTranscriptScroll = useCallback(() => {
-    setTranscriptScrolling(true)
-    if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current)
-    scrollHideTimerRef.current = setTimeout(() => {
-      setTranscriptScrolling(false)
-      scrollHideTimerRef.current = null
-    }, 800)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (scrollHideTimerRef.current) clearTimeout(scrollHideTimerRef.current)
-    }
-  }, [])
 
   // Probe auth + initial data.
   useEffect(() => {
@@ -232,12 +227,7 @@ export function ChatPage({
     [workspaceId],
   )
 
-  // Auto-scroll on new content.
-  useEffect(() => {
-    const el = transcriptRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [turns])
+  // Scroll follows the live edge via MessageScrollerProvider `autoScroll`.
 
   // Cancel any in-flight stream on unmount.
   useEffect(() => {
@@ -330,6 +320,30 @@ export function ChatPage({
       return next
     })
   }, [])
+
+  const convoTitle =
+    activeConvo?.title?.trim() || t('convo.untitled')
+
+  const handleShareConversation = useCallback(async () => {
+    const md = conversationToMarkdown(turns, { title: convoTitle })
+    if (!md.trim()) return
+    try {
+      const mode = await shareOrCopyText(md, { title: convoTitle })
+      toast.success(
+        mode === 'shared' ? t('chat.share.shared') : t('chat.share.ok'),
+      )
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+    }
+  }, [turns, convoTitle, t])
+
+  const handleExportConversation = useCallback(() => {
+    const md = conversationToMarkdown(turns, { title: convoTitle })
+    if (!md.trim()) return
+    const safe = convoTitle.replace(/[^\w\u4e00-\u9fff-]+/g, '_').slice(0, 40)
+    downloadMarkdown(safe || 'hermes-chat', md)
+    toast.success(t('chat.export.ok'))
+  }, [turns, convoTitle, t])
 
   const ensureProvisionalTitle = useCallback(
     async (sid: string, message: string) => {
@@ -964,6 +978,8 @@ export function ChatPage({
                   })
                 }
                 onToggleChatWidth={toggleChatWidth}
+                onShareConversation={() => void handleShareConversation()}
+                onExportConversation={handleExportConversation}
               />
             ) : (
               <div className="conversation-header conversation-header--meta">
@@ -973,46 +989,63 @@ export function ChatPage({
               </div>
             )
           ) : null}
-          <div
-            className={cn(
-              'chat-transcript',
-              transcriptScrolling && 'chat-transcript--scrolling',
-            )}
-            ref={transcriptRef}
-            onScroll={onTranscriptScroll}
+          <MessageScrollerProvider
+            key={sessionId ?? 'new-chat'}
+            autoScroll
+            defaultScrollPosition="last-anchor"
+            scrollPreviousItemPeek={48}
           >
-            {turns.length === 0 ? (
-              <ChatEmptyGuide
-                platformMode={platformMode}
-                needsBindKey={needsBindKey}
-                hasModel={Boolean(selectedModel)}
-                enabledSkillsCount={enabledSkillsCount}
-                onPickSuggestion={setInput}
-                onGoFiles={() => {
-                  window.location.hash = routeHref('files')
-                }}
-                onGoSkills={() => {
-                  window.location.hash = routeHref('skills')
-                }}
-                onGoSettings={onGoBindSettings}
+            <MessageScroller className="chat-transcript-scroller min-h-0 flex-1">
+              <MessageScrollerViewport className="chat-transcript">
+                <MessageScrollerContent className="gap-5 px-1 py-5">
+                  {turns.length === 0 ? (
+                    <MessageScrollerItem messageId="empty-guide">
+                      <ChatEmptyGuide
+                        platformMode={platformMode}
+                        needsBindKey={needsBindKey}
+                        hasModel={Boolean(selectedModel)}
+                        enabledSkillsCount={enabledSkillsCount}
+                        onPickSuggestion={setInput}
+                        onGoFiles={() => {
+                          window.location.hash = routeHref('files')
+                        }}
+                        onGoSkills={() => {
+                          window.location.hash = routeHref('skills')
+                        }}
+                        onGoSettings={onGoBindSettings}
+                      />
+                    </MessageScrollerItem>
+                  ) : (
+                    turns.map((turn) => (
+                      <MessageScrollerItem
+                        key={turn.id}
+                        messageId={turn.id}
+                        scrollAnchor={turn.role === 'user'}
+                      >
+                        <ChatTurnBubble
+                          turn={turn}
+                          onRetry={
+                            turn.role === 'assistant'
+                              ? () => handleRetry(turn)
+                              : undefined
+                          }
+                          onEdit={
+                            turn.role === 'user'
+                              ? () => handleEdit(turn)
+                              : undefined
+                          }
+                        />
+                      </MessageScrollerItem>
+                    ))
+                  )}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton
+                direction="end"
+                aria-label={t('chat.scrollLatest')}
               />
-            ) : (
-              turns.map((turn) => (
-                <ChatTurnBubble
-                  key={turn.id}
-                  turn={turn}
-                  onRetry={
-                    turn.role === 'assistant'
-                      ? () => handleRetry(turn)
-                      : undefined
-                  }
-                  onEdit={
-                    turn.role === 'user' ? () => handleEdit(turn) : undefined
-                  }
-                />
-              ))
-            )}
-          </div>
+            </MessageScroller>
+          </MessageScrollerProvider>
 
           <ChatComposer
             input={input}

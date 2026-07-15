@@ -19,6 +19,8 @@ describe('ChatTurnBubble', () => {
     }
     const { container } = wrap(<ChatTurnBubble turn={turn} />)
     expect(screen.getByText('可见用户气泡文字')).toBeTruthy()
+    expect(container.querySelector('[data-slot="message"]')).toBeTruthy()
+    expect(container.querySelector('[data-slot="avatar"]')).toBeTruthy()
     const content = container.querySelector('[data-slot="bubble-content"]')
     expect(content?.className).toMatch(/text-primary-foreground/)
     expect(content?.className).toMatch(/bg-primary/)

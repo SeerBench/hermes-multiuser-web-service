@@ -65,6 +65,27 @@ export type WorkspacePreferences = {
   default_model?: string
 }
 
+export type BillingUsage = {
+  name?: string | null
+  total_granted?: number | null
+  total_used?: number | null
+  total_available?: number | null
+  unlimited_quota?: boolean
+  expires_at?: number
+  model_limits_enabled?: boolean
+}
+
+export type BillingLogItem = {
+  id?: number
+  type?: number
+  content?: string
+  model_name?: string
+  quota?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  created_at?: number
+}
+
 export type SkillRow = {
   name: string
   source: string
@@ -187,6 +208,13 @@ export const platform = {
       method: 'POST',
       body: JSON.stringify({ api_key }),
     }),
+
+  getBillingUsage: () => platformRequest<BillingUsage>('/billing/usage'),
+
+  getBillingLogs: (limit = 50) =>
+    platformRequest<{ items: BillingLogItem[] }>(
+      `/billing/logs?limit=${limit}`,
+    ),
 
   listWorkspaces: () =>
     platformRequest<Workspace[]>('/workspaces'),

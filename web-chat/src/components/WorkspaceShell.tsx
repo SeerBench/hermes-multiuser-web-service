@@ -39,6 +39,7 @@ export function WorkspaceShell({
           <TabsTrigger value="memory">{t('nav.memory')}</TabsTrigger>
         </TabsList>
       </Tabs>
+
       <div className="workspace-shell-body">{children}</div>
     </div>
   )

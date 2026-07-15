@@ -7,8 +7,15 @@ import {
   PlatformApiError,
   getStoredWorkspaceId,
   platform,
+  type BillingLogItem,
+  type BillingUsage,
   type PlatformUser,
 } from '../platformClient'
+import {
+  getStoredFontScale,
+  setFontScale,
+  type FontScale,
+} from '../fontScaleStorage'
 import {
   getStoredTheme,
   setTheme,
@@ -43,9 +50,9 @@ type Props = {
   onUserUpdated?: (user: PlatformUser) => void
 }
 
-type SettingsTab = 'general' | 'account' | 'models'
+type SettingsTab = 'general' | 'account' | 'apikey' | 'models'
 
-/** Settings dialog: General / Account / Models. Wide on PC, fullscreen on mobile. */
+/** Settings: General / Account / API Key / Models. Wide on PC, fullscreen on mobile. */
 export function SettingsPage({
   open,
   onOpenChange,
@@ -67,6 +74,15 @@ export function SettingsPage({
   const [bindBusy, setBindBusy] = useState(false)
   const [bindMsg, setBindMsg] = useState<string | null>(null)
   const [theme, setThemeState] = useState<ThemePreference>(() => getStoredTheme())
+  const [fontScale, setFontScaleState] = useState<FontScale>(() =>
+    getStoredFontScale(),
+  )
+
+  // Billing (API key tab)
+  const [usage, setUsage] = useState<BillingUsage | null>(null)
+  const [usageErr, setUsageErr] = useState<string | null>(null)
+  const [logs, setLogs] = useState<BillingLogItem[]>([])
+  const [billingBusy, setBillingBusy] = useState(false)
 
   // Account edit form
   const [nickname, setNickname] = useState('')
@@ -142,12 +158,39 @@ export function SettingsPage({
     }
   }, [platformMode, workspaceId])
 
+  const loadBilling = useCallback(async () => {
+    if (!platformMode) return
+    setBillingBusy(true)
+    setUsageErr(null)
+    try {
+      const [u, l] = await Promise.all([
+        platform.getBillingUsage(),
+        platform.getBillingLogs(40),
+      ])
+      setUsage(u)
+      setLogs(l.items ?? [])
+    } catch (err) {
+      setUsage(null)
+      setLogs([])
+      if (err instanceof PlatformApiError && err.status === 403) {
+        setUsageErr(t('settings.billing.needKey'))
+      } else {
+        setUsageErr(
+          err instanceof Error ? err.message : t('settings.billing.fail'),
+        )
+      }
+    } finally {
+      setBillingBusy(false)
+    }
+  }, [platformMode, t])
+
   useEffect(() => {
     if (!open) return
     setTab('general')
     void load()
     void loadModels()
-  }, [open, load, loadModels])
+    void loadBilling()
+  }, [open, load, loadModels, loadBilling])
 
   const logout = async () => {
     setLoggingOut(true)
@@ -174,6 +217,7 @@ export function SettingsPage({
       setBindMsg(t('settings.bindKey.ok'))
       onUserUpdated?.(res.user)
       await load()
+      await loadBilling()
     } catch (err) {
       setBindMsg(
         err instanceof PlatformApiError ? err.message : t('settings.bindKey.fail'),
@@ -187,6 +231,12 @@ export function SettingsPage({
     const next = value as ThemePreference
     setThemeState(next)
     setTheme(next)
+  }
+
+  const onFontScaleChange = (value: string) => {
+    const next = value as FontScale
+    setFontScaleState(next)
+    setFontScale(next)
   }
 
   const saveProfile = async () => {
@@ -323,6 +373,9 @@ export function SettingsPage({
                 <TabsTrigger value="account">{t('settings.tab.account')}</TabsTrigger>
               )}
               {platformMode && (
+                <TabsTrigger value="apikey">{t('settings.tab.apikey')}</TabsTrigger>
+              )}
+              {platformMode && (
                 <TabsTrigger value="models">{t('settings.tab.models')}</TabsTrigger>
               )}
             </TabsList>
@@ -400,33 +453,21 @@ export function SettingsPage({
                 )}
               </section>
 
-              {needsBind && (
+              {needsBind && platformMode && (
                 <>
                   <Separator />
-                  <section className="space-y-3">
-                    <h3 className="text-sm font-semibold">{t('settings.bindKey.title')}</h3>
-                    <p className="text-muted-foreground text-sm">{t('settings.bindKey.hint')}</p>
-                    <Input
-                      type="password"
-                      value={bindKey}
-                      onChange={(e) => setBindKey(e.target.value)}
-                      placeholder={t('settings.bindKey.placeholder')}
-                      disabled={bindBusy}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={bindBusy || !bindKey.trim()}
-                      onClick={() => void submitBindKey()}
-                    >
-                      {bindBusy ? t('settings.bindKey.busy') : t('settings.bindKey.submit')}
-                    </Button>
-                    {bindMsg && (
-                      <Alert>
-                        <AlertDescription>{bindMsg}</AlertDescription>
-                      </Alert>
-                    )}
-                  </section>
+                  <Alert>
+                    <AlertDescription>
+                      {t('settings.bindKey.goTab')}{' '}
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => setTab('apikey')}
+                      >
+                        {t('settings.tab.apikey')}
+                      </button>
+                    </AlertDescription>
+                  </Alert>
                 </>
               )}
 
@@ -474,6 +515,35 @@ export function SettingsPage({
                 <p className="text-muted-foreground text-xs">
                   {t('settings.preferences.theme.hint')}
                 </p>
+                <div className="space-y-2">
+                  <Label>{t('settings.preferences.font')}</Label>
+                  <p className="text-muted-foreground text-xs">
+                    {t('settings.preferences.font.hint')}
+                  </p>
+                  <RadioGroup
+                    value={fontScale}
+                    onValueChange={onFontScaleChange}
+                    className="flex flex-row flex-wrap gap-2"
+                  >
+                    {(
+                      [
+                        ['sm', 'settings.font.sm'],
+                        ['md', 'settings.font.md'],
+                        ['lg', 'settings.font.lg'],
+                      ] as const
+                    ).map(([value, labelKey]) => (
+                      <label
+                        key={value}
+                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"
+                      >
+                        <RadioGroupItem value={value} id={`font-${value}`} />
+                        <span className="text-sm whitespace-nowrap">
+                          {t(labelKey)}
+                        </span>
+                      </label>
+                    ))}
+                  </RadioGroup>
+                </div>
               </section>
 
               {!platformMode && (
@@ -606,6 +676,147 @@ export function SettingsPage({
                       <AlertDescription>{passwordMsg}</AlertDescription>
                     </Alert>
                   )}
+                </section>
+              </TabsContent>
+            )}
+
+            {platformMode && (
+              <TabsContent value="apikey" className="mt-0 space-y-6 pb-4">
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">{t('settings.bindKey.title')}</h3>
+                  <p className="text-muted-foreground text-sm">
+                    {needsBind
+                      ? t('settings.bindKey.hint')
+                      : t('settings.bindKey.updateHint')}
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    {t('settings.bindKey.validateNote')}
+                  </p>
+                  <Input
+                    type="password"
+                    value={bindKey}
+                    onChange={(e) => setBindKey(e.target.value)}
+                    placeholder={t('settings.bindKey.placeholder')}
+                    disabled={bindBusy}
+                    autoComplete="off"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={bindBusy || !bindKey.trim()}
+                    onClick={() => void submitBindKey()}
+                  >
+                    {bindBusy
+                      ? t('settings.bindKey.busy')
+                      : needsBind
+                        ? t('settings.bindKey.submit')
+                        : t('settings.bindKey.update')}
+                  </Button>
+                  {bindMsg && (
+                    <Alert>
+                      <AlertDescription>{bindMsg}</AlertDescription>
+                    </Alert>
+                  )}
+                </section>
+
+                <Separator />
+
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">
+                      {t('settings.billing.title')}
+                    </h3>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={billingBusy}
+                      onClick={() => void loadBilling()}
+                    >
+                      {t('settings.billing.refresh')}
+                    </Button>
+                  </div>
+                  {billingBusy && (
+                    <p className="text-muted-foreground text-sm">
+                      {t('common.loading')}
+                    </p>
+                  )}
+                  {usageErr && (
+                    <Alert>
+                      <AlertDescription>{usageErr}</AlertDescription>
+                    </Alert>
+                  )}
+                  {usage && !usageErr && (
+                    <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                      {usage.name && (
+                        <div className="flex justify-between gap-2 sm:col-span-2">
+                          <dt className="text-muted-foreground">
+                            {t('settings.billing.name')}
+                          </dt>
+                          <dd className="font-medium">{usage.name}</dd>
+                        </div>
+                      )}
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-muted-foreground">
+                          {t('settings.billing.used')}
+                        </dt>
+                        <dd className="font-mono text-xs">
+                          {usage.unlimited_quota
+                            ? t('settings.billing.unlimited')
+                            : String(usage.total_used ?? '—')}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <dt className="text-muted-foreground">
+                          {t('settings.billing.available')}
+                        </dt>
+                        <dd className="font-mono text-xs">
+                          {usage.unlimited_quota
+                            ? t('settings.billing.unlimited')
+                            : String(usage.total_available ?? '—')}
+                        </dd>
+                      </div>
+                      <div className="flex justify-between gap-2 sm:col-span-2">
+                        <dt className="text-muted-foreground">
+                          {t('settings.billing.granted')}
+                        </dt>
+                        <dd className="font-mono text-xs">
+                          {usage.unlimited_quota
+                            ? t('settings.billing.unlimited')
+                            : String(usage.total_granted ?? '—')}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                </section>
+
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold">
+                    {t('settings.billing.logs')}
+                  </h3>
+                  {logs.length === 0 && !billingBusy && (
+                    <p className="text-muted-foreground text-sm">
+                      {t('settings.billing.logsEmpty')}
+                    </p>
+                  )}
+                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                    {logs.map((row) => (
+                      <div
+                        key={String(row.id ?? `${row.created_at}-${row.model_name}`)}
+                        className="hover:bg-muted/40 flex flex-wrap items-baseline justify-between gap-2 rounded px-2 py-1.5 text-xs"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {row.model_name || row.content || '—'}
+                        </span>
+                        <span className="text-muted-foreground shrink-0">
+                          {row.quota != null ? `q=${row.quota}` : ''}
+                          {row.created_at
+                            ? ` · ${new Date(row.created_at * 1000).toLocaleString()}`
+                            : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </section>
               </TabsContent>
             )}

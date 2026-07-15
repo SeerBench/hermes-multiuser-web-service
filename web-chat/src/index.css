@@ -34,7 +34,7 @@
   --bp-mobile: 768px;
   --bp-desktop: 1024px;
   /* Align with legacy styles.css dark defaults */
-  --radius: 0.5rem;
+  --radius: 0.625rem;
   --background: #0f1014;
   --foreground: #e6e9f0;
   --card: #161922;

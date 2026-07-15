@@ -4,9 +4,11 @@ import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { ReasoningPanel } from './ReasoningPanel'
 import { ToolEvent } from './ToolEvent'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import {
   Message,
+  MessageAvatar,
   MessageContent,
   MessageFooter,
   MessageHeader,
@@ -15,7 +17,7 @@ import { cn } from '@/lib/utils'
 import { useT } from '../i18n'
 import { turnToCopyText, type Turn } from '../chatTurns'
 
-/** One chat turn rendered with shadcn Message + Bubble. */
+/** One chat turn: shadcn Message + Avatar + Bubble composition. */
 export function ChatTurnBubble({
   turn,
   onRetry,
@@ -28,11 +30,24 @@ export function ChatTurnBubble({
   const t = useT()
   const isUser = turn.role === 'user'
   const align = isUser ? 'end' : 'start'
-  // User: primary bubble with explicit fg contrast; assistant: ghost (plain markdown).
+  // User: primary bubble; assistant: ghost (markdown flush with the column).
   const variant = isUser ? 'default' : 'ghost'
 
   return (
     <Message align={align} className={`turn turn-${turn.role}`}>
+      <MessageAvatar>
+        <Avatar size="sm">
+          <AvatarFallback
+            className={cn(
+              isUser &&
+                'bg-primary text-primary-foreground group-data-[size=sm]/avatar:text-[10px]',
+            )}
+          >
+            {isUser ? t('chat.role.user').slice(0, 1) : 'H'}
+          </AvatarFallback>
+        </Avatar>
+      </MessageAvatar>
+
       <MessageContent className={isUser ? 'max-w-[min(100%,42rem)]' : undefined}>
         <MessageHeader>
           {isUser ? t('chat.role.user') : t('chat.role.assistant')}
@@ -137,6 +152,7 @@ export function ChatTurnBubble({
               copyText={turnToCopyText(turn)}
               onRetry={turn.role === 'assistant' ? onRetry : undefined}
               onEdit={turn.role === 'user' ? onEdit : undefined}
+              shareable={turn.role === 'assistant'}
             />
           </MessageFooter>
         )}

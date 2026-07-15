@@ -32,11 +32,13 @@ vi.mock('../platformClient', async (importOriginal) => {
       patchPreferences: vi.fn(),
       patchMe: vi.fn(),
       changePassword: vi.fn(),
+      getBillingUsage: vi.fn(),
+      getBillingLogs: vi.fn(),
     },
   }
 })
 
-import { platform } from '../platformClient'
+import { platform, PlatformApiError } from '../platformClient'
 import { applyTheme, getStoredTheme } from '../themeStorage'
 
 describe('SettingsPage', () => {
@@ -62,6 +64,10 @@ describe('SettingsPage', () => {
       preferred_model: 'gpt-mini',
       default_model: 'gpt-mini',
     })
+    vi.mocked(platform.getBillingUsage).mockRejectedValue(
+      new PlatformApiError('upstream key not bound', 403),
+    )
+    vi.mocked(platform.getBillingLogs).mockResolvedValue({ items: [] })
   })
 
   it('opens as a wide settings dialog with tabs and switches theme', async () => {
@@ -83,12 +89,17 @@ describe('SettingsPage', () => {
     expect(await screen.findByText(/a@b.com/)).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /general/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /account/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /api key/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /models/i })).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: /light/i }))
     expect(getStoredTheme()).toBe('light')
     expect(document.documentElement.classList.contains('light')).toBe(true)
     applyTheme('system')
+
+    await user.click(screen.getByRole('radio', { name: /large/i }))
+    const { getStoredFontScale } = await import('../fontScaleStorage')
+    expect(getStoredFontScale()).toBe('lg')
   })
 
   it('shows account edit fields and model favorites checklist', async () => {

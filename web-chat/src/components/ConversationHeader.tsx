@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ChevronDown, Pencil, Pin, PinOff } from 'lucide-react'
+import { Check, ChevronDown, Download, Pencil, Pin, PinOff, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { useT } from '../i18n'
 import type { LayoutWidth } from '../layoutWidthStorage'
 
-/** Session title bar + actions (rename / widen / pin). */
+/** Session title bar + actions (rename / widen / pin / share). */
 export function ConversationHeader({
   title,
   pinned,
@@ -21,6 +21,8 @@ export function ConversationHeader({
   onRename,
   onTogglePin,
   onToggleChatWidth,
+  onShareConversation,
+  onExportConversation,
 }: {
   title: string
   pinned: boolean
@@ -29,6 +31,8 @@ export function ConversationHeader({
   onRename: (title: string) => void
   onTogglePin: () => void
   onToggleChatWidth: () => void
+  onShareConversation?: () => void
+  onExportConversation?: () => void
 }) {
   const t = useT()
   const [editing, setEditing] = useState(false)
@@ -100,6 +104,18 @@ export function ConversationHeader({
                 <Pencil className="size-4" />
                 {t('chat.title.edit')}
               </DropdownMenuItem>
+              {onShareConversation && (
+                <DropdownMenuItem onClick={onShareConversation}>
+                  <Share2 className="size-4" />
+                  {t('chat.share')}
+                </DropdownMenuItem>
+              )}
+              {onExportConversation && (
+                <DropdownMenuItem onClick={onExportConversation}>
+                  <Download className="size-4" />
+                  {t('chat.export')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={onToggleChatWidth}>
                 {chatWidth === 'full'
                   ? t('layout.width.standard')
