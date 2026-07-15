@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { LayoutGrid, MessageSquare } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AuthPage } from './pages/AuthPage'
 import { FilesPage } from './pages/FilesPage'
+import { FileTagsPage } from './pages/FileTagsPage'
 import { MemoryPage } from './pages/MemoryPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { AdminPage } from './pages/AdminPage'
@@ -26,9 +28,9 @@ import {
   parseRoute,
   routeHref,
   workspaceEntryRoute,
+  workspaceShellTab,
   type MainTab,
   type Route,
-  type WorkspaceTab,
 } from './routing'
 import { subscribeViewport } from './lib/breakpoints'
 import {
@@ -164,11 +166,15 @@ function AppShell() {
   const workspaceBody =
     pageRoute === 'files' ? (
       <FilesPage key={`files-${pageKey}`} />
+    ) : pageRoute === 'file-tags' ? (
+      <FileTagsPage key={`file-tags-${pageKey}`} />
     ) : pageRoute === 'memory' ? (
       <MemoryPage key={`memory-${pageKey}`} />
     ) : pageRoute === 'skills' ? (
       <SkillsPage key={`skills-${pageKey}`} />
     ) : null
+
+  const shellTab = workspaceShellTab(pageRoute)
 
   // 登录门禁 / 加载中不渲染工作台顶栏（仅已登录用户可见）
   const showChrome = Boolean(user) && !showAuthGate && !authLoading
@@ -197,9 +203,15 @@ function AppShell() {
               className="gap-0"
             >
               <TabsList className="bg-muted/80">
-                <TabsTrigger value="chat">{t('nav.chat')}</TabsTrigger>
+                <TabsTrigger value="chat" className="gap-1.5">
+                  <MessageSquare className="size-4" aria-hidden />
+                  {t('nav.chat')}
+                </TabsTrigger>
                 {platformMode && (
-                  <TabsTrigger value="workspace">{t('nav.workspace')}</TabsTrigger>
+                  <TabsTrigger value="workspace" className="gap-1.5">
+                    <LayoutGrid className="size-4" aria-hidden />
+                    {t('nav.workspace')}
+                  </TabsTrigger>
                 )}
               </TabsList>
             </Tabs>
@@ -266,8 +278,8 @@ function AppShell() {
                   userAvatarUrl={user?.avatar_url ?? null}
                 />
               )}
-              {isWorkspaceRoute(pageRoute) && workspaceBody && (
-                <WorkspaceShell active={pageRoute as WorkspaceTab}>
+              {isWorkspaceRoute(pageRoute) && workspaceBody && shellTab && (
+                <WorkspaceShell active={shellTab}>
                   {workspaceBody}
                 </WorkspaceShell>
               )}
@@ -295,6 +307,7 @@ function AppShell() {
             className={activeTab === 'chat' ? 'app-mobile-nav--active' : undefined}
             onClick={() => onMainTab('chat')}
           >
+            <MessageSquare className="size-4" aria-hidden />
             {t('nav.chat')}
           </button>
           {platformMode && (
@@ -305,6 +318,7 @@ function AppShell() {
               }
               onClick={() => onMainTab('workspace')}
             >
+              <LayoutGrid className="size-4" aria-hidden />
               {t('nav.workspace')}
             </button>
           )}

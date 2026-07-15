@@ -67,6 +67,10 @@ def migrate_schema(engine: Engine) -> None:
                 conn.execute(
                     text("ALTER TABLE files ADD COLUMN category_id VARCHAR(36)")
                 )
+            if "folder_id" not in cols:
+                conn.execute(
+                    text("ALTER TABLE files ADD COLUMN folder_id VARCHAR(36)")
+                )
     if "workspaces" in insp.get_table_names():
         cols = {c["name"] for c in insp.get_columns("workspaces")}
         with engine.begin() as conn:

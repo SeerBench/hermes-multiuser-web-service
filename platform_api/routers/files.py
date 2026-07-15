@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from gateway.web.platform.models import (
     DocumentChunk,
     FileCategory,
+    FileFolder,
     FileRecord,
     FileTag,
     FileTagLink,
@@ -27,7 +28,9 @@ from platform_api.services.knowledge import search_knowledge
 router = APIRouter(prefix="/workspaces", tags=["files"])
 
 _MAX_BYTES = 20 * 1024 * 1024
-_ALLOWED_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+_DOC_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+_ALLOWED_SUFFIXES = _DOC_SUFFIXES | _IMAGE_SUFFIXES
 
 
 class KnowledgeSearchBody(BaseModel):
@@ -48,9 +51,27 @@ class TagBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
 
 
+class FolderBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    parent_id: Optional[str] = None
+
+
+class FolderPatch(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
 class FilePatchBody(BaseModel):
     category_id: Optional[str] = None
+    folder_id: Optional[str] = None
     tag_ids: Optional[List[str]] = None
+
+
+def _is_image_filename(name: str) -> bool:
+    return Path(name).suffix.lower() in _IMAGE_SUFFIXES
+
+
+def _is_document_filename(name: str) -> bool:
+    return Path(name).suffix.lower() in _DOC_SUFFIXES
 
 
 @router.post("/{workspace_id}/files")
@@ -58,9 +79,12 @@ async def upload_files(
     workspace_id: str,
     files: List[UploadFile] = File(...),
     ingest: bool = Query(default=True),
+    folder_id: Optional[str] = Query(default=None),
     user_id: str = Depends(get_current_user_id),
 ) -> List[dict[str, Any]]:
     ws = _get_workspace(workspace_id, user_id)
+    if folder_id:
+        _require_folder(workspace_id, folder_id)
     results: list[dict[str, Any]] = []
     pending_ingest: list[str] = []
     with enter_user_context(user_id):
@@ -81,6 +105,8 @@ async def upload_files(
             dest = upload_dir / f"{file_id}_{safe_name}"
             dest.write_bytes(data)
             storage_key = str(dest.relative_to(get_user_workspace()))
+            # Images are archive-only — no RAG extractors for binary images.
+            want_ingest = bool(ingest) and not _is_image_filename(safe_name)
             rec_dict = register_sandbox_file(
                 workspace_id=ws.id,
                 storage_key=storage_key,
@@ -88,9 +114,10 @@ async def upload_files(
                 size_bytes=len(data),
                 mime_type=uf.content_type,
                 origin="platform",
-                auto_ingest=ingest,
+                auto_ingest=want_ingest,
+                folder_id=folder_id,
             )
-            if ingest:
+            if want_ingest:
                 pending_ingest.append(rec_dict["id"])
             results.append(rec_dict)
     for file_id in pending_ingest:
@@ -111,6 +138,8 @@ def list_files(
     sort: str = Query(default="created_at"),
     order: str = Query(default="desc"),
     category_id: Optional[str] = Query(default=None),
+    folder_id: Optional[str] = Query(default=None),
+    kind: Optional[str] = Query(default=None),
     tag: Optional[str] = Query(default=None),
     user_id: str = Depends(get_current_user_id),
 ) -> List[dict[str, Any]]:
@@ -122,11 +151,20 @@ def list_files(
         "name": FileRecord.filename,
     }.get(sort, FileRecord.created_at)
     descending = order.lower() != "asc"
+    kind_norm = (kind or "").strip().lower() or None
+    if kind_norm and kind_norm not in ("image", "document"):
+        raise HTTPException(status_code=400, detail="kind must be 'image' or 'document'")
 
     with store._session_factory() as db:
         stmt = select(FileRecord).where(FileRecord.workspace_id == workspace_id)
         if category_id:
             stmt = stmt.where(FileRecord.category_id == category_id)
+        # ``folder_id=`` (empty) → root only; omitted → all folders.
+        if folder_id is not None:
+            if folder_id == "":
+                stmt = stmt.where(FileRecord.folder_id.is_(None))
+            else:
+                stmt = stmt.where(FileRecord.folder_id == folder_id)
         if tag:
             tag_row = db.execute(
                 select(FileTag).where(
@@ -140,7 +178,11 @@ def list_files(
                 FileTagLink.tag_id == tag_row.id
             )
         stmt = stmt.order_by(sort_col.desc() if descending else sort_col.asc())
-        rows = db.execute(stmt).scalars().all()
+        rows = list(db.execute(stmt).scalars().all())
+        if kind_norm == "image":
+            rows = [r for r in rows if _is_image_filename(r.filename)]
+        elif kind_norm == "document":
+            rows = [r for r in rows if _is_document_filename(r.filename)]
         tag_map = _load_tag_ids(db, [r.id for r in rows])
         return [file_record_dict(r, tag_ids=tag_map.get(r.id, [])) for r in rows]
 
@@ -166,6 +208,14 @@ def patch_file(
                 if not cat or cat.workspace_id != workspace_id:
                     raise HTTPException(status_code=400, detail="invalid category")
             rec.category_id = body.category_id or None
+        if body.folder_id is not None:
+            if body.folder_id:
+                folder = db.get(FileFolder, body.folder_id)
+                if not folder or folder.workspace_id != workspace_id:
+                    raise HTTPException(status_code=400, detail="invalid folder")
+                rec.folder_id = body.folder_id
+            else:
+                rec.folder_id = None
         if body.tag_ids is not None:
             db.execute(delete(FileTagLink).where(FileTagLink.file_id == file_id))
             for tid in body.tag_ids:
@@ -192,7 +242,7 @@ def trigger_ingest(
         if not rec or rec.workspace_id != workspace_id:
             raise HTTPException(status_code=404, detail="not found")
         suffix = Path(rec.filename).suffix.lower()
-        if suffix not in _ALLOWED_SUFFIXES:
+        if suffix not in _DOC_SUFFIXES:
             raise HTTPException(status_code=400, detail="unsupported type for ingest")
         if rec.status == "ready":
             return file_record_dict(rec, tag_ids=_tag_ids_for_file(db, file_id))
@@ -243,6 +293,175 @@ def delete_file(
             db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_id))
             db.delete(rec)
     return {"status": "deleted"}
+
+
+@router.get("/{workspace_id}/file-folders")
+def list_folders(
+    workspace_id: str,
+    parent_id: Optional[str] = Query(default=None),
+    user_id: str = Depends(get_current_user_id),
+) -> List[dict[str, Any]]:
+    """List folders. Default: all folders. ``parent_id=`` limits to root children."""
+    _get_workspace(workspace_id, user_id)
+    store = get_store()
+    with store._session_factory() as db:
+        stmt = select(FileFolder).where(FileFolder.workspace_id == workspace_id)
+        if parent_id is not None:
+            if parent_id == "":
+                stmt = stmt.where(FileFolder.parent_id.is_(None))
+            else:
+                stmt = stmt.where(FileFolder.parent_id == parent_id)
+        rows = db.execute(stmt.order_by(FileFolder.name)).scalars().all()
+        return [_folder_dict(f) for f in rows]
+
+
+@router.post("/{workspace_id}/file-folders")
+def create_folder(
+    workspace_id: str,
+    body: FolderBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _get_workspace(workspace_id, user_id)
+    name = body.name.strip()
+    parent_id = body.parent_id or None
+    if parent_id:
+        _require_folder(workspace_id, parent_id)
+    store = get_store()
+    from gateway.web.platform.database import session_scope
+
+    with session_scope(store._engine) as db:
+        clash = _find_folder_name_clash(db, workspace_id, parent_id, name)
+        if clash:
+            raise HTTPException(status_code=409, detail="folder name exists")
+        folder = FileFolder(
+            workspace_id=workspace_id,
+            parent_id=parent_id,
+            name=name,
+        )
+        db.add(folder)
+        db.flush()
+        return _folder_dict(folder)
+
+
+@router.patch("/{workspace_id}/file-folders/{folder_id}")
+def patch_folder(
+    workspace_id: str,
+    folder_id: str,
+    body: FolderPatch,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    _get_workspace(workspace_id, user_id)
+    store = get_store()
+    from gateway.web.platform.database import session_scope
+
+    with session_scope(store._engine) as db:
+        folder = db.get(FileFolder, folder_id)
+        if not folder or folder.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="not found")
+        if body.name is not None:
+            name = body.name.strip()
+            clash = _find_folder_name_clash(
+                db, workspace_id, folder.parent_id, name, exclude_id=folder_id,
+            )
+            if clash:
+                raise HTTPException(status_code=409, detail="folder name exists")
+            folder.name = name
+        db.add(folder)
+        return _folder_dict(folder)
+
+
+@router.delete("/{workspace_id}/file-folders/{folder_id}")
+def delete_folder(
+    workspace_id: str,
+    folder_id: str,
+    force: bool = Query(default=False),
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    """Delete a folder. Non-empty → 409 with counts unless ``force=true``."""
+    _get_workspace(workspace_id, user_id)
+    store = get_store()
+    from gateway.web.platform.database import session_scope
+
+    with enter_user_context(user_id):
+        from gateway.web.sandbox import get_user_workspace
+
+        with session_scope(store._engine) as db:
+            folder = db.get(FileFolder, folder_id)
+            if not folder or folder.workspace_id != workspace_id:
+                raise HTTPException(status_code=404, detail="not found")
+
+            descendant_ids = _collect_descendant_folder_ids(db, workspace_id, folder_id)
+            all_folder_ids = [folder_id, *descendant_ids]
+            file_rows = list(
+                db.execute(
+                    select(FileRecord).where(
+                        FileRecord.workspace_id == workspace_id,
+                        FileRecord.folder_id.in_(all_folder_ids),
+                    )
+                ).scalars()
+            )
+            file_count = len(file_rows)
+            folder_count = len(descendant_ids)
+
+            if (file_count or folder_count) and not force:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "folder_not_empty",
+                        "file_count": file_count,
+                        "folder_count": folder_count,
+                        "message": (
+                            f"folder contains {file_count} file(s) and "
+                            f"{folder_count} subfolder(s)"
+                        ),
+                    },
+                )
+
+            workspace_root = get_user_workspace()
+            for rec in file_rows:
+                path = workspace_root / rec.storage_key
+                if path.is_file():
+                    path.unlink()
+                db.execute(delete(FileTagLink).where(FileTagLink.file_id == rec.id))
+                db.execute(
+                    delete(DocumentChunk).where(DocumentChunk.file_id == rec.id)
+                )
+                db.delete(rec)
+
+            # Children first so FK parent links stay valid until removed.
+            for child_id in reversed(descendant_ids):
+                child = db.get(FileFolder, child_id)
+                if child:
+                    db.delete(child)
+            db.delete(folder)
+
+    return {
+        "status": "deleted",
+        "file_count": file_count,
+        "folder_count": folder_count,
+    }
+
+
+def _collect_descendant_folder_ids(
+    db, workspace_id: str, root_id: str
+) -> list[str]:
+    """BFS: all nested folder ids under ``root_id`` (not including root)."""
+    found: list[str] = []
+    queue = [root_id]
+    while queue:
+        parent = queue.pop(0)
+        children = list(
+            db.execute(
+                select(FileFolder.id).where(
+                    FileFolder.workspace_id == workspace_id,
+                    FileFolder.parent_id == parent,
+                )
+            ).scalars()
+        )
+        for cid in children:
+            found.append(cid)
+            queue.append(cid)
+    return found
 
 
 @router.get("/{workspace_id}/file-categories")
@@ -435,6 +654,45 @@ def _tag_dict(tag: FileTag) -> dict[str, Any]:
         "name": tag.name,
         "created_at": tag.created_at.timestamp(),
     }
+
+
+def _folder_dict(folder: FileFolder) -> dict[str, Any]:
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "parent_id": folder.parent_id,
+        "created_at": folder.created_at.timestamp(),
+    }
+
+
+def _require_folder(workspace_id: str, folder_id: str) -> FileFolder:
+    store = get_store()
+    with store._session_factory() as db:
+        folder = db.get(FileFolder, folder_id)
+        if not folder or folder.workspace_id != workspace_id:
+            raise HTTPException(status_code=400, detail="invalid folder")
+        return folder
+
+
+def _find_folder_name_clash(
+    db,
+    workspace_id: str,
+    parent_id: Optional[str],
+    name: str,
+    *,
+    exclude_id: Optional[str] = None,
+) -> Optional[FileFolder]:
+    stmt = select(FileFolder).where(
+        FileFolder.workspace_id == workspace_id,
+        FileFolder.name == name,
+    )
+    if parent_id is None:
+        stmt = stmt.where(FileFolder.parent_id.is_(None))
+    else:
+        stmt = stmt.where(FileFolder.parent_id == parent_id)
+    if exclude_id:
+        stmt = stmt.where(FileFolder.id != exclude_id)
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def _load_tag_ids(db, file_ids: list[str]) -> dict[str, list[str]]:

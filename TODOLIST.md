@@ -315,6 +315,9 @@ flowchart TD
 - [~] 上传 + 列表 + 删除（**无拖拽进度条**）
 - [x] 路由 `#/files` + 导航入口
 - [x] Chat 页保留 `/api/uploads` 快速附件路径
+- [x] 创建时间列；文件夹与文件同列表；标签管理独立页 `#/file-tags`
+- [x] Tabs：全部 / 文件 / 图片；新建下拉（文件夹、上传、上传并检索）
+- [x] 后端 `file_folders` + `files.folder_id` + `kind=image|document`
 
 ---
 

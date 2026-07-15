@@ -19,6 +19,7 @@ def register_sandbox_file(
     mime_type: Optional[str] = None,
     origin: str = "chat",
     auto_ingest: bool = False,
+    folder_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create a FileRecord pointing at an existing sandbox path.
 
@@ -41,6 +42,7 @@ def register_sandbox_file(
             size_bytes=size_bytes,
             storage_key=storage_key,
             origin=origin,
+            folder_id=folder_id,
             status=initial_status,
         )
         db.add(rec)
@@ -57,6 +59,7 @@ def file_record_dict(rec: FileRecord, *, tag_ids: list[str]) -> dict[str, Any]:
         "storage_key": rec.storage_key,
         "origin": rec.origin,
         "category_id": rec.category_id,
+        "folder_id": getattr(rec, "folder_id", None),
         "tag_ids": tag_ids,
         "status": rec.status,
         "error_message": rec.error_message,

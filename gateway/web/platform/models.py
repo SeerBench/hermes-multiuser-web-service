@@ -134,6 +134,20 @@ class FileTagLink(Base):
     )
 
 
+class FileFolder(Base):
+    """Logical folder within a workspace (storage paths stay flat on disk)."""
+
+    __tablename__ = "file_folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    workspace_id: Mapped[str] = mapped_column(String(36), ForeignKey("workspaces.id"), nullable=False)
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("file_folders.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class FileRecord(Base):
     __tablename__ = "files"
 
@@ -147,6 +161,9 @@ class FileRecord(Base):
     origin: Mapped[str] = mapped_column(String(16), nullable=False, default="platform")
     category_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("file_categories.id", ondelete="SET NULL"), nullable=True
+    )
+    folder_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("file_folders.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

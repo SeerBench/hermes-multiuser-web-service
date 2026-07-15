@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { MarkdownEditor } from '../components/MarkdownEditor'
-import { useT } from '../i18n'
+import { useLocale, useT } from '../i18n'
+import { skillDisplayDescription } from '../skillDescriptions.zh'
 import {
   PlatformApiError,
   getStoredWorkspaceId,
@@ -14,13 +15,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -28,11 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Switch } from '@/components/ui/switch'
-import { cn } from '@/lib/utils'
-
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 
 const SKILL_TEMPLATE = `---
 name: my-skill
@@ -47,8 +40,11 @@ version: "1.0"
 ## Procedure
 `
 
+type SkillsTab = 'mine' | 'catalog'
+
 export function SkillsPage() {
   const t = useT()
+  const { locale } = useLocale()
   const workspaceId = getStoredWorkspaceId()
   const [skills, setSkills] = useState<SkillRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +57,7 @@ export function SkillsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createContent, setCreateContent] = useState(SKILL_TEMPLATE)
+  const [tab, setTab] = useState<SkillsTab>('mine')
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -74,6 +71,9 @@ export function SkillsPage() {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  const describe = (skill: { name: string; description?: string | null }) =>
+    skillDisplayDescription(locale, skill.name, skill.description)
 
   const toggle = async (name: string, enabled: boolean) => {
     if (!workspaceId) return
@@ -152,6 +152,7 @@ export function SkillsPage() {
       setCreateOpen(false)
       setCreateName('')
       setCreateContent(SKILL_TEMPLATE)
+      setTab('mine')
       await openDetail(created)
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
@@ -169,6 +170,7 @@ export function SkillsPage() {
       await reload()
       setSelected(await platform.getSkill(workspaceId, name))
       setDetailOpen(true)
+      setTab('mine')
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
@@ -177,7 +179,9 @@ export function SkillsPage() {
   }
 
   if (!workspaceId) {
-    return <p className="text-muted-foreground p-4 text-sm">{t('skills.noWorkspace')}</p>
+    return (
+      <p className="text-muted-foreground p-4 text-sm">{t('skills.noWorkspace')}</p>
+    )
   }
 
   const globalSkills = skills.filter((s) => s.source === 'global')
@@ -185,6 +189,7 @@ export function SkillsPage() {
   const otherSkills = skills.filter(
     (s) => s.source !== 'global' && s.source !== 'user',
   )
+  const mySkills = [...userSkills, ...otherSkills]
 
   return (
     <PageShell
@@ -198,48 +203,60 @@ export function SkillsPage() {
         </Button>
       }
     >
-
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="mb-3">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      {userSkills.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t('skills.section.mine')}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {userSkills.map((s) => (
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as SkillsTab)}
+        className="skills-tabs gap-4"
+      >
+        <TabsList className="bg-muted/80">
+          <TabsTrigger value="mine">{t('skills.tab.mine')}</TabsTrigger>
+          <TabsTrigger value="catalog">{t('skills.tab.catalog')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="mine" className="space-y-2 outline-none">
+          {mySkills.length === 0 ? (
+            <p className="text-muted-foreground text-sm">{t('skills.mine.empty')}</p>
+          ) : (
+            mySkills.map((s) => (
               <SkillListItem
-                key={s.name}
+                key={`${s.source}-${s.name}`}
                 skill={s}
+                description={describe(s)}
                 busy={busy || detailBusy}
                 onSelect={() => void openDetail(s.name)}
                 onToggle={() => void toggle(s.name, s.enabled !== false)}
                 enabledLabel={t('skills.enabled')}
-                onDelete={() => void removeSkill(s.name)}
+                onDelete={
+                  s.source === 'user'
+                    ? () => void removeSkill(s.name)
+                    : undefined
+                }
                 deleteLabel={t('skills.delete')}
               />
-            ))}
-          </CardContent>
-        </Card>
-      )}
+            ))
+          )}
+        </TabsContent>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t('skills.section.catalog')}</CardTitle>
-          <CardDescription>{t('skills.catalog.hint')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
+        <TabsContent value="catalog" className="space-y-2 outline-none">
+          <p className="text-muted-foreground mb-2 text-sm">
+            {t('skills.catalog.hint')}
+          </p>
           {globalSkills.length === 0 ? (
-            <p className="text-muted-foreground text-sm">{t('skills.catalog.empty')}</p>
+            <p className="text-muted-foreground text-sm">
+              {t('skills.catalog.empty')}
+            </p>
           ) : (
             globalSkills.map((s) => (
               <SkillListItem
                 key={s.name}
                 skill={s}
+                description={describe(s)}
                 busy={busy || detailBusy}
                 onSelect={() => void openDetail(s.name)}
                 onToggle={() => void toggle(s.name, s.enabled !== false)}
@@ -249,28 +266,8 @@ export function SkillsPage() {
               />
             ))
           )}
-        </CardContent>
-      </Card>
-
-      {otherSkills.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t('skills.section.other')}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {otherSkills.map((s) => (
-              <SkillListItem
-                key={s.name}
-                skill={s}
-                busy={busy || detailBusy}
-                onSelect={() => void openDetail(s.name)}
-                onToggle={() => void toggle(s.name, s.enabled !== false)}
-                enabledLabel={t('skills.enabled')}
-              />
-            ))}
-          </CardContent>
-        </Card>
-      )}
+        </TabsContent>
+      </Tabs>
 
       <Dialog
         open={detailOpen}
@@ -279,8 +276,8 @@ export function SkillsPage() {
           if (!open) setSelected(null)
         }}
       >
-        <DialogContent className="flex max-h-[min(90vh,720px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
-          <DialogHeader className="border-b border-border px-6 py-4 text-left">
+        <DialogContent className="flex h-[min(90vh,900px)] w-full max-w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-[800px]">
+          <DialogHeader className="shrink-0 border-b border-border px-6 py-4 text-left">
             <DialogTitle>{selected?.name ?? t('nav.skills')}</DialogTitle>
             <DialogDescription>
               {detailBusy
@@ -294,10 +291,10 @@ export function SkillsPage() {
           </DialogHeader>
           {selected && !detailBusy && (
             <>
-              <ScrollArea className="overlay-scrollbar max-h-[min(55vh,480px)] flex-1 px-6 py-4">
-                {selected.description && !editing && (
+              <div className="overlay-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-4">
+                {!editing && describe(selected) && (
                   <p className="text-muted-foreground mb-3 text-sm">
-                    {selected.description}
+                    {describe(selected)}
                   </p>
                 )}
                 {selected.source === 'user' && !editing && (
@@ -309,21 +306,23 @@ export function SkillsPage() {
                   <MarkdownEditor
                     value={editContent}
                     onChange={setEditContent}
-                    minHeight={320}
+                    minHeight={360}
                   />
                 ) : (
-                  <MarkdownEditor
-                    value={selected.content}
-                    readOnly
-                    minHeight={280}
-                  />
+                  <pre className="skills-detail-content skills-detail-content--dialog">
+                    {selected.content}
+                  </pre>
                 )}
-              </ScrollArea>
-              <DialogFooter className="border-t border-border px-6 py-3 gap-2">
+              </div>
+              <DialogFooter className="shrink-0 gap-2 border-t border-border px-6 py-3">
                 {selected.source === 'user' && (
                   <>
                     {editing ? (
-                      <Button type="button" disabled={busy} onClick={() => void saveEdit()}>
+                      <Button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void saveEdit()}
+                      >
                         {t('skills.save')}
                       </Button>
                     ) : (
@@ -372,12 +371,24 @@ export function SkillsPage() {
             onChange={(e) => setCreateName(e.target.value)}
             placeholder={t('skills.createName')}
           />
-          <MarkdownEditor value={createContent} onChange={setCreateContent} minHeight={280} />
+          <MarkdownEditor
+            value={createContent}
+            onChange={setCreateContent}
+            minHeight={280}
+          />
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreateOpen(false)}
+            >
               {t('common.cancel')}
             </Button>
-            <Button type="button" disabled={busy || !createName.trim()} onClick={() => void createSkill()}>
+            <Button
+              type="button"
+              disabled={busy || !createName.trim()}
+              onClick={() => void createSkill()}
+            >
               {t('skills.create')}
             </Button>
           </DialogFooter>
@@ -389,6 +400,7 @@ export function SkillsPage() {
 
 type ItemProps = {
   skill: SkillRow
+  description: string
   busy: boolean
   onSelect: () => void
   onToggle: () => void
@@ -401,6 +413,7 @@ type ItemProps = {
 
 function SkillListItem({
   skill,
+  description,
   busy,
   onSelect,
   onToggle,
@@ -427,20 +440,32 @@ function SkillListItem({
             {skill.source}
           </Badge>
         </div>
-        {skill.description && (
+        {description && (
           <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
-            {skill.description}
+            {description}
           </p>
         )}
       </button>
       <div className="flex shrink-0 items-center gap-3">
         {onDelete && deleteLabel && (
-          <Button type="button" size="sm" variant="destructive" disabled={busy} onClick={onDelete}>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={busy}
+            onClick={onDelete}
+          >
             {deleteLabel}
           </Button>
         )}
         {onInstall && installLabel && (
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onInstall}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={onInstall}
+          >
             {installLabel}
           </Button>
         )}

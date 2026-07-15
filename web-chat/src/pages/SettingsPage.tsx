@@ -7,8 +7,6 @@ import {
   PlatformApiError,
   getStoredWorkspaceId,
   platform,
-  type BillingLogItem,
-  type BillingUsage,
   type PlatformUser,
 } from '../platformClient'
 import {
@@ -50,9 +48,9 @@ type Props = {
   onUserUpdated?: (user: PlatformUser) => void
 }
 
-type SettingsTab = 'general' | 'account' | 'apikey' | 'models'
+type SettingsTab = 'general' | 'account' | 'models' | 'usage'
 
-/** Settings: General / Account / API Key / Models. Wide on PC, fullscreen on mobile. */
+/** Settings: General / Account / Models / Usage. Wide on PC, fullscreen on mobile. */
 export function SettingsPage({
   open,
   onOpenChange,
@@ -78,11 +76,6 @@ export function SettingsPage({
     getStoredFontScale(),
   )
 
-  // Billing (API key tab)
-  const [usage, setUsage] = useState<BillingUsage | null>(null)
-  const [usageErr, setUsageErr] = useState<string | null>(null)
-  const [logs, setLogs] = useState<BillingLogItem[]>([])
-  const [billingBusy, setBillingBusy] = useState(false)
 
   // Account edit form
   const [nickname, setNickname] = useState('')
@@ -158,39 +151,13 @@ export function SettingsPage({
     }
   }, [platformMode, workspaceId])
 
-  const loadBilling = useCallback(async () => {
-    if (!platformMode) return
-    setBillingBusy(true)
-    setUsageErr(null)
-    try {
-      const [u, l] = await Promise.all([
-        platform.getBillingUsage(),
-        platform.getBillingLogs(40),
-      ])
-      setUsage(u)
-      setLogs(l.items ?? [])
-    } catch (err) {
-      setUsage(null)
-      setLogs([])
-      if (err instanceof PlatformApiError && err.status === 403) {
-        setUsageErr(t('settings.billing.needKey'))
-      } else {
-        setUsageErr(
-          err instanceof Error ? err.message : t('settings.billing.fail'),
-        )
-      }
-    } finally {
-      setBillingBusy(false)
-    }
-  }, [platformMode, t])
 
   useEffect(() => {
     if (!open) return
     setTab('general')
     void load()
     void loadModels()
-    void loadBilling()
-  }, [open, load, loadModels, loadBilling])
+  }, [open, load, loadModels])
 
   const logout = async () => {
     setLoggingOut(true)
@@ -217,7 +184,6 @@ export function SettingsPage({
       setBindMsg(t('settings.bindKey.ok'))
       onUserUpdated?.(res.user)
       await load()
-      await loadBilling()
     } catch (err) {
       setBindMsg(
         err instanceof PlatformApiError ? err.message : t('settings.bindKey.fail'),
@@ -347,10 +313,8 @@ export function SettingsPage({
       <DialogContent
         className={cn(
           'settings-dialog flex flex-col gap-0 overflow-hidden p-0',
-          // Mobile: fullscreen
           'max-sm:top-0 max-sm:left-0 max-sm:h-dvh max-sm:max-h-dvh max-sm:w-full max-sm:max-w-none',
           'max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none',
-          // PC: wider panel
           'sm:max-h-[min(90vh,820px)] sm:max-w-3xl',
         )}
         showCloseButton
@@ -364,31 +328,173 @@ export function SettingsPage({
         <Tabs
           value={tab}
           onValueChange={(v) => setTab(v as SettingsTab)}
-          className="flex min-h-0 flex-1 flex-col gap-0"
+          orientation="vertical"
+          className="flex min-h-0 flex-1 flex-col gap-0 sm:flex-row"
         >
-          <div className="border-b border-border px-4 pt-2 sm:px-6">
-            <TabsList className="w-full justify-start overflow-x-auto">
-              <TabsTrigger value="general">{t('settings.tab.general')}</TabsTrigger>
+          {/* Vertical sidebar (screenshot layout) */}
+          <aside className="flex w-full shrink-0 flex-col border-b border-border sm:w-48 sm:border-r sm:border-b-0">
+            <TabsList className="bg-transparent h-auto w-full flex-col items-stretch justify-start gap-1 rounded-none p-3">
+              <TabsTrigger
+                value="general"
+                className="justify-start data-[state=active]:bg-muted"
+              >
+                {t('settings.tab.general')}
+              </TabsTrigger>
               {platformMode && (
-                <TabsTrigger value="account">{t('settings.tab.account')}</TabsTrigger>
+                <TabsTrigger
+                  value="account"
+                  className="justify-start data-[state=active]:bg-muted"
+                >
+                  {t('settings.tab.account')}
+                </TabsTrigger>
               )}
               {platformMode && (
-                <TabsTrigger value="apikey">{t('settings.tab.apikey')}</TabsTrigger>
+                <TabsTrigger
+                  value="models"
+                  className="justify-start data-[state=active]:bg-muted"
+                >
+                  {t('settings.tab.models')}
+                </TabsTrigger>
               )}
               {platformMode && (
-                <TabsTrigger value="models">{t('settings.tab.models')}</TabsTrigger>
+                <TabsTrigger
+                  value="usage"
+                  className="justify-start data-[state=active]:bg-muted"
+                >
+                  {t('settings.tab.usage')}
+                </TabsTrigger>
               )}
             </TabsList>
-          </div>
+            <div className="mt-auto border-t border-border p-3">
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full justify-start"
+                size="sm"
+                onClick={() => void logout()}
+                disabled={loggingOut || !me}
+              >
+                {loggingOut ? t('settings.signout.busy') : t('settings.signout')}
+              </Button>
+            </div>
+          </aside>
 
           <ScrollArea className="min-h-0 flex-1 px-6 py-4">
             <TabsContent value="general" className="mt-0 space-y-6 pb-4">
               <section className="space-y-3">
-                <h3 className="text-sm font-semibold">{t('settings.account.title')}</h3>
-                {loading ? (
-                  <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
-                ) : me ? (
-                  <>
+                <h3 className="text-sm font-semibold">{t('settings.preferences.theme')}</h3>
+                <RadioGroup
+                  value={theme}
+                  onValueChange={onThemeChange}
+                  className="grid gap-2 sm:grid-cols-3"
+                >
+                  {(
+                    [
+                      ['light', 'settings.theme.light'],
+                      ['dark', 'settings.theme.dark'],
+                      ['system', 'settings.theme.system'],
+                    ] as const
+                  ).map(([value, labelKey]) => (
+                    <label
+                      key={value}
+                      className={cn(
+                        'hover:bg-muted/50 flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-border px-3 py-4 text-center',
+                        theme === value && 'bg-muted border-primary/40',
+                      )}
+                    >
+                      <RadioGroupItem value={value} id={`theme-${value}`} className="sr-only" />
+                      <span className="text-sm font-medium whitespace-nowrap">
+                        {t(labelKey)}
+                      </span>
+                    </label>
+                  ))}
+                </RadioGroup>
+                <p className="text-muted-foreground text-xs">
+                  {t('settings.preferences.theme.hint')}
+                </p>
+              </section>
+
+              <Separator />
+
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Label className="shrink-0">{t('settings.preferences.language')}</Label>
+                  <LanguageToggle />
+                </div>
+              </section>
+
+              <Separator />
+
+              <section className="space-y-3">
+                <Label>{t('settings.preferences.font')}</Label>
+                <p className="text-muted-foreground text-xs">
+                  {t('settings.preferences.font.hint')}
+                </p>
+                <RadioGroup
+                  value={fontScale}
+                  onValueChange={onFontScaleChange}
+                  className="flex flex-row flex-wrap gap-2"
+                >
+                  {(
+                    [
+                      ['sm', 'settings.font.sm'],
+                      ['md', 'settings.font.md'],
+                      ['lg', 'settings.font.lg'],
+                    ] as const
+                  ).map(([value, labelKey]) => (
+                    <label
+                      key={value}
+                      className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"
+                    >
+                      <RadioGroupItem value={value} id={`font-${value}`} />
+                      <span className="text-sm whitespace-nowrap">{t(labelKey)}</span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </section>
+
+              {needsBind && platformMode && (
+                <>
+                  <Separator />
+                  <Alert>
+                    <AlertDescription>
+                      {t('settings.bindKey.goTab')}{' '}
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={() => setTab('models')}
+                      >
+                        {t('settings.tab.models')}
+                      </button>
+                    </AlertDescription>
+                  </Alert>
+                </>
+              )}
+
+              {!platformMode && (
+                <>
+                  <Separator />
+                  <section className="space-y-2">
+                    <h3 className="text-sm font-semibold">{t('settings.about.title')}</h3>
+                    <p className="text-muted-foreground text-sm leading-relaxed">
+                      {t('settings.about.body')}
+                    </p>
+                  </section>
+                </>
+              )}
+
+              {!me && !loading && (
+                <p className="text-muted-foreground text-sm">{t('settings.not_signed_in')}</p>
+              )}
+            </TabsContent>
+
+            {platformMode && (
+              <TabsContent value="account" className="mt-0 space-y-6 pb-4">
+                <section className="space-y-3">
+                  <h3 className="text-sm font-semibold">{t('settings.account.title')}</h3>
+                  {loading ? (
+                    <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
+                  ) : me ? (
                     <div className="flex items-start gap-3">
                       {me.avatar_url ? (
                         <img
@@ -438,129 +544,13 @@ export function SettingsPage({
                         )}
                       </dl>
                     </div>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => void logout()}
-                      disabled={loggingOut}
-                    >
-                      {loggingOut ? t('settings.signout.busy') : t('settings.signout')}
-                    </Button>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground text-sm">{t('settings.not_signed_in')}</p>
-                )}
-              </section>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">{t('settings.not_signed_in')}</p>
+                  )}
+                </section>
 
-              {needsBind && platformMode && (
-                <>
-                  <Separator />
-                  <Alert>
-                    <AlertDescription>
-                      {t('settings.bindKey.goTab')}{' '}
-                      <button
-                        type="button"
-                        className="link-btn"
-                        onClick={() => setTab('apikey')}
-                      >
-                        {t('settings.tab.apikey')}
-                      </button>
-                    </AlertDescription>
-                  </Alert>
-                </>
-              )}
+                <Separator />
 
-              <Separator />
-
-              <section className="space-y-3">
-                <h3 className="text-sm font-semibold">{t('settings.preferences.title')}</h3>
-                {/* Language + appearance options on one row (wrap on narrow screens). */}
-                <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Label className="shrink-0">
-                      {t('settings.preferences.language')}
-                    </Label>
-                    <LanguageToggle />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Label className="shrink-0">
-                      {t('settings.preferences.theme')}
-                    </Label>
-                    <RadioGroup
-                      value={theme}
-                      onValueChange={onThemeChange}
-                      className="flex flex-row flex-wrap gap-2"
-                    >
-                      {(
-                        [
-                          ['system', 'settings.theme.system'],
-                          ['light', 'settings.theme.light'],
-                          ['dark', 'settings.theme.dark'],
-                        ] as const
-                      ).map(([value, labelKey]) => (
-                        <label
-                          key={value}
-                          className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"
-                        >
-                          <RadioGroupItem value={value} id={`theme-${value}`} />
-                          <span className="text-sm whitespace-nowrap">
-                            {t(labelKey)}
-                          </span>
-                        </label>
-                      ))}
-                    </RadioGroup>
-                  </div>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  {t('settings.preferences.theme.hint')}
-                </p>
-                <div className="space-y-2">
-                  <Label>{t('settings.preferences.font')}</Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t('settings.preferences.font.hint')}
-                  </p>
-                  <RadioGroup
-                    value={fontScale}
-                    onValueChange={onFontScaleChange}
-                    className="flex flex-row flex-wrap gap-2"
-                  >
-                    {(
-                      [
-                        ['sm', 'settings.font.sm'],
-                        ['md', 'settings.font.md'],
-                        ['lg', 'settings.font.lg'],
-                      ] as const
-                    ).map(([value, labelKey]) => (
-                      <label
-                        key={value}
-                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2"
-                      >
-                        <RadioGroupItem value={value} id={`font-${value}`} />
-                        <span className="text-sm whitespace-nowrap">
-                          {t(labelKey)}
-                        </span>
-                      </label>
-                    ))}
-                  </RadioGroup>
-                </div>
-              </section>
-
-              {!platformMode && (
-                <>
-                  <Separator />
-                  <section className="space-y-2">
-                    <h3 className="text-sm font-semibold">{t('settings.about.title')}</h3>
-                    <p className="text-muted-foreground text-sm leading-relaxed">
-                      {t('settings.about.body')}
-                    </p>
-                  </section>
-                </>
-              )}
-            </TabsContent>
-
-            {platformMode && (
-              <TabsContent value="account" className="mt-0 space-y-6 pb-4">
                 <section className="space-y-3">
                   <h3 className="text-sm font-semibold">{t('settings.account.edit')}</h3>
                   <div className="flex items-center gap-4">
@@ -681,7 +671,7 @@ export function SettingsPage({
             )}
 
             {platformMode && (
-              <TabsContent value="apikey" className="mt-0 space-y-6 pb-4">
+              <TabsContent value="models" className="mt-0 space-y-6 pb-4">
                 <section className="space-y-3">
                   <h3 className="text-sm font-semibold">{t('settings.bindKey.title')}</h3>
                   <p className="text-muted-foreground text-sm">
@@ -721,170 +711,81 @@ export function SettingsPage({
 
                 <Separator />
 
-                <section className="space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold">
-                      {t('settings.billing.title')}
-                    </h3>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={billingBusy}
-                      onClick={() => void loadBilling()}
+                <section className="space-y-4">
+                  <h3 className="text-sm font-semibold">{t('settings.tab.models')}</h3>
+                  <p className="text-muted-foreground text-sm">{t('settings.models.hint')}</p>
+                  <Input
+                    placeholder={t('settings.models.search')}
+                    value={modelFilter}
+                    onChange={(e) => setModelFilter(e.target.value)}
+                  />
+                  <div className="space-y-2">
+                    <Label>{t('settings.models.preferred')}</Label>
+                    <select
+                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                      value={preferred}
+                      onChange={(e) => setPreferred(e.target.value)}
                     >
-                      {t('settings.billing.refresh')}
-                    </Button>
+                      <option value="">{t('settings.models.preferred.none')}</option>
+                      {(favorites.length
+                        ? allModels.filter((m) => favorites.includes(m.id))
+                        : allModels
+                      ).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.id}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  {billingBusy && (
-                    <p className="text-muted-foreground text-sm">
-                      {t('common.loading')}
-                    </p>
-                  )}
-                  {usageErr && (
-                    <Alert>
-                      <AlertDescription>{usageErr}</AlertDescription>
-                    </Alert>
-                  )}
-                  {usage && !usageErr && (
-                    <dl className="grid gap-2 text-sm sm:grid-cols-2">
-                      {usage.name && (
-                        <div className="flex justify-between gap-2 sm:col-span-2">
-                          <dt className="text-muted-foreground">
-                            {t('settings.billing.name')}
-                          </dt>
-                          <dd className="font-medium">{usage.name}</dd>
-                        </div>
-                      )}
-                      <div className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">
-                          {t('settings.billing.used')}
-                        </dt>
-                        <dd className="font-mono text-xs">
-                          {usage.unlimited_quota
-                            ? t('settings.billing.unlimited')
-                            : String(usage.total_used ?? '—')}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">
-                          {t('settings.billing.available')}
-                        </dt>
-                        <dd className="font-mono text-xs">
-                          {usage.unlimited_quota
-                            ? t('settings.billing.unlimited')
-                            : String(usage.total_available ?? '—')}
-                        </dd>
-                      </div>
-                      <div className="flex justify-between gap-2 sm:col-span-2">
-                        <dt className="text-muted-foreground">
-                          {t('settings.billing.granted')}
-                        </dt>
-                        <dd className="font-mono text-xs">
-                          {usage.unlimited_quota
-                            ? t('settings.billing.unlimited')
-                            : String(usage.total_granted ?? '—')}
-                        </dd>
-                      </div>
-                    </dl>
-                  )}
-                </section>
-
-                <section className="space-y-2">
-                  <h3 className="text-sm font-semibold">
-                    {t('settings.billing.logs')}
-                  </h3>
-                  {logs.length === 0 && !billingBusy && (
-                    <p className="text-muted-foreground text-sm">
-                      {t('settings.billing.logsEmpty')}
-                    </p>
-                  )}
-                  <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                    {logs.map((row) => (
-                      <div
-                        key={String(row.id ?? `${row.created_at}-${row.model_name}`)}
-                        className="hover:bg-muted/40 flex flex-wrap items-baseline justify-between gap-2 rounded px-2 py-1.5 text-xs"
+                  <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border p-2">
+                    {modelsBusy && (
+                      <p className="text-muted-foreground p-2 text-sm">
+                        {t('common.loading')}
+                      </p>
+                    )}
+                    {!modelsBusy && filteredCatalog.length === 0 && (
+                      <p className="text-muted-foreground p-2 text-sm">
+                        {t('settings.models.empty')}
+                      </p>
+                    )}
+                    {filteredCatalog.map((m) => (
+                      <label
+                        key={m.id}
+                        className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
                       >
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {row.model_name || row.content || '—'}
-                        </span>
-                        <span className="text-muted-foreground shrink-0">
-                          {row.quota != null ? `q=${row.quota}` : ''}
-                          {row.created_at
-                            ? ` · ${new Date(row.created_at * 1000).toLocaleString()}`
-                            : ''}
-                        </span>
-                      </div>
+                        <Checkbox
+                          checked={favorites.includes(m.id)}
+                          onCheckedChange={() => toggleFavorite(m.id)}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm">{m.id}</span>
+                        {m.owned_by && (
+                          <span className="text-muted-foreground text-xs">{m.owned_by}</span>
+                        )}
+                      </label>
                     ))}
                   </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={modelsBusy}
+                    onClick={() => void saveFavorites()}
+                  >
+                    {modelsBusy ? t('common.loading') : t('settings.models.save')}
+                  </Button>
+                  {modelsMsg && (
+                    <Alert>
+                      <AlertDescription>{modelsMsg}</AlertDescription>
+                    </Alert>
+                  )}
                 </section>
               </TabsContent>
             )}
 
             {platformMode && (
-              <TabsContent value="models" className="mt-0 space-y-4 pb-4">
-                <p className="text-muted-foreground text-sm">{t('settings.models.hint')}</p>
-                <Input
-                  placeholder={t('settings.models.search')}
-                  value={modelFilter}
-                  onChange={(e) => setModelFilter(e.target.value)}
-                />
-                <div className="space-y-2">
-                  <Label>{t('settings.models.preferred')}</Label>
-                  <select
-                    className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                    value={preferred}
-                    onChange={(e) => setPreferred(e.target.value)}
-                  >
-                    <option value="">{t('settings.models.preferred.none')}</option>
-                    {(favorites.length
-                      ? allModels.filter((m) => favorites.includes(m.id))
-                      : allModels
-                    ).map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                  {modelsBusy && (
-                    <p className="text-muted-foreground p-2 text-sm">{t('common.loading')}</p>
-                  )}
-                  {!modelsBusy && filteredCatalog.length === 0 && (
-                    <p className="text-muted-foreground p-2 text-sm">
-                      {t('settings.models.empty')}
-                    </p>
-                  )}
-                  {filteredCatalog.map((m) => (
-                    <label
-                      key={m.id}
-                      className="hover:bg-muted/50 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5"
-                    >
-                      <Checkbox
-                        checked={favorites.includes(m.id)}
-                        onCheckedChange={() => toggleFavorite(m.id)}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm">{m.id}</span>
-                      {m.owned_by && (
-                        <span className="text-muted-foreground text-xs">{m.owned_by}</span>
-                      )}
-                    </label>
-                  ))}
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={modelsBusy}
-                  onClick={() => void saveFavorites()}
-                >
-                  {modelsBusy ? t('common.loading') : t('settings.models.save')}
-                </Button>
-                {modelsMsg && (
-                  <Alert>
-                    <AlertDescription>{modelsMsg}</AlertDescription>
-                  </Alert>
-                )}
+              <TabsContent value="usage" className="mt-0 space-y-4 pb-4">
+                <p className="text-muted-foreground text-sm py-8 text-center">
+                  {t('settings.usage.comingSoon')}
+                </p>
               </TabsContent>
             )}
 

@@ -39,7 +39,13 @@ export function uploadWithProgress(
       let detail = xhr.statusText
       try {
         const body = JSON.parse(xhr.responseText)
-        detail = body.detail ?? body.error ?? detail
+        const raw = body.detail ?? body.error ?? detail
+        detail =
+          typeof raw === 'string'
+            ? raw
+            : raw && typeof raw === 'object' && 'message' in raw
+              ? String((raw as { message: unknown }).message)
+              : JSON.stringify(raw)
       } catch {
         // ignore
       }

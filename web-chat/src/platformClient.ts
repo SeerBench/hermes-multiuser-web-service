@@ -33,6 +33,7 @@ export type PlatformFile = {
   storage_key?: string
   origin?: string
   category_id?: string | null
+  folder_id?: string | null
   tag_ids?: string[]
   status: string
   error_message?: string | null
@@ -43,6 +44,13 @@ export type FileCategory = {
   id: string
   name: string
   sort_order: number
+  created_at: number
+}
+
+export type FileFolder = {
+  id: string
+  name: string
+  parent_id?: string | null
   created_at: number
 }
 
@@ -108,9 +116,25 @@ const BASE = '/api/v1'
 
 class PlatformApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  detail: unknown
+  constructor(message: string, status: number, detail: unknown = message) {
     super(message)
     this.status = status
+    this.detail = detail
+  }
+}
+
+function formatApiDetail(detail: unknown, fallback: string): string {
+  if (detail == null) return fallback
+  if (typeof detail === 'string') return detail
+  if (typeof detail === 'object' && detail !== null && 'message' in detail) {
+    const msg = (detail as { message?: unknown }).message
+    if (typeof msg === 'string' && msg.trim()) return msg
+  }
+  try {
+    return JSON.stringify(detail)
+  } catch {
+    return fallback
   }
 }
 
@@ -127,14 +151,18 @@ async function platformRequest<T>(
     ...init,
   })
   if (!res.ok) {
-    let detail = res.statusText
+    let rawDetail: unknown = res.statusText
     try {
       const body = await res.json()
-      detail = body.detail ?? body.error ?? detail
+      rawDetail = body.detail ?? body.error ?? res.statusText
     } catch {
       // ignore
     }
-    throw new PlatformApiError(String(detail), res.status)
+    throw new PlatformApiError(
+      formatApiDetail(rawDetail, res.statusText),
+      res.status,
+      rawDetail,
+    )
   }
   if (res.status === 204) return undefined as T
   const ct = res.headers.get('content-type') ?? ''
@@ -272,6 +300,8 @@ export const platform = {
       sort?: 'created_at' | 'size' | 'name'
       order?: 'asc' | 'desc'
       category_id?: string
+      folder_id?: string | null
+      kind?: 'image' | 'document'
       tag?: string
     },
   ) => {
@@ -279,6 +309,10 @@ export const platform = {
     if (opts?.sort) q.set('sort', opts.sort)
     if (opts?.order) q.set('order', opts.order)
     if (opts?.category_id) q.set('category_id', opts.category_id)
+    if (opts?.folder_id !== undefined) {
+      q.set('folder_id', opts.folder_id ?? '')
+    }
+    if (opts?.kind) q.set('kind', opts.kind)
     if (opts?.tag) q.set('tag', opts.tag)
     const qs = q.toString()
     return platformRequest<PlatformFile[]>(
@@ -286,12 +320,20 @@ export const platform = {
     )
   },
 
-  uploadFiles: (workspaceId: string, files: File[], ingest = true) => {
+  uploadFiles: (
+    workspaceId: string,
+    files: File[],
+    ingest = true,
+    folderId?: string | null,
+  ) => {
     const fd = new FormData()
     for (const f of files) fd.append('files', f, f.name)
-    const qs = ingest ? '' : '?ingest=false'
+    const q = new URLSearchParams()
+    if (!ingest) q.set('ingest', 'false')
+    if (folderId) q.set('folder_id', folderId)
+    const qs = q.toString()
     return platformRequest<PlatformFile[]>(
-      `/workspaces/${workspaceId}/files${qs}`,
+      `/workspaces/${workspaceId}/files${qs ? `?${qs}` : ''}`,
       { method: 'POST', body: fd },
     )
   },
@@ -299,7 +341,11 @@ export const platform = {
   patchFile: (
     workspaceId: string,
     fileId: string,
-    patch: { category_id?: string | null; tag_ids?: string[] },
+    patch: {
+      category_id?: string | null
+      folder_id?: string | null
+      tag_ids?: string[]
+    },
   ) =>
     platformRequest<PlatformFile>(
       `/workspaces/${workspaceId}/files/${fileId}`,
@@ -311,6 +357,49 @@ export const platform = {
       `/workspaces/${workspaceId}/files/${fileId}/ingest`,
       { method: 'POST' },
     ),
+
+  listFileFolders: (workspaceId: string, parentId?: string | null) => {
+    const q = new URLSearchParams()
+    if (parentId !== undefined) q.set('parent_id', parentId ?? '')
+    const qs = q.toString()
+    return platformRequest<FileFolder[]>(
+      `/workspaces/${workspaceId}/file-folders${qs ? `?${qs}` : ''}`,
+    )
+  },
+
+  createFileFolder: (
+    workspaceId: string,
+    name: string,
+    parentId?: string | null,
+  ) =>
+    platformRequest<FileFolder>(`/workspaces/${workspaceId}/file-folders`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        parent_id: parentId ?? null,
+      }),
+    }),
+
+  renameFileFolder: (workspaceId: string, folderId: string, name: string) =>
+    platformRequest<FileFolder>(
+      `/workspaces/${workspaceId}/file-folders/${folderId}`,
+      { method: 'PATCH', body: JSON.stringify({ name }) },
+    ),
+
+  deleteFileFolder: (
+    workspaceId: string,
+    folderId: string,
+    force = false,
+  ) => {
+    const q = force ? '?force=true' : ''
+    return platformRequest<{
+      status: string
+      file_count?: number
+      folder_count?: number
+    }>(`/workspaces/${workspaceId}/file-folders/${folderId}${q}`, {
+      method: 'DELETE',
+    })
+  },
 
   listFileCategories: (workspaceId: string) =>
     platformRequest<FileCategory[]>(`/workspaces/${workspaceId}/file-categories`),

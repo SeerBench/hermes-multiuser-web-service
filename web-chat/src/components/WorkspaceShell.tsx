@@ -31,7 +31,7 @@ export function WorkspaceShell({
         onValueChange={(v) => {
           window.location.hash = routeHref(v as WorkspaceTab)
         }}
-        className="workspace-shell-tabs gap-3"
+        className="workspace-shell-tabs items-center gap-3"
       >
         <TabsList className="bg-muted/80">
           <TabsTrigger value="files">{t('nav.files')}</TabsTrigger>

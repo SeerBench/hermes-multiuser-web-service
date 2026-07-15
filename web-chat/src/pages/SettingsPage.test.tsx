@@ -38,7 +38,7 @@ vi.mock('../platformClient', async (importOriginal) => {
   }
 })
 
-import { platform, PlatformApiError } from '../platformClient'
+import { platform } from '../platformClient'
 import { applyTheme, getStoredTheme } from '../themeStorage'
 
 describe('SettingsPage', () => {
@@ -64,13 +64,9 @@ describe('SettingsPage', () => {
       preferred_model: 'gpt-mini',
       default_model: 'gpt-mini',
     })
-    vi.mocked(platform.getBillingUsage).mockRejectedValue(
-      new PlatformApiError('upstream key not bound', 403),
-    )
-    vi.mocked(platform.getBillingLogs).mockResolvedValue({ items: [] })
   })
 
-  it('opens as a wide settings dialog with tabs and switches theme', async () => {
+  it('opens with sidebar tabs: general, account, models, usage, and warning sign-out', async () => {
     const user = userEvent.setup()
     render(
       <LocaleProvider>
@@ -85,12 +81,12 @@ describe('SettingsPage', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toBeInTheDocument()
-    expect(dialog.className).toMatch(/sm:max-w-3xl/)
-    expect(await screen.findByText(/a@b.com/)).toBeInTheDocument()
+
     expect(screen.getByRole('tab', { name: /general/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /account/i })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: /api key/i })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /models/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /usage/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: /light/i }))
     expect(getStoredTheme()).toBe('light')
@@ -102,7 +98,7 @@ describe('SettingsPage', () => {
     expect(getStoredFontScale()).toBe('lg')
   })
 
-  it('shows account edit fields and model favorites checklist', async () => {
+  it('puts profile fields under account and API key + favorites under models', async () => {
     const user = userEvent.setup()
     render(
       <LocaleProvider>
@@ -115,15 +111,20 @@ describe('SettingsPage', () => {
       </LocaleProvider>,
     )
 
-    await screen.findByText(/a@b.com/)
-    await user.click(screen.getByRole('tab', { name: /account/i }))
+    await user.click(await screen.findByRole('tab', { name: /account/i }))
+    expect(await screen.findByText(/a@b.com/)).toBeInTheDocument()
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/current password/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: /models/i }))
+    expect(
+      await screen.findByRole('heading', { name: /bind api key/i }),
+    ).toBeInTheDocument()
     expect(await screen.findAllByText('gpt-mini')).not.toHaveLength(0)
     expect(screen.getByText('gpt-pro')).toBeInTheDocument()
-    expect(screen.getByText('other')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: /usage/i }))
+    expect(await screen.findByText(/coming soon/i)).toBeInTheDocument()
   })
 })

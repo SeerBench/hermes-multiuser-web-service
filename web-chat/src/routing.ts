@@ -4,6 +4,7 @@ export type Route =
   | 'chat'
   | 'settings'
   | 'files'
+  | 'file-tags'
   | 'memory'
   | 'skills'
   | 'admin'
@@ -16,6 +17,7 @@ export type WorkspaceTab = 'files' | 'memory' | 'skills'
 const ROUTES: Route[] = [
   'settings',
   'files',
+  'file-tags',
   'memory',
   'skills',
   'admin',
@@ -37,7 +39,19 @@ export function routeHref(route: Route): string {
 }
 
 export function isWorkspaceRoute(route: Route): boolean {
-  return route === 'files' || route === 'memory' || route === 'skills'
+  return (
+    route === 'files' ||
+    route === 'file-tags' ||
+    route === 'memory' ||
+    route === 'skills'
+  )
+}
+
+/** WorkspaceShell 顶栏高亮的子 Tab（file-tags 挂在「文件」下）。 */
+export function workspaceShellTab(route: Route): WorkspaceTab | null {
+  if (route === 'files' || route === 'file-tags') return 'files'
+  if (route === 'memory' || route === 'skills') return route
+  return null
 }
 
 /** Map any route to the visible primary tab (settings → background). */
