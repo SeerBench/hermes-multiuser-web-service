@@ -58,6 +58,7 @@ from gateway.web.sandbox import (
     confine_path,
     get_user_workspace,
 )
+from gateway.web.skill_filters import is_web_excluded_skill
 from tools.registry import registry
 
 logger = logging.getLogger("hermes.web.tools.sandboxed_skill_manage")
@@ -79,8 +80,10 @@ _SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # subdirectories under ``~/.hermes/skills/`` as of fork creation. The
 # allowlist keeps `web_skills_list` output tidy and stops users from
 # fragmenting the namespace with one-off categories.
+# ``apple`` deliberately omitted — macOS-only skills are filtered out of the
+# web surface (see ``gateway.web.skill_filters``).
 _ALLOWED_CATEGORIES: frozenset[str] = frozenset({
-    "apple", "autonomous-ai-agents", "creative", "data-science",
+    "autonomous-ai-agents", "creative", "data-science",
     "devops", "diagramming", "dogfood", "domain", "email", "gaming",
     "gifs", "github", "mcp", "media", "mlops", "note-taking",
     "productivity", "red-teaming", "research", "smart-home",
@@ -174,7 +177,13 @@ def _scan_skills_dir(root: Path) -> Iterator[Tuple[str, str, str]]:
             desc = meta.get("description", "")
             if not isinstance(name, str) or not name.strip():
                 continue
-            yield name.strip(), category, str(desc).strip()
+            name = name.strip()
+            # Hide Apple / macOS-only skills from the web agent surface.
+            if is_web_excluded_skill(
+                category=category, name=name, frontmatter=meta,
+            ):
+                continue
+            yield name, category, str(desc).strip()
 
 
 def _validate_skill_md(
@@ -300,6 +309,19 @@ def install_skill_from_catalog(
         return {"success": False, "error": f"skill {name!r} not found in catalog", "code": "not_found"}
 
     skill_dir, source = located
+    try:
+        meta = _parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8")) or {}
+    except OSError:
+        meta = {}
+    if is_web_excluded_skill(
+        category=skill_dir.parent.name, name=name, frontmatter=meta,
+    ):
+        return {
+            "success": False,
+            "error": f"skill {name!r} is not available on web-chat (macOS-only)",
+            "code": "web_excluded",
+        }
+
     if source == "user" and not overwrite:
         return {
             "success": False,
@@ -456,6 +478,18 @@ def _handle_web_skill_view(args: Dict[str, Any], **kw: Any) -> str:
     if not located:
         return _json({"success": False, "error": f"skill {name!r} not found", "name": name})
     skill_dir, source = located
+    try:
+        view_meta = _parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8")) or {}
+    except OSError:
+        view_meta = {}
+    if is_web_excluded_skill(
+        category=skill_dir.parent.name, name=name, frontmatter=view_meta,
+    ):
+        return _json({
+            "success": False,
+            "error": f"skill {name!r} is not available on web-chat (macOS-only)",
+            "name": name,
+        })
 
     file_path = args.get("file_path")
     if file_path:

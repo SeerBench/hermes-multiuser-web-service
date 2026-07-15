@@ -76,6 +76,70 @@ def _good_skill_md(name: str, desc: str = "a personal skill") -> str:
     )
 
 
+def test_web_skills_list_hides_apple_macos_only(hermes_home, alice_workspace):
+    """Apple / macOS-only catalog skills must not surface to the agent."""
+    _seed_global_skill(
+        hermes_home,
+        "apple",
+        "imessage",
+        content=(
+            "---\n"
+            "name: imessage\n"
+            'description: "Send iMessage"\n'
+            "platforms: [macos]\n"
+            "version: 1.0.0\n"
+            "---\n"
+            "# imessage\n"
+        ),
+    )
+    _seed_global_skill(hermes_home, "research", "arxiv", desc="arxiv search")
+
+    result = _call("web_skills_list", {})
+    assert result["success"] is True
+    names = {s["name"] for s in result["skills"]}
+    assert "arxiv" in names
+    assert "imessage" not in names
+
+
+def test_web_skill_view_rejects_apple_skill(hermes_home, alice_workspace):
+    _seed_global_skill(
+        hermes_home,
+        "apple",
+        "apple-notes",
+        content=(
+            "---\n"
+            "name: apple-notes\n"
+            'description: "Notes"\n'
+            "platforms: [macos]\n"
+            "version: 1.0.0\n"
+            "---\n"
+            "# apple-notes\n"
+        ),
+    )
+    result = _call("web_skill_view", {"name": "apple-notes"})
+    assert result["success"] is False
+
+
+def test_install_from_catalog_rejects_apple(hermes_home, alice_workspace):
+    _seed_global_skill(
+        hermes_home,
+        "apple",
+        "findmy",
+        content=(
+            "---\n"
+            "name: findmy\n"
+            'description: "Find My"\n'
+            "platforms: [macos]\n"
+            "version: 1.0.0\n"
+            "---\n"
+            "# findmy\n"
+        ),
+    )
+    result = mod.install_skill_from_catalog("findmy")
+    assert result["success"] is False
+    assert result.get("code") in ("not_found", "web_excluded")
+
+
 def _call(handler_name: str, args: dict) -> dict:
     handler = getattr(mod, f"_handle_{handler_name}")
     return json.loads(handler(args))

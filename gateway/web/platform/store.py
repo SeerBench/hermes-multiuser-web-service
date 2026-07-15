@@ -505,6 +505,8 @@ class PlatformStore:
                 ).scalars()
             }
         # Global skills minus explicit disables; user-private skills included.
+        # Apple / macOS-only skills stay hidden on the web surface.
+        from gateway.web.skill_filters import is_web_excluded_skill
         from hermes_constants import get_hermes_home
 
         names: set[str] = set()
@@ -512,8 +514,12 @@ class PlatformStore:
             if root.is_dir():
                 for skill_md in root.rglob("SKILL.md"):
                     name = skill_md.parent.name
-                    if name not in disabled:
-                        names.add(name)
+                    category = skill_md.parent.parent.name
+                    if name in disabled:
+                        continue
+                    if is_web_excluded_skill(category=category, name=name):
+                        continue
+                    names.add(name)
         with enter_user_context(user_id):
             from gateway.web.sandbox import get_user_workspace
 
@@ -521,8 +527,12 @@ class PlatformStore:
             if user_skills.is_dir():
                 for skill_md in user_skills.rglob("SKILL.md"):
                     name = skill_md.parent.name
-                    if name not in disabled:
-                        names.add(name)
+                    category = skill_md.parent.parent.name
+                    if name in disabled:
+                        continue
+                    if is_web_excluded_skill(category=category, name=name):
+                        continue
+                    names.add(name)
         return sorted(names)
 
     def list_users_admin(self, *, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:

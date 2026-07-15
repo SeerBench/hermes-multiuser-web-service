@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from gateway.web.platform.models import SkillEntitlement, Workspace
 from gateway.web.sandbox import enter_user_context
+from gateway.web.skill_filters import is_web_excluded_skill
 from hermes_constants import get_hermes_home
 from platform_api.deps import get_current_user_id, get_store
 
@@ -65,7 +66,14 @@ def list_skills(workspace_id: str, user_id: str = Depends(get_current_user_id)) 
             }
     for s in merged.values():
         s.setdefault("enabled", True)
-    return sorted(merged.values(), key=lambda x: x["name"])
+    visible = [
+        s for s in merged.values()
+        if not is_web_excluded_skill(
+            name=s.get("name"),
+            category=s.get("category"),
+        )
+    ]
+    return sorted(visible, key=lambda x: x["name"])
 
 
 @router.post("/{workspace_id}/skills/install-from-catalog")
@@ -78,13 +86,19 @@ def install_from_catalog(
     _get_workspace(workspace_id, user_id)
     from gateway.web.tools.sandboxed_skill_manage import install_skill_from_catalog
 
+    if is_web_excluded_skill(name=body.name.strip()):
+        raise HTTPException(
+            status_code=404,
+            detail=f"skill {body.name.strip()!r} is not available on web-chat (macOS-only)",
+        )
+
     with enter_user_context(user_id):
         result = install_skill_from_catalog(body.name.strip(), overwrite=body.overwrite)
 
     if not result.get("success"):
         code = result.get("code")
         err = str(result.get("error") or "install failed")
-        if code == "not_found" or code == "not_in_catalog":
+        if code in ("not_found", "not_in_catalog", "web_excluded"):
             raise HTTPException(status_code=404, detail=err)
         if code == "already_installed":
             raise HTTPException(status_code=409, detail=err)
@@ -177,6 +191,8 @@ def get_skill(
 ) -> dict[str, Any]:
     """Preview a skill's metadata + SKILL.md (user overlay wins)."""
     _get_workspace(workspace_id, user_id)
+    if is_web_excluded_skill(name=skill_name.strip()):
+        raise HTTPException(status_code=404, detail="not found")
     with enter_user_context(user_id):
         from gateway.web.tools.sandboxed_skill_manage import _find_skill
 
@@ -198,6 +214,13 @@ def get_skill(
         except yaml.YAMLError:
             meta = {}
 
+    if is_web_excluded_skill(
+        category=skill_dir.parent.name,
+        name=str(meta.get("name") or skill_name),
+        frontmatter=meta,
+    ):
+        raise HTTPException(status_code=404, detail="not found")
+
     return {
         "name": str(meta.get("name") or skill_name),
         "source": source,
@@ -215,6 +238,8 @@ def patch_skill(
     body: SkillPatch,
     user_id: str = Depends(get_current_user_id),
 ) -> dict[str, Any]:
+    if is_web_excluded_skill(name=skill_name.strip()):
+        raise HTTPException(status_code=404, detail="not found")
     ws = _get_workspace(workspace_id, user_id)
     store = get_store()
     from gateway.web.platform.database import session_scope
@@ -278,10 +303,19 @@ def _scan_skills(root: Path, *, source: str) -> List[dict[str, Any]]:
             else:
                 meta = {}
             name = str(meta.get("name") or skill_md.parent.name)
+            category = (
+                skill_md.parent.parent.name
+                if skill_md.parent.parent != root
+                else ""
+            )
+            if is_web_excluded_skill(
+                category=category, name=name, frontmatter=meta,
+            ):
+                continue
             out.append({
                 "name": name,
                 "source": source,
-                "category": skill_md.parent.parent.name if skill_md.parent.parent != root else "",
+                "category": category,
                 "path": str(skill_md.parent),
                 "description": meta.get("description", ""),
             })
