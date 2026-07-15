@@ -1,4 +1,4 @@
-"""Auth routes: register, login, logout, bind-key, me."""
+"""Auth routes: register, login, logout, bind-key, me, profile."""
 
 from __future__ import annotations
 
@@ -29,6 +29,18 @@ class BindKeyBody(BaseModel):
     api_key: str = Field(min_length=8)
 
 
+class ProfilePatchBody(BaseModel):
+    nickname: Optional[str] = Field(default=None, max_length=64)
+    email: Optional[EmailStr] = None
+    avatar_url: Optional[str] = Field(default=None, max_length=350_000)
+    clear_avatar: bool = False
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 def _issue_cookie(response: Response, store: PlatformStore, user_id: str, key_enc: str) -> None:
     settings = get_settings()
     vault = get_vault()
@@ -46,6 +58,22 @@ def _issue_cookie(response: Response, store: PlatformStore, user_id: str, key_en
         secure=settings.cookie_secure,
         samesite="lax",
     )
+
+
+def _require_session_user(hermes_session: Optional[str]) -> tuple[PlatformStore, dict[str, Any]]:
+    if not hermes_session:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    store = get_store()
+    if not isinstance(store, PlatformStore):
+        raise HTTPException(status_code=503, detail="platform store required")
+    try:
+        session = store.verify_web_session(hermes_session)
+    except InvalidCredentialsError as exc:
+        raise HTTPException(status_code=401, detail="unauthorized") from exc
+    user = store.get_user(session["user_id"])
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return store, user
 
 
 @router.post("/register")
@@ -142,15 +170,42 @@ def bind_key(
 def me(
     hermes_session: Optional[str] = Cookie(default=None, alias="hermes_session"),
 ) -> dict[str, Any]:
-    if not hermes_session:
-        raise HTTPException(status_code=401, detail="unauthorized")
-    store = get_store()
-    try:
-        session = store.verify_web_session(hermes_session)
-    except InvalidCredentialsError as exc:
-        raise HTTPException(status_code=401, detail="unauthorized") from exc
-
-    user = store.get_user(session["user_id"])
-    if not user:
-        raise HTTPException(status_code=401, detail="unauthorized")
+    _store, user = _require_session_user(hermes_session)
     return user
+
+
+@router.patch("/me")
+def patch_me(
+    body: ProfilePatchBody,
+    hermes_session: Optional[str] = Cookie(default=None, alias="hermes_session"),
+) -> dict[str, Any]:
+    store, user = _require_session_user(hermes_session)
+    try:
+        return store.update_profile(
+            user["user_id"],
+            nickname=body.nickname,
+            email=str(body.email) if body.email is not None else None,
+            avatar_url=body.avatar_url,
+            clear_avatar=body.clear_avatar,
+        )
+    except UserStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordBody,
+    hermes_session: Optional[str] = Cookie(default=None, alias="hermes_session"),
+) -> dict[str, str]:
+    store, user = _require_session_user(hermes_session)
+    try:
+        store.change_password(
+            user["user_id"],
+            body.current_password,
+            body.new_password,
+        )
+    except InvalidCredentialsError as exc:
+        raise HTTPException(status_code=401, detail="invalid credentials") from exc
+    except UserStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok"}

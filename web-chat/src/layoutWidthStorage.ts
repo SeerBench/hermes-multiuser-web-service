@@ -1,5 +1,7 @@
 /**
  * Content column width: density (reading/wide) + optional full-bleed preference.
+ * Visual sizing is in CSS (`.content-column`) — not Tailwind — so flex parents
+ * cannot stretch the column past 960px / erase centering.
  */
 
 export type LayoutDensity = 'reading' | 'wide'
@@ -53,10 +55,13 @@ export function toggleExpanded(
   return current === 'full' ? density : 'full'
 }
 
-/** Tailwind classes for the content column. */
+/**
+ * Class names for the content column.
+ * Default → `.content-column` (960px / 98%, centered).
+ * Full → `.content-column--full` (bleed into chat / workspace area).
+ */
 export function widthClass(width: LayoutWidth | 'lg'): string {
   const w = width === 'lg' ? 'reading' : width
-  if (w === 'full') return 'w-full max-w-none'
-  if (w === 'wide') return 'mx-auto w-full max-w-7xl'
-  return 'mx-auto w-full max-w-screen-xl'
+  if (w === 'full') return 'content-column content-column--full'
+  return 'content-column'
 }

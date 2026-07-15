@@ -3,6 +3,8 @@
 export type PlatformUser = {
   user_id: string
   email?: string
+  nickname?: string | null
+  avatar_url?: string | null
   role?: string
   status?: string
   upstream_status?: string
@@ -53,11 +55,13 @@ export type FileTag = {
 export type WorkspaceModels = {
   models: { id: string; owned_by?: string }[]
   preferred_model?: string | null
+  favorite_models?: string[]
   default_model?: string
 }
 
 export type WorkspacePreferences = {
   preferred_model?: string | null
+  favorite_models?: string[]
   default_model?: string
 }
 
@@ -160,6 +164,23 @@ export const platform = {
     platformRequest<{ status: string }>('/auth/logout', { method: 'POST' }),
 
   me: () => platformRequest<PlatformUser>('/auth/me'),
+
+  patchMe: (patch: {
+    nickname?: string
+    email?: string
+    avatar_url?: string
+    clear_avatar?: boolean
+  }) =>
+    platformRequest<PlatformUser>('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  changePassword: (current_password: string, new_password: string) =>
+    platformRequest<{ status: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password }),
+    }),
 
   bindKey: (api_key: string) =>
     platformRequest<AuthResponse>('/auth/bind-key', {
@@ -299,7 +320,10 @@ export const platform = {
   getPreferences: (workspaceId: string) =>
     platformRequest<WorkspacePreferences>(`/workspaces/${workspaceId}/preferences`),
 
-  patchPreferences: (workspaceId: string, patch: { preferred_model?: string }) =>
+  patchPreferences: (
+    workspaceId: string,
+    patch: { preferred_model?: string; favorite_models?: string[] },
+  ) =>
     platformRequest<WorkspacePreferences>(`/workspaces/${workspaceId}/preferences`, {
       method: 'PATCH',
       body: JSON.stringify(patch),

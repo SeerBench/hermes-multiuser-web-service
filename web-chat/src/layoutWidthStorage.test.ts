@@ -37,10 +37,10 @@ describe('layoutWidthStorage', () => {
     expect(getPanelWidth('wide')).toBe('wide')
   })
 
-  it('maps width classes for reading / wide / full', () => {
-    expect(widthClass('reading')).toContain('max-w-screen-xl')
-    expect(widthClass('wide')).toContain('max-w-7xl')
-    expect(widthClass('full')).toContain('max-w-none')
+  it('maps width classes to content-column / full bleed', () => {
+    expect(widthClass('reading')).toBe('content-column')
+    expect(widthClass('wide')).toBe('content-column')
+    expect(widthClass('full')).toBe('content-column content-column--full')
   })
 
   it('toggles expanded vs density standard', () => {

@@ -28,7 +28,7 @@ export function PageShell({
   children: ReactNode
   className?: string
   constrainWidth?: boolean
-  /** reading = xl; wide = 7xl (files/skills). */
+  /** reading / wide share the 960px column; full bleeds. */
   density?: LayoutDensity
 }) {
   const t = useT()

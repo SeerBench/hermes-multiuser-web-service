@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react'
 import { useEffect } from 'react'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import { useT } from '../i18n'
+import { widthClass } from '../layoutWidthStorage'
 import {
   routeHref,
   setLastWorkspaceTab,
   type WorkspaceTab,
 } from '../routing'
 
-/** Sub-nav for Files / Memory / Skills under the Workspace primary tab. */
+/** Sub-nav: Files → Skills → Memory, centered 960 / 98% column. */
 export function WorkspaceShell({
   active,
   children,
@@ -23,7 +25,7 @@ export function WorkspaceShell({
   }, [active])
 
   return (
-    <div className="workspace-shell">
+    <div className={cn('workspace-shell', widthClass('reading'))}>
       <Tabs
         value={active}
         onValueChange={(v) => {
@@ -33,8 +35,8 @@ export function WorkspaceShell({
       >
         <TabsList className="bg-muted/80">
           <TabsTrigger value="files">{t('nav.files')}</TabsTrigger>
-          <TabsTrigger value="memory">{t('nav.memory')}</TabsTrigger>
           <TabsTrigger value="skills">{t('nav.skills')}</TabsTrigger>
+          <TabsTrigger value="memory">{t('nav.memory')}</TabsTrigger>
         </TabsList>
       </Tabs>
       <div className="workspace-shell-body">{children}</div>

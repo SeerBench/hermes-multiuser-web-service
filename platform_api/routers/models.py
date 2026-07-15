@@ -19,6 +19,22 @@ router = APIRouter(prefix="/workspaces", tags=["models"])
 
 class PreferencesPatch(BaseModel):
     preferred_model: Optional[str] = Field(default=None, max_length=256)
+    favorite_models: Optional[list[str]] = None
+
+
+def _normalize_favorites(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        mid = item.strip()
+        if mid and mid not in out:
+            out.append(mid[:256])
+        if len(out) >= 64:
+            break
+    return out
 
 
 @router.get("/{workspace_id}/models")
@@ -71,6 +87,7 @@ def list_models(
     return {
         "models": sorted(out, key=lambda x: x["id"]),
         "preferred_model": prefs.get("preferred_model"),
+        "favorite_models": _normalize_favorites(prefs.get("favorite_models")),
         "default_model": _gateway_default_model(),
     }
 
@@ -84,6 +101,7 @@ def get_preferences(
     prefs = _read_preferences(ws)
     return {
         "preferred_model": prefs.get("preferred_model"),
+        "favorite_models": _normalize_favorites(prefs.get("favorite_models")),
         "default_model": _gateway_default_model(),
     }
 
@@ -105,14 +123,21 @@ def patch_preferences(
         prefs = dict(row.settings_json or {})
         if body.preferred_model is not None:
             prefs["preferred_model"] = body.preferred_model.strip() or None
+        if body.favorite_models is not None:
+            prefs["favorite_models"] = _normalize_favorites(body.favorite_models)
+            # Keep preferred in the favorites set when possible.
+            pref = prefs.get("preferred_model")
+            favs = prefs["favorite_models"]
+            if pref and favs and pref not in favs:
+                prefs["preferred_model"] = favs[0]
         row.settings_json = prefs
         db.add(row)
 
     return {
         "preferred_model": prefs.get("preferred_model"),
+        "favorite_models": _normalize_favorites(prefs.get("favorite_models")),
         "default_model": _gateway_default_model(),
     }
-
 
 def resolve_workspace_model(workspace_id: str, user_id: str) -> Optional[str]:
     """Return persisted preferred_model for a workspace, if any."""

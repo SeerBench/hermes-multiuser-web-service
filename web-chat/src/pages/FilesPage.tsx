@@ -228,7 +228,12 @@ export function FilesPage() {
   }
 
   return (
-    <PageShell title={t('nav.files')} hint={t('files.hint')} density="wide">
+    <PageShell
+      title={t('nav.files')}
+      hint={t('files.hint')}
+      density="reading"
+      constrainWidth={false}
+    >
       <div className="files-layout">
         <aside className="files-sidebar">
           <h3>{t('files.categories')}</h3>

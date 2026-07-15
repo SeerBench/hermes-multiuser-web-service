@@ -22,7 +22,8 @@ const ROUTES: Route[] = [
   'chat',
 ]
 
-const WORKSPACE_TABS: WorkspaceTab[] = ['files', 'memory', 'skills']
+/** Display / entry order: Files → Skills → Memory. */
+const WORKSPACE_TABS: WorkspaceTab[] = ['files', 'skills', 'memory']
 const LAST_WS_KEY = 'hermes_last_workspace_tab'
 
 /** Parse ``#/chat``-style hash into a canonical route name. */

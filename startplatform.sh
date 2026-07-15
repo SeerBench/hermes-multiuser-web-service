@@ -19,8 +19,9 @@
 # For Legacy key-only chat (no platform-api), use ./startweb.sh instead.
 #
 # Usage:
-#   ./startplatform.sh                     # SQLite control plane + gateway
+#   ./startplatform.sh                     # SQLite control plane + gateway (localhost)
 #   ./startplatform.sh --postgres          # docker compose postgres first
+#   ./startplatform.sh --host 0.0.0.0      # LAN: other devices open http://<your-ip>:8643
 #   ./startplatform.sh --host 127.0.0.1    # localhost-only gateway bind
 #   ./startplatform.sh --no-rebuild        # skip SPA build check
 #   ./startplatform.sh --help
@@ -313,7 +314,7 @@ if [[ -f "$ENV_FILE" ]] && ! grep -qE '^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHR
 fi
 
 warn "first-time admin: python scripts/create_admin.py --email admin@example.com --password 'changeme123'"
-warn "frontend hot reload: cd web-chat && npm run dev  →  http://127.0.0.1:5173"
+warn "frontend hot reload: cd web-chat && npm run dev -- --host 0.0.0.0  →  http://<lan-ip>:5173"
 
 GATEWAY_URL="http://${HEALTH_HOST}:${PORT}/"
 PLATFORM_URL="http://127.0.0.1:${PLATFORM_PORT}/"
@@ -323,6 +324,29 @@ printf '%s  SPA / Gateway:%s  %s\n' "$C_DIM" "$C_RESET" "$GATEWAY_URL"
 printf '%s  Platform API:%s   %s (api/v1)\n' "$C_DIM" "$C_RESET" "$PLATFORM_URL"
 printf '%s  /api/v1 proxy:%s  gateway → %s\n' "$C_DIM" "$C_RESET" "${PLATFORM_API_URL}"
 printf '%s  Open SPA:%s       %s  (register / login)\n' "$C_DIM" "$C_RESET" "$GATEWAY_URL"
+if [[ "$HOST" == "0.0.0.0" || "$HOST" == "::" ]]; then
+    printf '%s  LAN access:%s     use ANY of the URLs below from phones / other PCs\n' "$C_DIM" "$C_RESET"
+    _lan_printed=0
+    if command -v ipconfig >/dev/null 2>&1; then
+        # macOS: prefer en0 / en1 IPv4
+        while IFS= read -r _ip; do
+            [[ -z "$_ip" ]] && continue
+            printf '%s                     %shttp://%s:%s/%s\n' "$C_DIM" "$C_GREEN" "$_ip" "$PORT" "$C_RESET"
+            _lan_printed=1
+        done < <(ipconfig getifaddr en0 2>/dev/null; ipconfig getifaddr en1 2>/dev/null)
+    fi
+    if [[ "$_lan_printed" -eq 0 ]] && command -v hostname >/dev/null 2>&1; then
+        while IFS= read -r _ip; do
+            [[ -z "$_ip" || "$_ip" == "127.0.0.1" ]] && continue
+            printf '%s                     %shttp://%s:%s/%s\n' "$C_DIM" "$C_GREEN" "$_ip" "$PORT" "$C_RESET"
+            _lan_printed=1
+        done < <(hostname -I 2>/dev/null | tr ' ' '\n')
+    fi
+    if [[ "$_lan_printed" -eq 0 ]]; then
+        printf '%s                     %s(http://<this-machine-lan-ip>:%s/)%s\n' "$C_DIM" "$C_YELLOW" "$PORT" "$C_RESET"
+    fi
+    warn "ensure macOS Firewall / router allow inbound TCP $PORT (and same Wi‑Fi/VLAN)"
+fi
 printf '%s  platform log:%s   tail -f %s\n' "$C_DIM" "$C_RESET" "$PLATFORM_LOG"
 printf '%sCtrl+C stops gateway + platform-api.%s\n\n' "$C_DIM" "$C_RESET"
 printf '%s%s%s\n' "$C_BOLD" "════════════════════════════════════════════════════════════════" "$C_RESET"

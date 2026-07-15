@@ -73,6 +73,14 @@ def migrate_schema(engine: Engine) -> None:
             if "settings_json" not in cols:
                 conn.execute(text("ALTER TABLE workspaces ADD COLUMN settings_json TEXT"))
 
+    if "users" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("users")}
+        with engine.begin() as conn:
+            if "nickname" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(64)"))
+            if "avatar_url" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN avatar_url TEXT"))
+
 
 @contextmanager
 def session_scope(engine: Engine) -> Generator[Session, None, None]:

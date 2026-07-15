@@ -170,24 +170,27 @@ function AppShell() {
       <SkillsPage key={`skills-${pageKey}`} />
     ) : null
 
+  // 登录门禁 / 加载中不渲染工作台顶栏（仅已登录用户可见）
+  const showChrome = Boolean(user) && !showAuthGate && !authLoading
+
   return (
     <div className={cn('app', route === 'settings' && 'app--settings-open')}>
-      <header className="app-header">
-        <div className="app-brand">
-          <button
-            type="button"
-            className="app-brand-link"
-            title={t('nav.home')}
-            aria-label={t('nav.home')}
-            onClick={() => goto('chat')}
-          >
-            <BrandLogo size={28} />
-            <h1 className="app-title">{t('app.title')}</h1>
-          </button>
-        </div>
+      {showChrome && user && (
+        <header className="app-header">
+          <div className="app-brand">
+            <button
+              type="button"
+              className="app-brand-link"
+              title={t('nav.home')}
+              aria-label={t('nav.home')}
+              onClick={() => goto('chat')}
+            >
+              <BrandLogo size={28} />
+              <h1 className="app-title">{t('app.title')}</h1>
+            </button>
+          </div>
 
-        <div className="app-nav-center">
-          {user && (
+          <div className="app-nav-center">
             <Tabs
               value={activeTab}
               onValueChange={(v) => onMainTab(v as MainTab)}
@@ -200,29 +203,27 @@ function AppShell() {
                 )}
               </TabsList>
             </Tabs>
-          )}
-        </div>
+          </div>
 
-        <div className="app-nav-actions">
-          {user?.role === 'admin' && (
-            <Button
-              type="button"
-              variant={route === 'admin' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => goto('admin')}
-            >
-              {t('nav.admin')}
-            </Button>
-          )}
-          {user && (
+          <div className="app-nav-actions">
+            {user.role === 'admin' && (
+              <Button
+                type="button"
+                variant={route === 'admin' ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => goto('admin')}
+              >
+                {t('nav.admin')}
+              </Button>
+            )}
             <AccountMenu
               email={user.email}
               onOpenSettings={() => goto('settings')}
               onLogout={() => void handleLoggedOut()}
             />
-          )}
-        </div>
-      </header>
+          </div>
+        </header>
+      )}
       {needsBindKey && (
         <PendingBindBanner onGoSettings={() => goto('settings')} />
       )}

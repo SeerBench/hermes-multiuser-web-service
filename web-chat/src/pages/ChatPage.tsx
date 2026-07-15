@@ -48,6 +48,10 @@ import {
 } from '../layoutWidthStorage'
 import { consumeFilesForChat } from '../attachBridge'
 import { ChatEmptyGuide } from '../components/ChatEmptyGuide'
+import {
+  filterModelsByFavorites,
+  PREFERENCES_UPDATED_EVENT,
+} from '../modelFavorites'
 import { routeHref } from '../routing'
 import { useLocale, useT } from '../i18n'
 import type { Locale } from '../i18n'
@@ -87,6 +91,7 @@ export function ChatPage({
   const [sideOpen, setSideOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState('')
   const [models, setModels] = useState<{ id: string; owned_by?: string }[]>([])
+  const [favoriteModels, setFavoriteModels] = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [enabledSkillsCount, setEnabledSkillsCount] = useState(0)
   const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
@@ -151,31 +156,52 @@ export function ChatPage({
     }
   }, [signedIn])
 
-  // Platform: load models + skill count for composer chrome.
-  useEffect(() => {
+  const reloadModels = useCallback(() => {
     if (!platformMode || !workspaceId) return
     setModelsLoading(true)
     void platform
       .listModels(workspaceId)
       .then((res) => {
-        setModels(res.models ?? [])
+        const catalog = res.models ?? []
+        const favorites = res.favorite_models ?? []
+        setModels(catalog)
+        setFavoriteModels(favorites)
+        const picker = filterModelsByFavorites(catalog, favorites)
         const pref =
           res.preferred_model?.trim() ||
           res.default_model?.trim() ||
-          res.models[0]?.id ||
+          picker[0]?.id ||
+          catalog[0]?.id ||
           ''
         setSelectedModel(pref)
       })
       .catch(() => undefined)
       .finally(() => setModelsLoading(false))
+  }, [platformMode, workspaceId])
 
+  // Platform: load models + skill count for composer chrome.
+  useEffect(() => {
+    if (!platformMode || !workspaceId) return
+    reloadModels()
     void platform
       .listSkills(workspaceId)
       .then((rows) =>
         setEnabledSkillsCount(rows.filter((s) => s.enabled !== false).length),
       )
       .catch(() => undefined)
-  }, [platformMode, workspaceId])
+  }, [platformMode, workspaceId, reloadModels])
+
+  // Settings dialog may update favorite_models while chat stays mounted.
+  useEffect(() => {
+    const onPrefs = () => reloadModels()
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, onPrefs)
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, onPrefs)
+  }, [reloadModels])
+
+  const pickerModels = useMemo(
+    () => filterModelsByFavorites(models, favoriteModels, selectedModel),
+    [models, favoriteModels, selectedModel],
+  )
 
   // Files page → chat bridge (sessionStorage, consumed once on mount).
   useEffect(() => {
@@ -1011,10 +1037,11 @@ export function ChatPage({
             onSlashClose={() => setInput('')}
             platformMode={platformMode}
             workspaceId={workspaceId}
-            models={models}
+            models={pickerModels}
             selectedModel={selectedModel}
             onModelChange={handleModelChange}
             modelsLoading={modelsLoading}
+            usingFavorites={favoriteModels.length > 0}
             enabledSkillsCount={enabledSkillsCount}
             onNavigate={(route) => {
               window.location.hash = `#/${route}`

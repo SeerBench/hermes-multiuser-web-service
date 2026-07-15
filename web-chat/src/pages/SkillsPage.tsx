@@ -190,7 +190,8 @@ export function SkillsPage() {
     <PageShell
       title={t('nav.skills')}
       hint={t('skills.hint')}
-      density="wide"
+      density="reading"
+      constrainWidth={false}
       actions={
         <Button type="button" onClick={() => setCreateOpen(true)}>
           {t('skills.create')}

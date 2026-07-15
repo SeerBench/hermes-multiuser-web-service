@@ -59,7 +59,9 @@ type ChatComposerProps = {
   selectedModel: string
   onModelChange: (model: string) => void
   modelsLoading?: boolean
-  onNavigate?: (route: 'memory' | 'skills' | 'files') => void
+  /** When true, `models` is already filtered to the user's favorites. */
+  usingFavorites?: boolean
+  onNavigate?: (route: 'memory' | 'skills' | 'files' | 'settings') => void
   enabledSkillsCount?: number
 }
 
@@ -94,6 +96,7 @@ export function ChatComposer({
   selectedModel,
   onModelChange,
   modelsLoading,
+  usingFavorites = false,
   onNavigate,
   enabledSkillsCount = 0,
 }: ChatComposerProps) {
@@ -200,12 +203,15 @@ export function ChatComposer({
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
-              className="composer-model-btn"
+              size="sm"
+              className="composer-model-btn max-w-[11rem] gap-1.5 px-2"
               title={selectedModel || t('composer.model.pick')}
               onClick={() => setModelOpen(true)}
             >
-              <Sparkles className="size-4" />
+              <Sparkles className="size-4 shrink-0" />
+              <span className="truncate text-xs font-normal">
+                {selectedModel || t('composer.model.pick')}
+              </span>
             </Button>
             {mobile ? (
               <Button
@@ -285,6 +291,21 @@ export function ChatComposer({
           <DialogHeader>
             <DialogTitle>{t('composer.model.title')}</DialogTitle>
           </DialogHeader>
+          {usingFavorites && (
+            <p className="page-hint">
+              {t('composer.model.favoritesHint')}{' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  setModelOpen(false)
+                  onNavigate?.('settings')
+                }}
+              >
+                {t('composer.model.favoritesEdit')}
+              </button>
+            </p>
+          )}
           <Input
             placeholder={t('composer.model.search')}
             value={modelFilter}

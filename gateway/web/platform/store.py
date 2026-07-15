@@ -385,6 +385,65 @@ class PlatformStore:
             user.last_seen_at = datetime.now(timezone.utc)
             return self._user_to_dict(user)
 
+    def update_profile(
+        self,
+        user_id: str,
+        *,
+        nickname: Optional[str] = None,
+        email: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+        clear_avatar: bool = False,
+    ) -> Dict[str, Any]:
+        """Update account profile fields. ``None`` means leave unchanged."""
+        with session_scope(self._engine) as db:
+            user = db.get(User, user_id)
+            if not user or user.disabled:
+                raise UserStoreError("unknown user")
+
+            if nickname is not None:
+                nick = nickname.strip()
+                user.nickname = nick[:64] if nick else None
+
+            if email is not None:
+                next_email = email.strip().lower()
+                if not next_email:
+                    raise UserStoreError("email required")
+                if next_email != user.email:
+                    clash = db.execute(
+                        select(User).where(User.email == next_email)
+                    ).scalars().first()
+                    if clash and clash.id != user_id:
+                        raise UserStoreError("email already registered")
+                    user.email = next_email
+
+            if clear_avatar:
+                user.avatar_url = None
+            elif avatar_url is not None:
+                url = avatar_url.strip()
+                if len(url) > 350_000:
+                    raise UserStoreError("avatar too large")
+                user.avatar_url = url or None
+
+            user.last_seen_at = datetime.now(timezone.utc)
+            return self._user_to_dict(user)
+
+    def change_password(
+        self,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+    ) -> None:
+        if len(new_password) < 8:
+            raise UserStoreError("password too short")
+        with session_scope(self._engine) as db:
+            user = db.get(User, user_id)
+            if not user or user.disabled:
+                raise InvalidCredentialsError("invalid credentials")
+            if not verify_password(user.password_hash, current_password):
+                raise InvalidCredentialsError("invalid credentials")
+            user.password_hash = hash_password(new_password)
+            user.last_seen_at = datetime.now(timezone.utc)
+
     def get_user_upstream_key_enc(self, user_id: str) -> Optional[str]:
         with self._session_factory() as db:
             user = db.get(User, user_id)
@@ -502,6 +561,8 @@ class PlatformStore:
             "user_id": user.id,
             "id": user.id,
             "email": user.email,
+            "nickname": getattr(user, "nickname", None),
+            "avatar_url": getattr(user, "avatar_url", None),
             "role": user.role,
             "status": user.status,
             "disabled": user.disabled,

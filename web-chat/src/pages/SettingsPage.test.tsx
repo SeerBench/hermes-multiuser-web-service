@@ -22,11 +22,16 @@ vi.mock('../platformClient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../platformClient')>()
   return {
     ...actual,
+    getStoredWorkspaceId: () => 'ws-1',
     platform: {
       ...actual.platform,
       me: vi.fn(),
       logout: vi.fn(),
       bindKey: vi.fn(),
+      listModels: vi.fn(),
+      patchPreferences: vi.fn(),
+      patchMe: vi.fn(),
+      changePassword: vi.fn(),
     },
   }
 })
@@ -37,17 +42,29 @@ import { applyTheme, getStoredTheme } from '../themeStorage'
 describe('SettingsPage', () => {
   beforeEach(() => {
     localStorage.clear()
+    localStorage.setItem('hermes-locale', 'en')
     document.documentElement.classList.remove('light', 'dark')
     vi.mocked(platform.me).mockResolvedValue({
       user_id: 'u1',
       email: 'a@b.com',
+      nickname: 'Ada',
       upstream_status: 'ready',
       created_at: 1,
       last_seen_at: 1,
     })
+    vi.mocked(platform.listModels).mockResolvedValue({
+      models: [
+        { id: 'gpt-mini' },
+        { id: 'gpt-pro' },
+        { id: 'other' },
+      ],
+      favorite_models: ['gpt-mini'],
+      preferred_model: 'gpt-mini',
+      default_model: 'gpt-mini',
+    })
   })
 
-  it('opens as a dialog and switches theme to light', async () => {
+  it('opens as a wide settings dialog with tabs and switches theme', async () => {
     const user = userEvent.setup()
     render(
       <LocaleProvider>
@@ -60,12 +77,42 @@ describe('SettingsPage', () => {
       </LocaleProvider>,
     )
 
-    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+    expect(dialog.className).toMatch(/sm:max-w-3xl/)
     expect(await screen.findByText(/a@b.com/)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /general/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /account/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /models/i })).toBeInTheDocument()
 
     await user.click(screen.getByRole('radio', { name: /light/i }))
     expect(getStoredTheme()).toBe('light')
     expect(document.documentElement.classList.contains('light')).toBe(true)
     applyTheme('system')
+  })
+
+  it('shows account edit fields and model favorites checklist', async () => {
+    const user = userEvent.setup()
+    render(
+      <LocaleProvider>
+        <SettingsPage
+          open
+          onOpenChange={vi.fn()}
+          platformMode
+          onLoggedOut={vi.fn()}
+        />
+      </LocaleProvider>,
+    )
+
+    await screen.findByText(/a@b.com/)
+    await user.click(screen.getByRole('tab', { name: /account/i }))
+    expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/current password/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: /models/i }))
+    expect(await screen.findAllByText('gpt-mini')).not.toHaveLength(0)
+    expect(screen.getByText('gpt-pro')).toBeInTheDocument()
+    expect(screen.getByText('other')).toBeInTheDocument()
   })
 })

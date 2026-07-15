@@ -66,6 +66,7 @@ export function MemoryPage() {
       title={t('nav.memory')}
       hint={t('memory.intro')}
       density="reading"
+      constrainWidth={false}
       actions={
         <Button type="button" disabled={busy || !dirty} onClick={() => void save()}>
           {t('memory.save')}
