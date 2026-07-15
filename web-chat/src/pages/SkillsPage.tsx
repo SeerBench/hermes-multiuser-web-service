@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { useT } from '../i18n'
@@ -77,8 +78,12 @@ export function SkillsPage() {
   const toggle = async (name: string, enabled: boolean) => {
     if (!workspaceId) return
     try {
-      await platform.patchSkill(workspaceId, name, { enabled: !enabled })
+      const next = !enabled
+      await platform.patchSkill(workspaceId, name, { enabled: next })
       await reload()
+      toast.success(
+        next ? t('skills.toast.enabled') : t('skills.toast.disabled'),
+      )
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
     }
@@ -185,6 +190,7 @@ export function SkillsPage() {
     <PageShell
       title={t('nav.skills')}
       hint={t('skills.hint')}
+      density="wide"
       actions={
         <Button type="button" onClick={() => setCreateOpen(true)}>
           {t('skills.create')}
@@ -287,7 +293,7 @@ export function SkillsPage() {
           </DialogHeader>
           {selected && !detailBusy && (
             <>
-              <ScrollArea className="max-h-[min(55vh,480px)] flex-1 px-6 py-4">
+              <ScrollArea className="overlay-scrollbar max-h-[min(55vh,480px)] flex-1 px-6 py-4">
                 {selected.description && !editing && (
                   <p className="text-muted-foreground mb-3 text-sm">
                     {selected.description}

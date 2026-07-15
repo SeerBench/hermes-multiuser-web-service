@@ -1932,12 +1932,140 @@ code {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-block: 4px;
+  background: color-mix(in srgb, var(--bg, var(--background)) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.page-shell-header--start {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 16px;
+}
+
+.page-shell-header--start .page-shell-heading {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.page-shell-header--start .page-shell-actions {
+  margin-left: 0;
+  margin-right: auto;
 }
 
 .page-shell-title {
   margin: 0;
   font-size: 1.25rem;
   font-weight: 600;
+}
+
+.workspace-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px 24px;
+}
+
+.workspace-shell-body {
+  min-height: 0;
+  flex: 1;
+}
+
+.app-page--dimmed {
+  pointer-events: none;
+  user-select: none;
+  filter: saturate(0.85) brightness(0.72);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.chat-empty-guide {
+  margin: 40px auto 24px;
+  max-width: 36rem;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.chat-empty-guide-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.chat-empty-guide-sub,
+.chat-empty-guide-label,
+.chat-empty-guide-meta {
+  margin: 0;
+  color: var(--fg-dim, var(--muted-foreground));
+  font-size: 0.9rem;
+}
+
+.chat-empty-guide-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-empty-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-empty-guide-alert {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--destructive, #ff7a82) 40%, var(--border));
+  background: color-mix(in srgb, var(--destructive, #ff7a82) 12%, transparent);
+  color: inherit;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.conversation-header-skills {
+  font-size: 12px;
+  color: var(--fg-dim, var(--muted-foreground));
+  white-space: nowrap;
+  margin-inline-end: 4px;
+}
+
+/* Shared overlay scrollbar (hide until hover/scroll). */
+.overlay-scrollbar {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.overlay-scrollbar:hover,
+.overlay-scrollbar.overlay-scrollbar--scrolling,
+.chat-transcript.chat-transcript--scrolling {
+  scrollbar-color: color-mix(in srgb, var(--fg-faint, #9097a6) 55%, transparent)
+    transparent;
+}
+
+.overlay-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overlay-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.overlay-scrollbar:hover::-webkit-scrollbar-thumb,
+.overlay-scrollbar.overlay-scrollbar--scrolling::-webkit-scrollbar-thumb,
+.chat-transcript.chat-transcript--scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-faint, #9097a6) 55%, transparent);
 }
 
 .split-pane--columns {

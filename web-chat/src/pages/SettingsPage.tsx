@@ -140,6 +140,7 @@ export function SettingsPage({
       <DialogContent
         className="flex max-h-[min(90vh,720px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
         showCloseButton
+        overlayClassName="bg-black/70 backdrop-blur-[2px]"
       >
         <DialogHeader className="border-b border-border px-6 py-4 text-left">
           <DialogTitle>{t('settings.dialog.title')}</DialogTitle>

@@ -4,6 +4,7 @@ import {
   getPanelWidth,
   setChatWidth,
   setPanelWidth,
+  toggleExpanded,
   widthClass,
 } from './layoutWidthStorage'
 
@@ -12,20 +13,39 @@ describe('layoutWidthStorage', () => {
     localStorage.clear()
   })
 
-  it('defaults panel and chat to lg', () => {
-    expect(getPanelWidth()).toBe('lg')
-    expect(getChatWidth()).toBe('lg')
+  it('defaults chat to reading and panel to density when unset', () => {
+    expect(getChatWidth()).toBe('reading')
+    expect(getPanelWidth('wide')).toBe('wide')
+    expect(getPanelWidth('reading')).toBe('reading')
+  })
+
+  it('treats legacy lg as not expanded (density applies)', () => {
+    localStorage.setItem('hermes_chat_width', 'lg')
+    expect(getChatWidth()).toBe('reading')
   })
 
   it('persists full width preference', () => {
     setPanelWidth('full')
     setChatWidth('full')
-    expect(getPanelWidth()).toBe('full')
+    expect(getPanelWidth('wide')).toBe('full')
     expect(getChatWidth()).toBe('full')
   })
 
-  it('maps width to max-w-screen-lg vs unconstrained', () => {
-    expect(widthClass('lg')).toContain('max-w-screen-lg')
+  it('clears expansion when set back to density', () => {
+    setPanelWidth('full')
+    setPanelWidth('wide')
+    expect(getPanelWidth('wide')).toBe('wide')
+  })
+
+  it('maps width classes for reading / wide / full', () => {
+    expect(widthClass('reading')).toContain('max-w-screen-xl')
+    expect(widthClass('wide')).toContain('max-w-7xl')
     expect(widthClass('full')).toContain('max-w-none')
+  })
+
+  it('toggles expanded vs density standard', () => {
+    expect(toggleExpanded('wide', 'wide')).toBe('full')
+    expect(toggleExpanded('wide', 'full')).toBe('wide')
+    expect(toggleExpanded('reading', 'full')).toBe('reading')
   })
 })

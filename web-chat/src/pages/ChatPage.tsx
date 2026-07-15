@@ -42,9 +42,13 @@ import { provisionalTitleFromMessage } from '../conversationTitle'
 import {
   getChatWidth,
   setChatWidth,
+  toggleExpanded,
   widthClass,
   type LayoutWidth,
 } from '../layoutWidthStorage'
+import { consumeFilesForChat } from '../attachBridge'
+import { ChatEmptyGuide } from '../components/ChatEmptyGuide'
+import { routeHref } from '../routing'
 import { useLocale, useT } from '../i18n'
 import type { Locale } from '../i18n'
 import { cn } from '@/lib/utils'
@@ -173,6 +177,22 @@ export function ChatPage({
       .catch(() => undefined)
   }, [platformMode, workspaceId])
 
+  // Files page → chat bridge (sessionStorage, consumed once on mount).
+  useEffect(() => {
+    const bridged = consumeFilesForChat()
+    if (bridged.length === 0) return
+    setPending((prev) => [
+      ...prev,
+      ...bridged.map((f) => ({
+        id: newTurnId(),
+        name: f.name,
+        size: f.size,
+        path: f.path,
+        status: 'done' as const,
+      })),
+    ])
+  }, [])
+
   const handleModelChange = useCallback(
     async (model: string) => {
       setSelectedModel(model)
@@ -279,7 +299,7 @@ export function ChatPage({
 
   const toggleChatWidth = useCallback(() => {
     setChatWidthState((prev) => {
-      const next: LayoutWidth = prev === 'lg' ? 'full' : 'lg'
+      const next = toggleExpanded('reading', prev)
       setChatWidth(next)
       return next
     })
@@ -899,25 +919,34 @@ export function ChatPage({
             {historyBanner}
           </div>
         )}
-        {/* Header + transcript + composer share one centered lg/full column */}
+        {/* Header + transcript + composer share one centered reading/full column */}
         <div className={cn('chat-column', widthClass(chatWidth))}>
-          {turns.length > 0 && sessionId && (
-            <ConversationHeader
-              title={
-                activeConvo?.title?.trim() ||
-                t('convo.untitled')
-              }
-              pinned={Boolean(activeConvo?.pinned)}
-              chatWidth={chatWidth}
-              onRename={(title) => void handleRename(sessionId, title)}
-              onTogglePin={() =>
-                void handleSetFlags(sessionId, {
-                  pinned: !activeConvo?.pinned,
-                })
-              }
-              onToggleChatWidth={toggleChatWidth}
-            />
-          )}
+          {(turns.length > 0 && sessionId) || enabledSkillsCount > 0 ? (
+            turns.length > 0 && sessionId ? (
+              <ConversationHeader
+                title={
+                  activeConvo?.title?.trim() ||
+                  t('convo.untitled')
+                }
+                pinned={Boolean(activeConvo?.pinned)}
+                chatWidth={chatWidth}
+                skillsCount={enabledSkillsCount}
+                onRename={(title) => void handleRename(sessionId, title)}
+                onTogglePin={() =>
+                  void handleSetFlags(sessionId, {
+                    pinned: !activeConvo?.pinned,
+                  })
+                }
+                onToggleChatWidth={toggleChatWidth}
+              />
+            ) : (
+              <div className="conversation-header conversation-header--meta">
+                <span className="conversation-header-skills">
+                  {t('chat.skills.count', { count: enabledSkillsCount })}
+                </span>
+              </div>
+            )
+          ) : null}
           <div
             className={cn(
               'chat-transcript',
@@ -927,10 +956,20 @@ export function ChatPage({
             onScroll={onTranscriptScroll}
           >
             {turns.length === 0 ? (
-              <div className="chat-empty">
-                <h2>{t('chat.empty.title')}</h2>
-                <p>{t('chat.empty.subtitle')}</p>
-              </div>
+              <ChatEmptyGuide
+                platformMode={platformMode}
+                needsBindKey={needsBindKey}
+                hasModel={Boolean(selectedModel)}
+                enabledSkillsCount={enabledSkillsCount}
+                onPickSuggestion={setInput}
+                onGoFiles={() => {
+                  window.location.hash = routeHref('files')
+                }}
+                onGoSkills={() => {
+                  window.location.hash = routeHref('skills')
+                }}
+                onGoSettings={onGoBindSettings}
+              />
             ) : (
               turns.map((turn) => (
                 <ChatTurnBubble

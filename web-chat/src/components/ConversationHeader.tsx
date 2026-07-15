@@ -1,13 +1,5 @@
 import { useState } from 'react'
-import {
-  Check,
-  ChevronDown,
-  Maximize2,
-  Minimize2,
-  Pencil,
-  Pin,
-  PinOff,
-} from 'lucide-react'
+import { Check, ChevronDown, Pencil, Pin, PinOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,11 +12,12 @@ import { Input } from '@/components/ui/input'
 import { useT } from '../i18n'
 import type { LayoutWidth } from '../layoutWidthStorage'
 
-/** Session title bar + actions (rename / full width / pin). */
+/** Session title bar + actions (rename / widen / pin). */
 export function ConversationHeader({
   title,
   pinned,
   chatWidth,
+  skillsCount,
   onRename,
   onTogglePin,
   onToggleChatWidth,
@@ -32,6 +25,7 @@ export function ConversationHeader({
   title: string
   pinned: boolean
   chatWidth: LayoutWidth
+  skillsCount?: number
   onRename: (title: string) => void
   onTogglePin: () => void
   onToggleChatWidth: () => void
@@ -85,6 +79,11 @@ export function ConversationHeader({
             {pinned && <Pin className="size-3.5 shrink-0 opacity-70" aria-hidden />}
             <span className="truncate">{title}</span>
           </h2>
+          {typeof skillsCount === 'number' && skillsCount > 0 && (
+            <span className="conversation-header-skills">
+              {t('chat.skills.count', { count: skillsCount })}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -102,14 +101,9 @@ export function ConversationHeader({
                 {t('chat.title.edit')}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onToggleChatWidth}>
-                {chatWidth === 'lg' ? (
-                  <Maximize2 className="size-4" />
-                ) : (
-                  <Minimize2 className="size-4" />
-                )}
-                {chatWidth === 'lg'
-                  ? t('layout.width.full')
-                  : t('layout.width.lg')}
+                {chatWidth === 'full'
+                  ? t('layout.width.standard')
+                  : t('layout.width.expand')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onTogglePin}>

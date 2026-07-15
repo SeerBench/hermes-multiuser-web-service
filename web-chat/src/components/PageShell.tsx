@@ -1,17 +1,18 @@
 import type { ReactNode } from 'react'
-import { Maximize2, Minimize2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useT } from '../i18n'
 import {
   getPanelWidth,
   setPanelWidth,
+  toggleExpanded,
   widthClass,
+  type LayoutDensity,
   type LayoutWidth,
 } from '../layoutWidthStorage'
-import { useEffect, useState } from 'react'
 
-/** Panel wrapper: default max-w-screen-lg, optional full-bleed. */
+/** Panel wrapper: density-based column + optional full-bleed. */
 export function PageShell({
   title,
   hint,
@@ -19,23 +20,29 @@ export function PageShell({
   children,
   className,
   constrainWidth = true,
+  density = 'wide',
 }: {
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
   children: ReactNode
   className?: string
-  /** When true (default), apply lg/full width preference. */
   constrainWidth?: boolean
+  /** reading = xl; wide = 7xl (files/skills). */
+  density?: LayoutDensity
 }) {
   const t = useT()
-  const [width, setWidth] = useState<LayoutWidth>(() => getPanelWidth())
+  const [width, setWidth] = useState<LayoutWidth>(() => getPanelWidth(density))
+
+  useEffect(() => {
+    setWidth(getPanelWidth(density))
+  }, [density])
 
   useEffect(() => {
     setPanelWidth(width)
   }, [width])
 
-  const toggle = () => setWidth((w) => (w === 'lg' ? 'full' : 'lg'))
+  const toggle = () => setWidth((w) => toggleExpanded(density, w))
 
   return (
     <div
@@ -46,35 +53,23 @@ export function PageShell({
       )}
     >
       {(title || actions || constrainWidth) && (
-        <header className="page-shell-header">
+        <header className="page-shell-header page-shell-header--start">
           <div className="page-shell-heading">
             {title && <h2 className="page-shell-title">{title}</h2>}
             {hint && <p className="page-hint">{hint}</p>}
           </div>
-          <div className="page-shell-actions flex items-center gap-2">
+          <div className="page-shell-actions flex flex-wrap items-center gap-2">
             {actions}
             {constrainWidth && (
               <Button
                 type="button"
                 variant="outline"
-                size="icon-sm"
-                title={
-                  width === 'lg'
-                    ? t('layout.width.full')
-                    : t('layout.width.lg')
-                }
-                aria-label={
-                  width === 'lg'
-                    ? t('layout.width.full')
-                    : t('layout.width.lg')
-                }
+                size="sm"
                 onClick={toggle}
               >
-                {width === 'lg' ? (
-                  <Maximize2 className="size-4" />
-                ) : (
-                  <Minimize2 className="size-4" />
-                )}
+                {width === 'full'
+                  ? t('layout.width.standard')
+                  : t('layout.width.expand')}
               </Button>
             )}
           </div>

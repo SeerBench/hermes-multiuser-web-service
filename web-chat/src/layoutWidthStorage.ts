@@ -1,47 +1,62 @@
-/** Panel / chat content width preference (constrained vs full-bleed). */
+/**
+ * Content column width: density (reading/wide) + optional full-bleed preference.
+ */
 
-export type LayoutWidth = 'lg' | 'full'
+export type LayoutDensity = 'reading' | 'wide'
+export type LayoutWidth = 'reading' | 'wide' | 'full'
 
 const PANEL_KEY = 'hermes_panel_width'
 const CHAT_KEY = 'hermes_chat_width'
 
-function read(key: string, fallback: LayoutWidth): LayoutWidth {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw === 'lg' || raw === 'full') return raw
-  } catch {
-    // ignore
-  }
-  return fallback
+function isFull(raw: string | null): boolean {
+  return raw === 'full'
 }
 
-function write(key: string, value: LayoutWidth): void {
+function readExpanded(key: string): boolean {
   try {
-    localStorage.setItem(key, value)
+    return isFull(localStorage.getItem(key))
   } catch {
-    // ignore
+    return false
   }
 }
 
-export function getPanelWidth(): LayoutWidth {
-  return read(PANEL_KEY, 'lg')
+function writeExpanded(key: string, expanded: boolean): void {
+  try {
+    if (expanded) localStorage.setItem(key, 'full')
+    else localStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
+
+/** Effective panel width for a page density. */
+export function getPanelWidth(density: LayoutDensity = 'wide'): LayoutWidth {
+  return readExpanded(PANEL_KEY) ? 'full' : density
 }
 
 export function setPanelWidth(value: LayoutWidth): void {
-  write(PANEL_KEY, value)
+  writeExpanded(PANEL_KEY, value === 'full')
 }
 
 export function getChatWidth(): LayoutWidth {
-  return read(CHAT_KEY, 'lg')
+  return readExpanded(CHAT_KEY) ? 'full' : 'reading'
 }
 
 export function setChatWidth(value: LayoutWidth): void {
-  write(CHAT_KEY, value)
+  writeExpanded(CHAT_KEY, value === 'full')
 }
 
-/** Tailwind classes for the constrained content column. */
-export function widthClass(width: LayoutWidth): string {
-  return width === 'full'
-    ? 'w-full max-w-none'
-    : 'mx-auto w-full max-w-screen-lg'
+export function toggleExpanded(
+  density: LayoutDensity,
+  current: LayoutWidth,
+): LayoutWidth {
+  return current === 'full' ? density : 'full'
+}
+
+/** Tailwind classes for the content column. */
+export function widthClass(width: LayoutWidth | 'lg'): string {
+  const w = width === 'lg' ? 'reading' : width
+  if (w === 'full') return 'w-full max-w-none'
+  if (w === 'wide') return 'mx-auto w-full max-w-7xl'
+  return 'mx-auto w-full max-w-screen-xl'
 }

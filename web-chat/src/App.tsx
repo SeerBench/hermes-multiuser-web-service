@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Power } from 'lucide-react'
+import { Toaster } from 'sonner'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AuthPage } from './pages/AuthPage'
@@ -7,11 +7,12 @@ import { FilesPage } from './pages/FilesPage'
 import { MemoryPage } from './pages/MemoryPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { AdminPage } from './pages/AdminPage'
+import { AccountMenu } from './components/AccountMenu'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PendingBindBanner } from './components/PendingBindBanner'
 import { BrandLogo } from './components/BrandLogo'
+import { WorkspaceShell } from './components/WorkspaceShell'
 import { LocaleProvider, useT } from './i18n'
-import { LanguageToggle } from './components/LanguageToggle'
 import { auth } from './api'
 import {
   clearWorkspaceId,
@@ -19,7 +20,16 @@ import {
   tryPlatformSession,
   type PlatformUser,
 } from './platformClient'
-import { parseRoute, routeHref, type Route } from './routing'
+import {
+  isWorkspaceRoute,
+  mainTabFromRoute,
+  parseRoute,
+  routeHref,
+  workspaceEntryRoute,
+  type MainTab,
+  type Route,
+  type WorkspaceTab,
+} from './routing'
 import { subscribeViewport } from './lib/breakpoints'
 import {
   isOnboardingComplete,
@@ -28,24 +38,10 @@ import {
 } from './onboardingStorage'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 
 function goto(route: Route) {
   window.location.hash = routeHref(route)
-}
-
-/** Main nav tabs when signed in (center of header). */
-type MainTab = 'chat' | 'files' | 'memory' | 'skills' | 'settings'
-
-function tabFromRoute(route: Route): MainTab {
-  if (
-    route === 'files' ||
-    route === 'memory' ||
-    route === 'skills' ||
-    route === 'settings'
-  ) {
-    return route
-  }
-  return 'chat'
 }
 
 function AppShell() {
@@ -117,7 +113,6 @@ function AppShell() {
     document.title = t('app.title')
   }, [t])
 
-  // 未完成 onboarding 的 Platform 用户登录后弹出向导。
   useEffect(() => {
     if (platformMode && user && !isOnboardingComplete(user.user_id)) {
       setOnboardingOpen(true)
@@ -152,10 +147,31 @@ function AppShell() {
     Boolean(user) &&
     user?.upstream_status === 'pending_bind'
   const pageRoute = route === 'settings' ? backgroundRoute : route
-  const activeTab = tabFromRoute(route)
+  const activeTab = mainTabFromRoute(
+    route === 'settings' ? backgroundRoute : route,
+  )
+
+  const onMainTab = (tab: MainTab) => {
+    if (tab === 'chat') {
+      goto('chat')
+      return
+    }
+    if (!isWorkspaceRoute(pageRoute)) {
+      goto(workspaceEntryRoute())
+    }
+  }
+
+  const workspaceBody =
+    pageRoute === 'files' ? (
+      <FilesPage key={`files-${pageKey}`} />
+    ) : pageRoute === 'memory' ? (
+      <MemoryPage key={`memory-${pageKey}`} />
+    ) : pageRoute === 'skills' ? (
+      <SkillsPage key={`skills-${pageKey}`} />
+    ) : null
 
   return (
-    <div className="app">
+    <div className={cn('app', route === 'settings' && 'app--settings-open')}>
       <header className="app-header">
         <div className="app-brand">
           <button
@@ -174,19 +190,14 @@ function AppShell() {
           {user && (
             <Tabs
               value={activeTab}
-              onValueChange={(v) => goto(v as MainTab)}
+              onValueChange={(v) => onMainTab(v as MainTab)}
               className="gap-0"
             >
               <TabsList className="bg-muted/80">
                 <TabsTrigger value="chat">{t('nav.chat')}</TabsTrigger>
                 {platformMode && (
-                  <>
-                    <TabsTrigger value="files">{t('nav.files')}</TabsTrigger>
-                    <TabsTrigger value="memory">{t('nav.memory')}</TabsTrigger>
-                    <TabsTrigger value="skills">{t('nav.skills')}</TabsTrigger>
-                  </>
+                  <TabsTrigger value="workspace">{t('nav.workspace')}</TabsTrigger>
                 )}
-                <TabsTrigger value="settings">{t('nav.settings')}</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
@@ -203,18 +214,12 @@ function AppShell() {
               {t('nav.admin')}
             </Button>
           )}
-          <LanguageToggle compact />
           {user && (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              title={t('nav.logout.tip')}
-              aria-label={t('nav.logout')}
-              onClick={() => void handleLoggedOut()}
-            >
-              <Power className="size-4" />
-            </Button>
+            <AccountMenu
+              email={user.email}
+              onOpenSettings={() => goto('settings')}
+              onLogout={() => void handleLoggedOut()}
+            />
           )}
         </div>
       </header>
@@ -231,8 +236,6 @@ function AppShell() {
               enterApp(u)
             }}
             onLegacySuccess={async (userId) => {
-              // Cookie already set by /api/auth/login — re-enter platform
-              // mode so Files/Memory/Skills can resolve a workspace.
               const session = await tryPlatformSession()
               if (session?.user) {
                 setPlatformMode(true)
@@ -245,24 +248,35 @@ function AppShell() {
           />
         ) : (
           <>
-            {pageRoute === 'chat' && (
-              <ChatPage
-                key={`chat-${pageKey}`}
-                platformMode={platformMode}
-                signedIn={Boolean(user)}
-                needsBindKey={needsBindKey}
-                onGoBindSettings={() => goto('settings')}
-              />
-            )}
-            {pageRoute === 'files' && <FilesPage key={`files-${pageKey}`} />}
-            {pageRoute === 'memory' && <MemoryPage key={`memory-${pageKey}`} />}
-            {pageRoute === 'skills' && <SkillsPage key={`skills-${pageKey}`} />}
-            {pageRoute === 'admin' && <AdminPage key={`admin-${pageKey}`} />}
+            <div
+              className={cn(
+                'app-page',
+                route === 'settings' && 'app-page--dimmed',
+              )}
+              aria-hidden={route === 'settings' || undefined}
+            >
+              {pageRoute === 'chat' && (
+                <ChatPage
+                  key={`chat-${pageKey}`}
+                  platformMode={platformMode}
+                  signedIn={Boolean(user)}
+                  needsBindKey={needsBindKey}
+                  onGoBindSettings={() => goto('settings')}
+                />
+              )}
+              {isWorkspaceRoute(pageRoute) && workspaceBody && (
+                <WorkspaceShell active={pageRoute as WorkspaceTab}>
+                  {workspaceBody}
+                </WorkspaceShell>
+              )}
+              {pageRoute === 'admin' && <AdminPage key={`admin-${pageKey}`} />}
+            </div>
             <SettingsPage
               key={`settings-${pageKey}`}
               open={route === 'settings'}
               onOpenChange={(open) => {
-                if (!open) goto(backgroundRoute === 'settings' ? 'chat' : backgroundRoute)
+                if (!open)
+                  goto(backgroundRoute === 'settings' ? 'chat' : backgroundRoute)
               }}
               platformMode={platformMode}
               user={user}
@@ -274,28 +288,30 @@ function AppShell() {
       </main>
       {user && mobileNav && (
         <nav className="app-mobile-nav" aria-label={t('nav.mobile')}>
-          {(
-            [
-              ['chat', t('nav.chat')],
-              ...(platformMode
-                ? [
-                    ['files', t('nav.files')],
-                    ['memory', t('nav.memory')],
-                    ['skills', t('nav.skills')],
-                  ]
-                : []),
-              ['settings', t('nav.settings')],
-            ] as const
-          ).map(([tab, label]) => (
+          <button
+            type="button"
+            className={activeTab === 'chat' ? 'app-mobile-nav--active' : undefined}
+            onClick={() => onMainTab('chat')}
+          >
+            {t('nav.chat')}
+          </button>
+          {platformMode && (
             <button
-              key={tab}
               type="button"
-              className={activeTab === tab ? 'app-mobile-nav--active' : undefined}
-              onClick={() => goto(tab as MainTab)}
+              className={
+                activeTab === 'workspace' ? 'app-mobile-nav--active' : undefined
+              }
+              onClick={() => onMainTab('workspace')}
             >
-              {label}
+              {t('nav.workspace')}
             </button>
-          ))}
+          )}
+          <button
+            type="button"
+            onClick={() => goto('settings')}
+          >
+            {t('nav.account')}
+          </button>
         </nav>
       )}
       {onboardingOpen && user && (
@@ -310,6 +326,7 @@ function AppShell() {
           }}
         />
       )}
+      <Toaster richColors position="top-center" closeButton />
     </div>
   )
 }

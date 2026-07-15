@@ -6,6 +6,7 @@ import {
   mergeFileUpdates,
 } from '../fileIngestion'
 import { PageShell } from '../components/PageShell'
+import { sendFileToChat } from '../attachBridge'
 import { useT } from '../i18n'
 import {
   PlatformApiError,
@@ -24,6 +25,13 @@ import { cn } from '@/lib/utils'
 function FileStatusBadge({ file }: { file: PlatformFile }) {
   const t = useT()
   const label = t(`files.status.${file.status}` as 'files.status.pending')
+  const tipKey =
+    file.status === 'ready'
+      ? 'files.status.ready.tip'
+      : file.status === 'skipped'
+        ? 'files.status.skipped.tip'
+        : null
+  const tip = tipKey ? t(tipKey) : (file.error_message ?? undefined)
   const inFlight = file.status === 'pending' || file.status === 'processing'
 
   const variant =
@@ -37,7 +45,7 @@ function FileStatusBadge({ file }: { file: PlatformFile }) {
     <span className="file-status-wrap">
       <Badge
         variant={variant}
-        title={file.error_message ?? undefined}
+        title={tip}
         className={cn(
           file.status === 'ready' && 'bg-emerald-600/20 text-emerald-500 hover:bg-emerald-600/20',
           file.status === 'skipped' && 'bg-muted text-muted-foreground',
@@ -220,7 +228,7 @@ export function FilesPage() {
   }
 
   return (
-    <PageShell title={t('nav.files')} hint={t('files.hint')}>
+    <PageShell title={t('nav.files')} hint={t('files.hint')} density="wide">
       <div className="files-layout">
         <aside className="files-sidebar">
           <h3>{t('files.categories')}</h3>
@@ -310,7 +318,7 @@ export function FilesPage() {
                 <option value="asc">{t('files.order.asc')}</option>
               </select>
             </label>
-            <label className="files-upload-btn">
+            <label className="files-upload-btn" title={t('files.upload.tip')}>
               <span>{t('files.upload')}</span>
               <input
                 type="file"
@@ -324,7 +332,10 @@ export function FilesPage() {
                 }}
               />
             </label>
-            <label className="files-upload-btn files-upload-btn--secondary">
+            <label
+              className="files-upload-btn files-upload-btn--secondary"
+              title={t('files.uploadStoreOnly.tip')}
+            >
               <span>{t('files.uploadStoreOnly')}</span>
               <input
                 type="file"
@@ -372,12 +383,27 @@ export function FilesPage() {
                       <FileStatusBadge file={f} />
                     </td>
                     <td className="files-row-actions">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          sendFileToChat({
+                            name: f.filename,
+                            path: f.storage_key ?? `uploads/${f.filename}`,
+                            size: f.size_bytes ?? 0,
+                          })
+                        }
+                      >
+                        {t('files.sendToChat')}
+                      </Button>
                       {f.status === 'skipped' && (
                         <Button
                           type="button"
                           size="sm"
                           variant="outline"
                           disabled={busy}
+                          title={t('files.ingest.tip')}
                           onClick={() => void onIngest(f.id)}
                         >
                           {t('files.ingest')}

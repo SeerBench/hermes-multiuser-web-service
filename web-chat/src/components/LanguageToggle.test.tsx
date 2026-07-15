@@ -11,7 +11,7 @@ describe('LanguageToggle', () => {
     localStorage.clear()
   })
 
-  it('shows English when UI is Chinese, then toggles to 中文', async () => {
+  it('shows current locale name by default (中文 when UI is Chinese)', async () => {
     const user = userEvent.setup()
     localStorage.setItem('hermes-locale', 'zh')
     render(
@@ -20,27 +20,25 @@ describe('LanguageToggle', () => {
       </LocaleProvider>,
     )
 
-    const btn = screen.getByRole('button', { name: 'Use English' })
-    expect(btn).toHaveTextContent('English')
-    expect(btn).toHaveAttribute('title', 'Use English')
+    const btn = screen.getByRole('button', { name: /切换|switch|语言/i })
+    expect(btn).toHaveTextContent('中文')
 
     await user.click(btn)
 
-    const next = screen.getByRole('button', { name: '使用中文' })
-    expect(next).toHaveTextContent('中文')
-    expect(next).toHaveAttribute('title', '使用中文')
+    expect(screen.getByRole('button', { name: /切换|switch|语言/i })).toHaveTextContent(
+      'English',
+    )
   })
 
-  it('shows 中文 when UI is English', () => {
-    localStorage.setItem('hermes-locale', 'en')
+  it('target variant shows the opposite language label', () => {
+    localStorage.setItem('hermes-locale', 'zh')
     render(
       <LocaleProvider>
-        <LanguageToggle />
+        <LanguageToggle variant="target" />
       </LocaleProvider>,
     )
 
-    const btn = screen.getByRole('button', { name: '使用中文' })
-    expect(btn).toHaveTextContent('中文')
-    expect(btn).toHaveAttribute('title', '使用中文')
+    const btn = screen.getByRole('button', { name: 'Use English' })
+    expect(btn).toHaveTextContent('English')
   })
 })

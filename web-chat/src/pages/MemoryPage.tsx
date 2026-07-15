@@ -65,6 +65,7 @@ export function MemoryPage() {
     <PageShell
       title={t('nav.memory')}
       hint={t('memory.intro')}
+      density="reading"
       actions={
         <Button type="button" disabled={busy || !dirty} onClick={() => void save()}>
           {t('memory.save')}

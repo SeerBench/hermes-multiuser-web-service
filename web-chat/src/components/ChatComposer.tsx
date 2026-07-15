@@ -135,7 +135,7 @@ export function ChatComposer({
     menuItems.push({
       key: 'files',
       icon: <FolderOpen className="size-4" />,
-      label: t('composer.menu.workspaceFiles'),
+      label: t('composer.menu.files'),
       action: () => {
         closeMenu()
         setFilePickerOpen(true)

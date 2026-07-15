@@ -1,4 +1,4 @@
-import { useLocale } from '../i18n'
+import { useLocale, useT } from '../i18n'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -6,19 +6,40 @@ type Props = {
   className?: string
   /** Slightly smaller for the app header. */
   compact?: boolean
+  /**
+   * `current` — label is the active locale (中文 / English).
+   * `target` — label is the locale you switch *to* (legacy Settings helper).
+   */
+  variant?: 'current' | 'target'
 }
 
 /**
  * Single toggle for ZH ↔ EN.
- * Label/tooltip are always in the *target* language so the control
- * remains understandable regardless of the current UI locale.
+ * Default (`current`) shows the active language so the control matches the UI.
  */
-export function LanguageToggle({ className, compact }: Props) {
+export function LanguageToggle({
+  className,
+  compact,
+  variant = 'current',
+}: Props) {
   const { locale, setLocale } = useLocale()
+  const t = useT()
 
-  const nextIsEnglish = locale === 'zh'
-  const label = nextIsEnglish ? 'English' : '中文'
-  const tip = nextIsEnglish ? 'Use English' : '使用中文'
+  const label =
+    variant === 'target'
+      ? locale === 'zh'
+        ? 'English'
+        : '中文'
+      : locale === 'zh'
+        ? '中文'
+        : 'English'
+
+  const tip =
+    variant === 'target'
+      ? locale === 'zh'
+        ? 'Use English'
+        : '使用中文'
+      : t('lang.toggle.tip')
 
   return (
     <Button
@@ -28,7 +49,7 @@ export function LanguageToggle({ className, compact }: Props) {
       className={cn(className)}
       title={tip}
       aria-label={tip}
-      onClick={() => setLocale(nextIsEnglish ? 'en' : 'zh')}
+      onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
     >
       {label}
     </Button>
