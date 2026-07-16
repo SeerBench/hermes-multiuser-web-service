@@ -11,6 +11,7 @@ import { sendFileToChat } from '../attachBridge'
 import {
   assignedTagsForFile,
   flattenFolderTree,
+  toggleFileTagId,
 } from '../filesListHelpers'
 import { useT } from '../i18n'
 import {
@@ -137,6 +138,7 @@ export function FilesPage() {
   const [busy, setBusy] = useState(false)
   const [sort, setSort] = useState<SortKey>('created_at')
   const [order, setOrder] = useState<'asc' | 'desc'>('desc')
+  const [tagFilter, setTagFilter] = useState('')
   /** null = root; string = current folder */
   const [folderId, setFolderId] = useState<string | null>(null)
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
@@ -156,6 +158,7 @@ export function FilesPage() {
   const [renamingFile, setRenamingFile] = useState<PlatformFile | null>(null)
   const [renameFileValue, setRenameFileValue] = useState('')
   const [deletingFile, setDeletingFile] = useState<PlatformFile | null>(null)
+  const [taggingFile, setTaggingFile] = useState<PlatformFile | null>(null)
 
   const storeUploadRef = useRef<HTMLInputElement>(null)
   const ingestUploadRef = useRef<HTMLInputElement>(null)
@@ -173,6 +176,7 @@ export function FilesPage() {
         order,
         kind: filesListKindParam(kind),
         folder_id: folderId,
+        tag: tagFilter || undefined,
       })
       setFiles(fileRows)
     } catch (err) {
@@ -195,7 +199,7 @@ export function FilesPage() {
       setTags([])
     }
     setError(fileError ?? secondaryError)
-  }, [workspaceId, sort, order, kind, folderId])
+  }, [workspaceId, sort, order, kind, folderId, tagFilter])
 
   useEffect(() => {
     void reload()
@@ -446,6 +450,26 @@ export function FilesPage() {
     setDeletingFile(null)
   }
 
+  const toggleTagForFile = async (file: PlatformFile, tagId: string) => {
+    if (!workspaceId) return
+    setBusy(true)
+    try {
+      const updated = await platform.patchFile(workspaceId, file.id, {
+        tag_ids: toggleFileTagId(file.tag_ids, tagId),
+      })
+      setFiles((prev) =>
+        prev.map((row) => (row.id === file.id ? { ...row, ...updated } : row)),
+      )
+      setTaggingFile((current) =>
+        current?.id === file.id ? { ...current, ...updated } : current,
+      )
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!workspaceId) {
     return <p className="page-hint">{t('files.noWorkspace')}</p>
   }
@@ -479,7 +503,7 @@ export function FilesPage() {
                 {t('files.new')}
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[12rem]">
+            <DropdownMenuContent align="end" className="min-w-48">
               <DropdownMenuItem
                 onSelect={() => {
                   setNewFolderName('')
@@ -584,6 +608,20 @@ export function FilesPage() {
           </Breadcrumb>
 
           <div className="files-toolbar-sort">
+            <label>
+              {t('files.tags.filter')}
+              <select
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+              >
+                <option value="">{t('files.tags.filterAll')}</option>
+                {tags.map((tag) => (
+                  <option key={tag.id} value={tag.name}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label>
               {t('files.sort')}
               <select
@@ -738,6 +776,7 @@ export function FilesPage() {
                             path: f.storage_key ?? `uploads/${f.filename}`,
                             size: f.size_bytes ?? 0,
                             fileId: f.id,
+                            mimeType: f.mime_type,
                           })
                         }
                       >
@@ -755,6 +794,11 @@ export function FilesPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="min-w-40">
+                          <DropdownMenuItem
+                            onSelect={() => setTaggingFile(f)}
+                          >
+                            {t('files.tags.manageFile')}
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onSelect={() => {
                               setMoveTargetId(f.folder_id ?? '__root__')
@@ -979,6 +1023,60 @@ export function FilesPage() {
               onClick={() => void commitRenameFile()}
             >
               {t('files.rename.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 管理单个文件的标签；保持弹窗打开以便连续勾选。 */}
+      <Dialog
+        open={taggingFile != null}
+        onOpenChange={(open) => {
+          if (!open) setTaggingFile(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('files.tags.manageFile')}</DialogTitle>
+            <DialogDescription>
+              {taggingFile
+                ? t('files.tags.manageFileHint', { name: taggingFile.filename })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="files-row-tags files-tags-pick">
+            {tags.length === 0 ? (
+              <span className="text-muted-foreground">
+                {t('files.tags.empty')}
+              </span>
+            ) : (
+              tags.map((tag) => {
+                const selected = (taggingFile?.tag_ids ?? []).includes(tag.id)
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className={cn('files-tag', selected && 'files-tag--active')}
+                    aria-pressed={selected}
+                    disabled={busy || !taggingFile}
+                    onClick={() => {
+                      if (taggingFile) {
+                        void toggleTagForFile(taggingFile, tag.id)
+                      }
+                    }}
+                  >
+                    {tag.name}
+                  </button>
+                )
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => setTaggingFile(null)}
+            >
+              {t('common.ok')}
             </Button>
           </DialogFooter>
         </DialogContent>

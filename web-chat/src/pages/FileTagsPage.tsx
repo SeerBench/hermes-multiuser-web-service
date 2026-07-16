@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Trash2 } from 'lucide-react'
 import { PageShell } from '../components/PageShell'
 import { useT } from '../i18n'
 import {
@@ -10,6 +10,7 @@ import {
   type PlatformFile,
 } from '../platformClient'
 import { routeHref } from '../routing'
+import { toggleFileTagId } from '../filesListHelpers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -81,12 +82,9 @@ export function FileTagsPage() {
 
   const toggleFileTag = async (file: PlatformFile, tagId: string) => {
     if (!workspaceId) return
-    const current = new Set(file.tag_ids ?? [])
-    if (current.has(tagId)) current.delete(tagId)
-    else current.add(tagId)
     try {
       const updated = await platform.patchFile(workspaceId, file.id, {
-        tag_ids: [...current],
+        tag_ids: toggleFileTagId(file.tag_ids, tagId),
       })
       setFiles((prev) =>
         prev.map((f) => (f.id === file.id ? { ...f, ...updated } : f)),
@@ -150,15 +148,17 @@ export function FileTagsPage() {
           <ul className="files-tags-list">
             {tags.map((tg) => (
               <li key={tg.id} className="files-tags-list-item">
-                <span>{tg.name}</span>
+                <span className="files-tags-list-name">{tg.name}</span>
                 <Button
                   type="button"
-                  size="sm"
-                  variant="outline"
+                  size="icon-sm"
+                  variant="ghost"
                   disabled={busy}
+                  aria-label={t('files.tags.deleteLabel', { name: tg.name })}
+                  title={t('files.tags.deleteLabel', { name: tg.name })}
                   onClick={() => void removeTag(tg.id)}
                 >
-                  {t('files.delete')}
+                  <Trash2 className="size-4" aria-hidden />
                 </Button>
               </li>
             ))}

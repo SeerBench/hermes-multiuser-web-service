@@ -16,6 +16,17 @@ export function assignedTagsForFile(
   return allTags.filter((tg) => want.has(tg.id))
 }
 
+/** Return the next tag assignment without mutating the file's current ids. */
+export function toggleFileTagId(
+  tagIds: string[] | undefined | null,
+  tagId: string,
+): string[] {
+  const next = new Set(tagIds ?? [])
+  if (next.has(tagId)) next.delete(tagId)
+  else next.add(tagId)
+  return [...next]
+}
+
 /**
  * Depth-first folder list for move-to tree pickers.
  * Roots first (name-sorted), then children.

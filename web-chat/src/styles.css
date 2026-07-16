@@ -656,6 +656,53 @@ code {
   min-height: 0;
 }
 
+/* 对话滚动区上下缘渐变 — 随 data-scrollable 显示/隐藏 */
+[data-slot='message-scroller'] {
+  --message-scroller-fade: 36px;
+}
+
+[data-slot='message-scroller']::before,
+[data-slot='message-scroller']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--message-scroller-fade);
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+[data-slot='message-scroller']::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 72%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+[data-slot='message-scroller']::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 72%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+/* 上方/下方仍有内容可滚动时显示对应渐变 */
+[data-slot='message-scroller'][data-scrollable~='start']::before {
+  opacity: 1;
+}
+
+[data-slot='message-scroller'][data-scrollable~='end']::after {
+  opacity: 1;
+}
+
 .chat-transcript::-webkit-scrollbar {
   width: 6px;
 }
@@ -1320,26 +1367,23 @@ code {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
 }
 
-.chat-main-toolbar {
+.chat-sidebar-toggle {
   display: none;
   flex-shrink: 0;
-  padding: 8px 12px 0;
-}
-
-.chat-sidebar-toggle {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 36px;
   min-height: 36px;
-  padding: 0 10px;
-  font-size: 18px;
-  line-height: 1;
-  border: 1px solid var(--border);
+  padding: 0;
+  border: none;
   border-radius: var(--radius);
-  background: var(--bg-elev-2);
+  background: transparent;
   color: var(--fg);
   cursor: pointer;
+}
+
+.chat-sidebar-toggle:hover {
+  background: var(--bg-elev-2);
 }
 
 .chat-side-backdrop {
@@ -2032,8 +2076,8 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .chat-main-toolbar {
-    display: block;
+  .chat-sidebar-toggle {
+    display: inline-flex;
   }
 
   .chat-side {
@@ -2210,10 +2254,10 @@ code {
 }
 
 .conversation-header-skills {
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--fg-dim, var(--muted-foreground));
   white-space: nowrap;
-  margin-inline-end: 4px;
 }
 
 /* Shared overlay scrollbar (hide until hover/scroll). */
@@ -2729,18 +2773,36 @@ code {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .files-tags-list-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: var(--radius);
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   background: var(--muted);
+}
+
+.files-tags-list-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.files-tags-list-item [data-slot='button'] {
+  width: 28px;
+  height: 28px;
+  color: var(--muted-foreground);
+}
+
+.files-tags-list-item [data-slot='button']:hover {
+  color: var(--destructive);
 }
 
 .files-tags-assign-hint {
@@ -2905,9 +2967,9 @@ code {
 .conversation-header {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   flex-shrink: 0;
-  padding: 8px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
   min-height: 44px;
@@ -2922,6 +2984,11 @@ code {
   font-weight: 600;
   min-width: 0;
   flex: 1;
+}
+
+.conversation-header-menu {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .conversation-header-edit {

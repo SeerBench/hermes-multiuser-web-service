@@ -157,17 +157,26 @@ def _sanitize_upload_name(raw: str) -> str:
     """Reduce a client-supplied filename to a safe basename.
 
     Strips any directory components (``/``, ``\\``), drops leading dots so a
-    file can't masquerade as a dotfile or ``..``, keeps only a conservative
-    character set, and bounds the length.  The result is always a non-empty
-    basename; ``confine_path`` is still the authoritative sandbox guard, this
-    is just defence-in-depth + a tidy name.
+    file can't masquerade as a dotfile or ``..``, removes control chars and
+    path separators, and bounds the length.  Unicode display names (e.g.
+    Chinese) are preserved; only shell-hostile punctuation is collapsed.
+    ``confine_path`` is still the authoritative sandbox guard.
+
+    Multipart stacks (aiohttp) may deliver ``filename`` percent-encoded
+    (``%E6%B5%8B...``) — decode before sanitizing so we don't mangle names.
     """
     import re
+    from urllib.parse import unquote
 
-    base = str(raw or "").replace("\\", "/").split("/")[-1].strip()
+    base = str(raw or "")
+    if "%" in base:
+        base = unquote(base, encoding="utf-8", errors="replace")
+    base = base.replace("\\", "/").split("/")[-1].strip()
     base = base.lstrip(".") or "file"
-    # Allow letters, digits, dash, underscore, dot, space; collapse the rest.
-    base = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)
+    # NUL + path separators must never reach the filesystem layer.
+    base = re.sub(r"[\x00-\x1f/\\]+", "_", base)
+    # Keep letters/digits (incl. CJK), dot, dash, underscore, space.
+    base = re.sub(r"[^\w.\- ]+", "_", base, flags=re.UNICODE)
     base = base.strip(" .") or "file"
     if len(base) > _UPLOAD_MAX_FILENAME_LEN:
         # Preserve the extension when truncating an over-long name.

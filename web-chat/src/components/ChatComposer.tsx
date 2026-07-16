@@ -59,6 +59,7 @@ type ChatComposerProps = {
     path: string
     size: number
     fileId?: string
+    mimeType?: string
   }[]) => void
   onStop: () => void
   placeholder: string
@@ -267,6 +268,7 @@ export function ChatComposer({
           onRemove={onRemovePending}
           onPreviewDoc={onPreviewDoc}
         />
+        <div className="composer-hmu-input-container p-2.5">
         <textarea
           ref={textareaRef}
           className="composer-hmu-input"
@@ -277,6 +279,7 @@ export function ChatComposer({
           rows={2}
           disabled={streaming}
         />
+        </div>
         <div className="composer-hmu-toolbar">
           <div className="composer-hmu-left">
             {/* 模型选择：截图式 Popover 下拉（搜索 + 品牌色 + Pro/新 标签） */}

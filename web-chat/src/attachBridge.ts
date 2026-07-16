@@ -6,6 +6,7 @@ export type BridgedFile = {
   size: number
   /** Platform FileRecord id — enables image/doc preview in composer. */
   fileId?: string
+  mimeType?: string
 }
 
 const KEY = 'hermes_pending_chat_files'
@@ -33,7 +34,8 @@ export function consumeFilesForChat(): BridgedFile[] {
         typeof row.name === 'string' &&
         typeof row.path === 'string' &&
         typeof row.size === 'number' &&
-        (row.fileId === undefined || typeof row.fileId === 'string')
+        (row.fileId === undefined || typeof row.fileId === 'string') &&
+        (row.mimeType === undefined || typeof row.mimeType === 'string')
       )
     })
   } catch {

@@ -31,6 +31,7 @@ export function FilePickerSheet({
     path: string
     size: number
     fileId: string
+    mimeType?: string
   }[]) => void
 }) {
   const t = useT()
@@ -70,6 +71,7 @@ export function FilePickerSheet({
         path: f.storage_key ?? `uploads/${f.filename}`,
         size: f.size_bytes ?? 0,
         fileId: f.id,
+        mimeType: f.mime_type,
       }))
     onConfirm(picked)
   }

@@ -15,12 +15,13 @@ import type {
   UploadedFile,
 } from '../api'
 import { ChatComposer } from '../components/ChatComposer'
-import {
-  isImageAttachmentName,
-  type PendingAttachment,
-} from '../components/AttachmentChips'
+import type { PendingAttachment } from '../components/AttachmentChips'
 import { FilePreviewDrawer } from '../components/FilePreviewDrawer'
 import type { PreviewableFile } from '../components/FilePreviewDrawer'
+import {
+  fetchWorkspaceImagePreviewUrl,
+  isImageAttachment,
+} from '../attachmentPreview'
 import { ChatTurnBubble } from '../components/ChatTurnBubble'
 import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
@@ -34,7 +35,6 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
 import {
-  fileContentUrl,
   getStoredWorkspaceId,
   platform,
 } from '../platformClient'
@@ -122,6 +122,35 @@ export function ChatPage({
   const [previewOpen, setPreviewOpen] = useState(false)
   const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
+
+  /** 工作区图片：fetch + blob URL，避免 <img src> 直连 API 鉴权失败。 */
+  const queueWorkspaceImagePreviews = useCallback(
+    (entries: PendingAttachment[]) => {
+      const ws = getStoredWorkspaceId()
+      if (!ws) return
+      for (const entry of entries) {
+        if (!entry.fileId) continue
+        if (
+          !isImageAttachment(entry.name, {
+            mimeType: entry.mimeType,
+            path: entry.path,
+          })
+        ) {
+          continue
+        }
+        void fetchWorkspaceImagePreviewUrl(ws, entry.fileId)
+          .then((previewUrl) => {
+            setPending((prev) =>
+              prev.map((p) => (p.id === entry.id ? { ...p, previewUrl } : p)),
+            )
+          })
+          .catch(() => {
+            // 预览失败时仍保留附件，只是无缩略图
+          })
+      }
+    },
+    [],
+  )
 
   // Probe auth + initial data.
   useEffect(() => {
@@ -213,23 +242,18 @@ export function ChatPage({
   useEffect(() => {
     const bridged = consumeFilesForChat()
     if (bridged.length === 0) return
-    const ws = getStoredWorkspaceId()
-    setPending((prev) => [
-      ...prev,
-      ...bridged.map((f) => ({
-        id: newTurnId(),
-        name: f.name,
-        size: f.size,
-        path: f.path,
-        status: 'done' as const,
-        fileId: f.fileId,
-        previewUrl:
-          f.fileId && ws && isImageAttachmentName(f.name)
-            ? fileContentUrl(ws, f.fileId)
-            : undefined,
-      })),
-    ])
-  }, [])
+    const entries: PendingAttachment[] = bridged.map((f) => ({
+      id: newTurnId(),
+      name: f.name,
+      size: f.size,
+      path: f.path,
+      status: 'done' as const,
+      fileId: f.fileId,
+      mimeType: f.mimeType,
+    }))
+    setPending((prev) => [...prev, ...entries])
+    queueWorkspaceImagePreviews(entries)
+  }, [queueWorkspaceImagePreviews])
 
   const handleModelChange = useCallback(
     async (model: string) => {
@@ -429,8 +453,7 @@ export function ChatPage({
       if (!files || files.length === 0) return
       const picked = Array.from(files)
       const entries: PendingAttachment[] = picked.map((f) => {
-        const isImage =
-          f.type.startsWith('image/') || isImageAttachmentName(f.name)
+        const isImage = isImageAttachment(f.name, { mimeType: f.type })
         return {
           id: newTurnId(),
           name: f.name,
@@ -826,8 +849,13 @@ export function ChatPage({
   )
 
   const onAttachWorkspaceFiles = useCallback(
-    (files: { name: string; path: string; size: number; fileId?: string }[]) => {
-      const ws = getStoredWorkspaceId()
+    (files: {
+      name: string
+      path: string
+      size: number
+      fileId?: string
+      mimeType?: string
+    }[]) => {
       const entries: PendingAttachment[] = files.map((f) => ({
         id: newTurnId(),
         name: f.name,
@@ -835,14 +863,12 @@ export function ChatPage({
         status: 'done',
         path: f.path,
         fileId: f.fileId,
-        previewUrl:
-          f.fileId && ws && isImageAttachmentName(f.name)
-            ? fileContentUrl(ws, f.fileId)
-            : undefined,
+        mimeType: f.mimeType,
       }))
       setPending((prev) => [...prev, ...entries])
+      queueWorkspaceImagePreviews(entries)
     },
-    [],
+    [queueWorkspaceImagePreviews],
   )
 
   const onPreviewDoc = useCallback((item: PendingAttachment) => {
@@ -992,16 +1018,6 @@ export function ChatPage({
       </aside>
 
       <section className="chat-main">
-        <div className="chat-main-toolbar">
-          <button
-            type="button"
-            className="chat-sidebar-toggle"
-            aria-label={t('chat.openSidebar')}
-            onClick={() => setSideOpen(true)}
-          >
-            ☰
-          </button>
-        </div>
         {needsBindKey && (
           <div className="chat-banner chat-banner-warn" role="status">
             <span>{t('bindBanner.chatHint')}</span>
@@ -1020,32 +1036,40 @@ export function ChatPage({
         {/* Header + transcript + composer share one centered reading/full column */}
         <div className={cn('chat-column', widthClass(chatWidth))}>
           {(turns.length > 0 && sessionId) || enabledSkillsCount > 0 ? (
-            turns.length > 0 && sessionId ? (
-              <ConversationHeader
-                title={
-                  activeConvo?.title?.trim() ||
-                  t('convo.untitled')
-                }
-                pinned={Boolean(activeConvo?.pinned)}
-                chatWidth={chatWidth}
-                skillsCount={enabledSkillsCount}
-                onRename={(title) => void handleRename(sessionId, title)}
-                onTogglePin={() =>
-                  void handleSetFlags(sessionId, {
-                    pinned: !activeConvo?.pinned,
-                  })
-                }
-                onToggleChatWidth={toggleChatWidth}
-                onShareConversation={() => void handleShareConversation()}
-                onExportConversation={handleExportConversation}
-              />
-            ) : (
-              <div className="conversation-header conversation-header--meta">
-                <span className="conversation-header-skills">
-                  {t('chat.skills.count', { count: enabledSkillsCount })}
-                </span>
-              </div>
-            )
+            <ConversationHeader
+              title={
+                activeConvo?.title?.trim() ||
+                t('convo.untitled')
+              }
+              pinned={Boolean(activeConvo?.pinned)}
+              chatWidth={chatWidth}
+              skillsCount={enabledSkillsCount}
+              onOpenSidebar={() => setSideOpen(true)}
+              onRename={
+                sessionId && turns.length > 0
+                  ? (title) => void handleRename(sessionId, title)
+                  : undefined
+              }
+              onTogglePin={
+                sessionId && turns.length > 0
+                  ? () =>
+                      void handleSetFlags(sessionId, {
+                        pinned: !activeConvo?.pinned,
+                      })
+                  : undefined
+              }
+              onToggleChatWidth={toggleChatWidth}
+              onShareConversation={
+                sessionId && turns.length > 0
+                  ? () => void handleShareConversation()
+                  : undefined
+              }
+              onExportConversation={
+                sessionId && turns.length > 0
+                  ? handleExportConversation
+                  : undefined
+              }
+            />
           ) : null}
           <MessageScrollerProvider
             key={sessionId ?? 'new-chat'}

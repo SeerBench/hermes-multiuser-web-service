@@ -3,6 +3,7 @@ import type { FileFolder, FileTag } from './platformClient'
 import {
   assignedTagsForFile,
   flattenFolderTree,
+  toggleFileTagId,
 } from './filesListHelpers'
 
 describe('assignedTagsForFile', () => {
@@ -35,5 +36,17 @@ describe('flattenFolderTree', () => {
       { id: 'a1', name: 'Nested', depth: 1 },
       { id: 'b', name: 'Beta', depth: 0 },
     ])
+  })
+})
+
+describe('toggleFileTagId', () => {
+  it('adds a missing tag without mutating the original list', () => {
+    const current = ['t1']
+    expect(toggleFileTagId(current, 't2')).toEqual(['t1', 't2'])
+    expect(current).toEqual(['t1'])
+  })
+
+  it('removes an assigned tag', () => {
+    expect(toggleFileTagId(['t1', 't2'], 't1')).toEqual(['t2'])
   })
 })

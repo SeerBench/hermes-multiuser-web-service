@@ -94,4 +94,27 @@ describe('PendingAttachments', () => {
       expect.objectContaining({ fileId: 'file-abc', name: 'spec.pdf' }),
     )
   })
+
+  it('renders image preview for library files without extension when mimeType is image', () => {
+    const items: PendingAttachment[] = [
+      {
+        id: '4',
+        name: '62ab3b44b270fb',
+        size: 265800,
+        status: 'done',
+        path: 'uploads/ws/62ab3b44b270fb',
+        mimeType: 'image/png',
+        previewUrl: 'blob:http://localhost/preview-lib',
+      },
+    ]
+    render(
+      <LocaleProvider>
+        <PendingAttachments items={items} onRemove={vi.fn()} />
+      </LocaleProvider>,
+    )
+
+    const chip = screen.getByTitle('62ab3b44b270fb')
+    expect(chip.className).toContain('attach-chip--image')
+    expect(chip.querySelector('img.attach-preview-img')).toBeTruthy()
+  })
 })

@@ -1,19 +1,12 @@
 import type { UploadedFile } from '../api'
 import { formatBytes } from '../format'
 import { useT } from '../i18n'
+import {
+  isDrawerPreviewableName,
+  isImageAttachment,
+} from '../attachmentPreview'
 
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
-const DRAWER_DOC_EXT = /\.(md|pdf)$/i
-
-/** True when the attachment filename looks like an image. */
-export function isImageAttachmentName(name: string): boolean {
-  return IMAGE_EXT.test(name)
-}
-
-/** Markdown / PDF — click opens the right-side preview drawer. */
-export function isDrawerPreviewableName(name: string): boolean {
-  return DRAWER_DOC_EXT.test(name)
-}
+export { isImageAttachmentName, isDrawerPreviewableName } from '../attachmentPreview'
 
 // A file selected in the composer, tracked through its upload lifecycle.
 export type PendingAttachment = {
@@ -27,6 +20,7 @@ export type PendingAttachment = {
   previewUrl?: string
   /** Platform FileRecord id — required for library file content preview. */
   fileId?: string
+  mimeType?: string
 }
 
 type PendingProps = {
@@ -48,7 +42,11 @@ export function PendingAttachments({
     <div className="attach-strip">
       {items.map((a) => {
         const showImagePreview =
-          Boolean(a.previewUrl) && isImageAttachmentName(a.name)
+          Boolean(a.previewUrl) &&
+          isImageAttachment(a.name, {
+            mimeType: a.mimeType,
+            path: a.path,
+          })
         const canDrawerPreview =
           Boolean(a.fileId) && isDrawerPreviewableName(a.name)
         return (
