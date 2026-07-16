@@ -2,25 +2,25 @@
 
 > 基于 [AI SaaS Platform Plan](.cursor/plans/ai_saas_platform_plan_d3c7e048.plan.md) 拆解。
 >
-> **架构决策**：FastAPI 控制面（sidecar）+ 现有 `web_chat` Agent Gateway + Hermes 核心零修改。
+> **架构决策**：FastAPI 控制面（sidecar）+ 现有 `web_chat` Agent Gateway + Hermes 核心零业务耦合（仅保留具名、向后兼容的小补丁）。
 >
 > **计费**：LLM 调用继续委托 **new-api**；平台注册时自动为用户 provisioning upstream API key。
 >
 > **规模目标**：50 用户；PostgreSQL + pgvector + MinIO 单机部署。
 
-**执行状态（2026-07-13）**：Phase 0–5 **MVP 骨架已落地**；Phase 6 **文档与基础清单已完成**，压测/正式安全 review 待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。设置 `PLATFORM_DATABASE_URL` 启用平台层；未设置则回退 legacy SQLite `UserStore`。
+**执行状态（2026-07-16）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**；Phase 6 仍以文档和基础验证为主，压测、正式安全 review 与生产自动化待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
 | 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
-| 1 身份鉴权 | **~90%** | 注册/登录/bind-key/双路径认证/SPA AuthPage 已有；**chat E2E 已补**；速率限制待补 |
-| 2 隔离加固 | **~85%** | UUID 贯穿 + 隔离 E2E（会话/记忆/知识库/禁用用户）；legacy 映射表待补 |
-| 3 文件 RAG | **~75%** | 同步 ingestion + 关键词检索 + `web_knowledge_search`；MinIO/Redis Worker/pgvector 待补 |
-| 4 Memory/Skill | **~95%** | API + UI + catalog install + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
+| 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；速率限制待补 |
+| 2 隔离加固 | **~90%** | UUID 贯穿 + 隔离 E2E（会话/记忆/知识库/禁用用户）；legacy 映射表与少量边界测试待补 |
+| 3 文件 RAG | **~85%** | 同步 ingestion、关键词检索、文件夹/分类/标签、内容预览与 `web_knowledge_search` 已有；MinIO/Redis Worker/pgvector 待补 |
+| 4 Memory/Skill | **~98%** | API + UI + catalog install/预览/CRUD + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
 | 5 Admin | **~85%** | API + UI + `create_admin.py` 已有；分页、审计 UI 待补 |
-| 6 硬化上线 | **~40%** | `platform-saas.md` + `deploy/README.md` 已有；压测、备份脚本、CI Compose job 待补 |
+| 6 硬化上线 | **~50%** | 中文 README、部署文档、自动化测试与构建验证已有；压测、备份脚本、CI Compose job 待补 |
 
-**测试**：`scripts/run_tests.sh tests/platform/`（**20 cases**）+ `tests/gateway/test_web_users.py`（26 cases）已通过。
+**最近验证（2026-07-16）**：Platform **57 cases**、Gateway/SessionDB **291 cases**、Web Chat **164 cases** 全部通过；TypeScript typecheck 与 production build 通过。
 
 **关键产物**
 
@@ -40,8 +40,8 @@
 1. 登录速率限制（Redis 计数器）  
 2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
 3. pgvector cosine 检索（替换关键词 MVP）  
-4. 50 用户压测、`update-web.sh` 扩展 platform-api 部署流程  
-5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（5 cases）+ CI `web-chat-verify.yml`  
+4. 50 用户压测、备份脚本、`update-web.sh` 扩展 platform-api 部署流程
+5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（6 cases）+ CI `web-chat-verify.yml`
 6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉 + 文件进度 + Onboarding~~
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
@@ -86,7 +86,7 @@ flowchart TD
 
 ## 设计约束（全程遵守）
 
-- [x] **不修改** Hermes 核心：`run_agent.py`、`cli.py`、`memory_manager.py`、`hermes_cli/main.py`
+- [x] Hermes 核心零业务耦合：`cli.py`、`memory_manager.py`、`hermes_cli/main.py` 保持不动；`run_agent.py` 仅保留具名的 `user_id` 传播补丁
 - [x] 平台业务代码落在 `platform_api/`（新建）和 `gateway/web/`（扩展）；废弃的 `platform-api/` 已删除
 - [x] 用户永远不接触 shell / Docker / 配置文件
 - [x] `hermes-web-chat` 工具集继续排除 `terminal`、`browser_*`、`code_execution`、`delegate_task`
@@ -261,7 +261,7 @@ flowchart TD
 ### 2.4 文档
 
 - [~] 更新 `docs/user-guide/web-chat.md` — **未改**；新增 `docs/user-guide/platform-saas.md`
-- [ ] 更新 `README.zh-CN.md` 路线图
+- [x] 更新 `README.zh-CN.md`，对齐 Platform SaaS 主路径、当前功能与测试状态
 
 ---
 
@@ -312,7 +312,7 @@ flowchart TD
 ### 3.6 前端文件管理 UI
 
 - [x] `web-chat/src/pages/FilesPage.tsx`
-- [~] 上传 + 列表 + 删除（**无拖拽进度条**）
+- [x] 上传进度 + 列表 + 重命名/移动/删除（拖拽上传仍待补）
 - [x] 路由 `#/files` + 导航入口
 - [x] Chat 页保留 `/api/uploads` 快速附件路径
 - [x] 创建时间列；文件夹与文件同列表；标签管理独立页 `#/file-tags`
@@ -351,7 +351,7 @@ flowchart TD
 
 - [x] `web-chat/src/pages/SkillsPage.tsx`
 - [x] 列表 + 启用开关
-- [ ] SKILL.md 预览（**未做**）
+- [x] SKILL.md 侧栏预览
 - [x] 路由 `#/skills`
 
 ### 4.5 Agent 启动时 Skill Hint 注入
@@ -421,7 +421,7 @@ flowchart TD
 - [x] `docs/user-guide/platform-saas.md`
 - [ ] 更新 `update-web.sh` 或新建 `deploy/update-platform.sh`
 - [~] 生产 checklist — 见 `deploy/README.md` + `platform-saas.md`
-- [ ] 更新 `README.zh-CN.md`
+- [x] 更新 `README.zh-CN.md`
 
 ### 6.5 CI
 
@@ -464,7 +464,7 @@ flowchart TD
 
 ## web-chat SPA — 用户体验待办（按人气 × 实用度）
 
-> **现状快照（2026-07-13）**：Chat 核心链路（SSE、工具事件、重试/编辑、附件、斜杠命令、会话 CRUD）已可用；Platform 六页（Auth/Chat/Settings/Files/Memory/Skills/Admin）为 **功能骨架**，多处仍偏「工程师 UI」。README 提到的 `QuotaBadge` **尚未实现**。
+> **现状快照（2026-07-16）**：Chat 核心链路与 Platform 工作台已经进入可用状态。现有 UI 覆盖 Auth、Chat、Settings、Files/Tags、Memory、Skills、Admin，并完成响应式导航、Onboarding、会话搜索、主题/字号、模型选择、附件与文件预览、文件标签管理、用量展示等产品化体验。剩余工作主要是基础设施异步化、检索质量、Admin 深化和上线硬化。
 
 **排序说明**：P0 = 多数用户每天都会碰到且明显影响留存；P1 = ChatGPT 类产品的常见预期；P2 = 提升专业用户/运营效率；P3 = 锦上添花。与 § MVP 明确不做 冲突的项（PWA、OAuth、多 Workspace UI）不列入。
 
@@ -488,13 +488,13 @@ flowchart TD
 
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
-| ★★★ | **Markdown 代码块高亮 + 复制** | 开发者用户刚需；现 `marked` 纯文本渲染 |
+| ★★★ | **Markdown 代码块高亮 + 复制** | 已有安全 Markdown 渲染；尚未接入高亮与代码块复制 |
 | ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
 | ★★☆ | ~~**用量 / 配额展示**~~ | Settings → API 密钥：new-api `usage` + logs（已完成） |
 | ★★☆ | **Composer 拖拽/粘贴上传** | 仅有 📎 按钮；无 drag-drop / paste 图片 |
-| ★★☆ | **手动深色/浅色主题** | 仅 `prefers-color-scheme`；shadcn token + `.dark` 已就绪，缺 Settings 开关 |
+| ★★☆ | ~~**手动深色/浅色主题**~~ | Account 下拉与 Settings 均支持 system / light / dark |
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
-| ★☆☆ | **模型选择器** | 高级用户期望 UI 选模型；可对接 `/model` 或 gateway 配置 |
+| ★☆☆ | ~~**模型选择器**~~ | Composer 已提供可搜索模型下拉，并支持常用模型筛选 |
 
 - [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
 - [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
@@ -502,7 +502,7 @@ flowchart TD
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
 - [x] `POST /api/v1/auth/change-password` + Settings 表单
 - [x] Settings：模型偏好（常用模型筛选）
-- [ ] 设置页或 Chat 顶栏：模型下拉（读 gateway `/api/me` 或 slash `/model` 封装）
+- [x] Composer：可搜索模型下拉 + workspace 偏好
 
 ### P2 — 中等人气 × 提升专业度
 
@@ -525,9 +525,9 @@ flowchart TD
 
 ### P3 — 体验抛光
 
-- [ ] 全局 Toast / 非阻塞错误提示（替换部分 `auth-error` 静态文案）
+- [x] 全局 Sonner Toast 基础设施与关键操作非阻塞提示
 - [ ] `MemoryPage`：Markdown 预览分栏（编辑 | 预览）
-- [ ] `FilesPage`：拖拽上传区、上传百分比进度条
+- [~] `FilesPage`：已有上传百分比进度；拖拽上传区待补
 - [ ] 键盘快捷键面板（`?`）：发送、新建对话、聚焦输入框
 - [ ] 账户：修改邮箱、注销账号（需 API + 合规文案）
 - [ ] 无障碍：焦点陷阱、跳过导航、`aria-live` 流式区域
@@ -542,6 +542,8 @@ flowchart TD
 - [x] 斜杠命令补全、会话置顶/归档/重命名/删除
 - [x] 中英双语 `LanguageToggle`
 - [x] Platform 六路由 + Legacy Key 备路径
+- [x] Account 下拉主题/字号快捷设置，Settings 完整偏好设置
+- [x] 文件夹、分类、标签、内容预览与「引用到对话」
 
 ---
 
@@ -607,19 +609,32 @@ flowchart TD
 | POST | `/auth/logout` | 1 | [x] |
 | POST | `/auth/bind-key` | 1 | [x] |
 | GET | `/auth/me` | 1 | [x] |
+| PATCH | `/auth/me` | 1 | [x] 资料 / 头像 |
+| POST | `/auth/change-password` | 1 | [x] |
+| GET | `/billing/usage`、`/billing/logs` | 1 | [x] |
 | GET | `/workspaces` | 1 | [x] |
 | GET | `/workspaces/{id}` | 1 | [x] |
+| GET | `/workspaces/{id}/models` | 1 | [x] |
+| GET/PATCH | `/workspaces/{id}/preferences` | 1 | [x] |
 | POST | `/workspaces/{id}/files` | 3 | [x] |
 | GET | `/workspaces/{id}/files` | 3 | [x] |
+| PATCH | `/workspaces/{id}/files/{file_id}` | 3 | [x] 重命名 / 移动 / 标签 |
 | DELETE | `/workspaces/{id}/files/{file_id}` | 3 | [x] |
+| GET | `/workspaces/{id}/files/{file_id}/content` | 3 | [x] 预览 / 下载 |
+| POST | `/workspaces/{id}/files/{file_id}/ingest` | 3 | [x] |
 | GET | `/workspaces/{id}/files/{file_id}/status` | 3 | [x] |
+| CRUD | `/workspaces/{id}/file-folders*` | 3 | [x] |
+| CRUD | `/workspaces/{id}/file-categories*` | 3 | [x] |
+| CRUD | `/workspaces/{id}/file-tags*` | 3 | [x] |
 | POST | `/workspaces/{id}/knowledge/search` | 3 | [x] |
 | GET | `/workspaces/{id}/memory` | 4 | [x] |
 | PATCH | `/workspaces/{id}/memory` | 4 | [x] |
 | GET | `/workspaces/{id}/skills` | 4 | [x] |
 | GET | `/workspaces/{id}/skills/{name}` | 4 | [x] |
 | POST | `/workspaces/{id}/skills/install-from-catalog` | 4 | [x] |
+| POST | `/workspaces/{id}/skills` | 4 | [x] |
 | PATCH | `/workspaces/{id}/skills/{name}` | 4 | [x] |
+| DELETE | `/workspaces/{id}/skills/{name}` | 4 | [x] |
 | GET | `/admin/users` | 5 | [x] |
 | PATCH | `/admin/users/{id}` | 5 | [x] |
 | GET | `/admin/stats` | 5 | [x] |
@@ -684,3 +699,5 @@ flowchart TD
 | 2026-07-13 | 增加双路径认证：平台注册（主）+ Legacy Key（备）+ bind-key 混合 Fallback |
 | 2026-07-13 | **E2E**：`test_chat_e2e.py`（register→bind→chat SSE）+ `test_isolation_extended.py`（5 cases）；platform 测试 14 cases |
 | 2026-07-13 | **web-chat UX 待办**：按用户视角补充 P0–P3 功能缺口（§ web-chat SPA） |
+| 2026-07-16 | 对齐当前实现：文件夹/分类/标签与预览、Skill 预览/CRUD、模型与账户偏好、用量、主题/字号及产品化 Chat UX |
+| 2026-07-16 | 完整验证：Platform 57 + Gateway/SessionDB 291 + Web Chat 164 cases 全绿，typecheck/build 通过；README 中文版改为 Platform SaaS 主路径 |
