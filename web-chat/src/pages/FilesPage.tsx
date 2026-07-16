@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
-import { Folder, Plus } from 'lucide-react'
+import { Folder, MoreHorizontal, Plus } from 'lucide-react'
 import { formatBytes } from '../format'
 import {
   FILE_INGEST_POLL_MS,
@@ -8,6 +8,10 @@ import {
 } from '../fileIngestion'
 import { PageShell } from '../components/PageShell'
 import { sendFileToChat } from '../attachBridge'
+import {
+  assignedTagsForFile,
+  flattenFolderTree,
+} from '../filesListHelpers'
 import { useT } from '../i18n'
 import {
   PlatformApiError,
@@ -146,9 +150,17 @@ export function FilesPage() {
     fileCount: number
     folderCount: number
   } | null>(null)
+  /** 文件行：移动 / 重命名 / 删除 弹窗目标 */
+  const [movingFile, setMovingFile] = useState<PlatformFile | null>(null)
+  const [moveTargetId, setMoveTargetId] = useState<string>('__root__')
+  const [renamingFile, setRenamingFile] = useState<PlatformFile | null>(null)
+  const [renameFileValue, setRenameFileValue] = useState('')
+  const [deletingFile, setDeletingFile] = useState<PlatformFile | null>(null)
 
   const storeUploadRef = useRef<HTMLInputElement>(null)
   const ingestUploadRef = useRef<HTMLInputElement>(null)
+
+  const folderTree = useMemo(() => flattenFolderTree(folders), [folders])
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -387,23 +399,9 @@ export function FilesPage() {
     void onDeleteFolder(id, false)
   }
 
-  const toggleFileTag = async (file: PlatformFile, tagId: string) => {
-    if (!workspaceId) return
-    const current = new Set(file.tag_ids ?? [])
-    if (current.has(tagId)) current.delete(tagId)
-    else current.add(tagId)
-    try {
-      const updated = await platform.patchFile(workspaceId, file.id, {
-        tag_ids: [...current],
-      })
-      setFiles((prev) => prev.map((f) => (f.id === file.id ? { ...f, ...updated } : f)))
-    } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
-    }
-  }
-
   const moveFile = async (fileId: string, targetFolderId: string) => {
     if (!workspaceId) return
+    setBusy(true)
     try {
       const updated = await platform.patchFile(workspaceId, fileId, {
         folder_id: targetFolderId === '__root__' ? null : targetFolderId,
@@ -416,9 +414,36 @@ export function FilesPage() {
           ? prev.map((f) => (f.id === fileId ? { ...f, ...updated } : f))
           : prev.filter((f) => f.id !== fileId),
       )
+      setMovingFile(null)
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
+  }
+
+  const commitRenameFile = async () => {
+    if (!workspaceId || !renamingFile || !renameFileValue.trim()) return
+    setBusy(true)
+    try {
+      const updated = await platform.patchFile(workspaceId, renamingFile.id, {
+        filename: renameFileValue.trim(),
+      })
+      setFiles((prev) =>
+        prev.map((f) => (f.id === renamingFile.id ? { ...f, ...updated } : f)),
+      )
+      setRenamingFile(null)
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmDeleteFile = async () => {
+    if (!deletingFile) return
+    await onDelete(deletingFile.id)
+    setDeletingFile(null)
   }
 
   if (!workspaceId) {
@@ -674,6 +699,7 @@ export function FilesPage() {
 
               {files.map((f) => {
                 const image = isImageFilename(f.filename)
+                const fileTags = assignedTagsForFile(tags, f.tag_ids)
                 return (
                   <tr key={f.id}>
                     <td>{f.filename}</td>
@@ -683,25 +709,17 @@ export function FilesPage() {
                     </td>
                     <td>
                       <div className="files-row-tags">
-                        {tags.map((tg) => {
-                          const on = (f.tag_ids ?? []).includes(tg.id)
-                          return (
-                            <button
+                        {fileTags.length === 0 ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          fileTags.map((tg) => (
+                            <span
                               key={tg.id}
-                              type="button"
-                              className={cn(
-                                'files-tag',
-                                on && 'files-tag--active',
-                              )}
-                              title={t('files.tags.toggle')}
-                              onClick={() => void toggleFileTag(f, tg.id)}
+                              className="files-tag files-tag--active files-tag--readonly"
                             >
                               {tg.name}
-                            </button>
-                          )
-                        })}
-                        {tags.length === 0 && (
-                          <span className="text-muted-foreground">—</span>
+                            </span>
+                          ))
                         )}
                       </div>
                     </td>
@@ -710,28 +728,6 @@ export function FilesPage() {
                       <td>{image ? '—' : <FileStatusBadge file={f} />}</td>
                     )}
                     <td className="files-row-actions">
-                      <select
-                        className="files-move-select"
-                        defaultValue=""
-                        aria-label={t('files.move')}
-                        onChange={(e) => {
-                          const v = e.target.value
-                          e.target.value = ''
-                          if (v) void moveFile(f.id, v)
-                        }}
-                      >
-                        <option value="" disabled>
-                          {t('files.move')}
-                        </option>
-                        <option value="__root__">
-                          {t('files.folders.root')}
-                        </option>
-                        {folders.map((folder) => (
-                          <option key={folder.id} value={folder.id}>
-                            {folder.name}
-                          </option>
-                        ))}
-                      </select>
                       <Button
                         type="button"
                         size="sm"
@@ -741,32 +737,57 @@ export function FilesPage() {
                             name: f.filename,
                             path: f.storage_key ?? `uploads/${f.filename}`,
                             size: f.size_bytes ?? 0,
+                            fileId: f.id,
                           })
                         }
                       >
                         {t('files.sendToChat')}
                       </Button>
-                      {!image && f.status === 'skipped' && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={busy}
-                          title={t('files.ingest.tip')}
-                          onClick={() => void onIngest(f.id)}
-                        >
-                          {t('files.ingest')}
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void onDelete(f.id)}
-                      >
-                        {t('files.delete')}
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={t('files.more')}
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setMoveTargetId(f.folder_id ?? '__root__')
+                              setMovingFile(f)
+                            }}
+                          >
+                            {t('files.move')}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setRenameFileValue(f.filename)
+                              setRenamingFile(f)
+                            }}
+                          >
+                            {t('files.rename')}
+                          </DropdownMenuItem>
+                          {!image && f.status === 'skipped' && (
+                            <DropdownMenuItem
+                              disabled={busy}
+                              onSelect={() => void onIngest(f.id)}
+                            >
+                              {t('files.ingest')}
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={busy}
+                            onSelect={() => setDeletingFile(f)}
+                          >
+                            {t('files.delete')}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   </tr>
                 )
@@ -851,6 +872,149 @@ export function FilesPage() {
               }}
             >
               {t('files.folders.deleteWarn.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 移动到文件夹（文件树） */}
+      <Dialog
+        open={movingFile != null}
+        onOpenChange={(open) => {
+          if (!open) setMovingFile(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('files.move')}</DialogTitle>
+            <DialogDescription>
+              {movingFile
+                ? t('files.move.hint', { name: movingFile.filename })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div
+            className="files-move-tree"
+            role="radiogroup"
+            aria-label={t('files.move')}
+          >
+            <label className="files-move-tree-item">
+              <input
+                type="radio"
+                name="move-folder"
+                checked={moveTargetId === '__root__'}
+                onChange={() => setMoveTargetId('__root__')}
+              />
+              <span>{t('files.folders.root')}</span>
+            </label>
+            {folderTree.map((node) => (
+              <label
+                key={node.id}
+                className="files-move-tree-item"
+                style={{ paddingLeft: `${12 + node.depth * 16}px` }}
+              >
+                <input
+                  type="radio"
+                  name="move-folder"
+                  checked={moveTargetId === node.id}
+                  onChange={() => setMoveTargetId(node.id)}
+                />
+                <Folder className="size-3.5 shrink-0 opacity-70" aria-hidden />
+                <span>{node.name}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setMovingFile(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || !movingFile}
+              onClick={() => {
+                if (movingFile) void moveFile(movingFile.id, moveTargetId)
+              }}
+            >
+              {t('files.move.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 重命名文件 */}
+      <Dialog
+        open={renamingFile != null}
+        onOpenChange={(open) => {
+          if (!open) setRenamingFile(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('files.rename')}</DialogTitle>
+            <DialogDescription>{t('files.rename.hint')}</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={renameFileValue}
+            autoFocus
+            onChange={(e) => setRenameFileValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commitRenameFile()
+            }}
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRenamingFile(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || !renameFileValue.trim()}
+              onClick={() => void commitRenameFile()}
+            >
+              {t('files.rename.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除文件确认 */}
+      <Dialog
+        open={deletingFile != null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingFile(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('files.deleteConfirm.title')}</DialogTitle>
+            <DialogDescription>
+              {deletingFile
+                ? t('files.deleteConfirm.body', { name: deletingFile.filename })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeletingFile(null)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busy || !deletingFile}
+              onClick={() => void confirmDeleteFile()}
+            >
+              {t('files.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

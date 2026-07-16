@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '../i18n'
 import {
@@ -62,5 +63,35 @@ describe('PendingAttachments', () => {
     const chip = screen.getByTitle('notes.md')
     expect(chip.className).not.toContain('attach-chip--image')
     expect(chip.querySelector('img.attach-preview-img')).toBeNull()
+  })
+
+  it('exposes a clickable name for library md/pdf with fileId', async () => {
+    const user = userEvent.setup()
+    const onPreviewDoc = vi.fn()
+    const items: PendingAttachment[] = [
+      {
+        id: '3',
+        name: 'spec.pdf',
+        size: 99,
+        status: 'done',
+        path: 'uploads/spec.pdf',
+        fileId: 'file-abc',
+      },
+    ]
+    render(
+      <LocaleProvider>
+        <PendingAttachments
+          items={items}
+          onRemove={vi.fn()}
+          onPreviewDoc={onPreviewDoc}
+        />
+      </LocaleProvider>,
+    )
+
+    const nameBtn = screen.getByRole('button', { name: 'spec.pdf' })
+    await user.click(nameBtn)
+    expect(onPreviewDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: 'file-abc', name: 'spec.pdf' }),
+    )
   })
 })

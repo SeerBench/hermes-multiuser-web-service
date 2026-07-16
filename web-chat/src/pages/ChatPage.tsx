@@ -19,6 +19,8 @@ import {
   isImageAttachmentName,
   type PendingAttachment,
 } from '../components/AttachmentChips'
+import { FilePreviewDrawer } from '../components/FilePreviewDrawer'
+import type { PreviewableFile } from '../components/FilePreviewDrawer'
 import { ChatTurnBubble } from '../components/ChatTurnBubble'
 import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
@@ -32,6 +34,7 @@ import {
   MessageScrollerViewport,
 } from '@/components/ui/message-scroller'
 import {
+  fileContentUrl,
   getStoredWorkspaceId,
   platform,
 } from '../platformClient'
@@ -115,6 +118,8 @@ export function ChatPage({
   const [modelsLoading, setModelsLoading] = useState(false)
   const [enabledSkillsCount, setEnabledSkillsCount] = useState(0)
   const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
 
@@ -208,6 +213,7 @@ export function ChatPage({
   useEffect(() => {
     const bridged = consumeFilesForChat()
     if (bridged.length === 0) return
+    const ws = getStoredWorkspaceId()
     setPending((prev) => [
       ...prev,
       ...bridged.map((f) => ({
@@ -216,6 +222,11 @@ export function ChatPage({
         size: f.size,
         path: f.path,
         status: 'done' as const,
+        fileId: f.fileId,
+        previewUrl:
+          f.fileId && ws && isImageAttachmentName(f.name)
+            ? fileContentUrl(ws, f.fileId)
+            : undefined,
       })),
     ])
   }, [])
@@ -815,18 +826,30 @@ export function ChatPage({
   )
 
   const onAttachWorkspaceFiles = useCallback(
-    (files: { name: string; path: string; size: number }[]) => {
+    (files: { name: string; path: string; size: number; fileId?: string }[]) => {
+      const ws = getStoredWorkspaceId()
       const entries: PendingAttachment[] = files.map((f) => ({
         id: newTurnId(),
         name: f.name,
         size: f.size,
         status: 'done',
         path: f.path,
+        fileId: f.fileId,
+        previewUrl:
+          f.fileId && ws && isImageAttachmentName(f.name)
+            ? fileContentUrl(ws, f.fileId)
+            : undefined,
       }))
       setPending((prev) => [...prev, ...entries])
     },
     [],
   )
+
+  const onPreviewDoc = useCallback((item: PendingAttachment) => {
+    if (!item.fileId) return
+    setPreviewFile({ fileId: item.fileId, name: item.name })
+    setPreviewOpen(true)
+  }, [])
 
   const uploading = pending.some((p) => p.status === 'uploading')
 
@@ -1115,9 +1138,20 @@ export function ChatPage({
             onNavigate={(route) => {
               window.location.hash = `#/${route}`
             }}
+            onPreviewDoc={onPreviewDoc}
           />
         </div>
       </section>
+
+      <FilePreviewDrawer
+        open={previewOpen}
+        onOpenChange={(open) => {
+          setPreviewOpen(open)
+          if (!open) setPreviewFile(null)
+        }}
+        workspaceId={workspaceId}
+        file={previewFile}
+      />
 
       {keyModal.open && (
         <KeyPromptModal

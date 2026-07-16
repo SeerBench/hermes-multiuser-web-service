@@ -6,7 +6,10 @@ import uuid
 from pathlib import Path
 from typing import Any, List, Optional
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
@@ -64,6 +67,7 @@ class FilePatchBody(BaseModel):
     category_id: Optional[str] = None
     folder_id: Optional[str] = None
     tag_ids: Optional[List[str]] = None
+    filename: Optional[str] = Field(default=None, min_length=1, max_length=512)
 
 
 def _is_image_filename(name: str) -> bool:
@@ -224,6 +228,16 @@ def patch_file(
                     raise HTTPException(status_code=400, detail="invalid tag")
                 db.add(FileTagLink(file_id=file_id, tag_id=tid))
             db.flush()
+        if body.filename is not None:
+            safe = Path(body.filename).name.strip()
+            if not safe or safe in (".", ".."):
+                raise HTTPException(status_code=400, detail="invalid filename")
+            suffix = Path(safe).suffix.lower()
+            if suffix not in _ALLOWED_SUFFIXES:
+                raise HTTPException(
+                    status_code=400, detail=f"unsupported type: {suffix or '(none)'}"
+                )
+            rec.filename = safe
         db.add(rec)
         tag_ids = _tag_ids_for_file(db, file_id)
         return file_record_dict(rec, tag_ids=tag_ids)
@@ -267,6 +281,44 @@ def file_status(
         if not rec or rec.workspace_id != workspace_id:
             raise HTTPException(status_code=404, detail="not found")
         return file_record_dict(rec, tag_ids=_tag_ids_for_file(db, file_id))
+
+
+@router.get("/{workspace_id}/files/{file_id}/content")
+def download_file_content(
+    workspace_id: str,
+    file_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> FileResponse:
+    """Stream file bytes for in-app preview (images / markdown / PDF)."""
+    _get_workspace(workspace_id, user_id)
+    store = get_store()
+    with enter_user_context(user_id):
+        from gateway.web.sandbox import get_user_workspace
+
+        with store._session_factory() as db:
+            rec = db.get(FileRecord, file_id)
+            if not rec or rec.workspace_id != workspace_id:
+                raise HTTPException(status_code=404, detail="not found")
+            storage_key = rec.storage_key
+            filename = rec.filename
+            mime_type = rec.mime_type
+
+        root = get_user_workspace().resolve()
+        path = (root / storage_key).resolve()
+        # 防止 storage_key 越权跳出用户沙箱
+        if not path.is_relative_to(root) or not path.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        media = (
+            mime_type
+            or mimetypes.guess_type(filename)[0]
+            or "application/octet-stream"
+        )
+        return FileResponse(
+            path,
+            media_type=media,
+            filename=filename,
+            content_disposition_type="inline",
+        )
 
 
 @router.delete("/{workspace_id}/files/{file_id}")

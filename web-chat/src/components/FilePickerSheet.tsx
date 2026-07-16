@@ -26,7 +26,12 @@ export function FilePickerSheet({
   open: boolean
   onOpenChange: (open: boolean) => void
   workspaceId: string
-  onConfirm: (files: { name: string; path: string; size: number }[]) => void
+  onConfirm: (files: {
+    name: string
+    path: string
+    size: number
+    fileId: string
+  }[]) => void
 }) {
   const t = useT()
   const [files, setFiles] = useState<PlatformFile[]>([])
@@ -64,6 +69,7 @@ export function FilePickerSheet({
         name: f.filename,
         path: f.storage_key ?? `uploads/${f.filename}`,
         size: f.size_bytes ?? 0,
+        fileId: f.id,
       }))
     onConfirm(picked)
   }

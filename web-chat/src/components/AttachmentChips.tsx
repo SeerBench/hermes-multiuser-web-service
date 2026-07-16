@@ -3,10 +3,16 @@ import { formatBytes } from '../format'
 import { useT } from '../i18n'
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
+const DRAWER_DOC_EXT = /\.(md|pdf)$/i
 
 /** True when the attachment filename looks like an image. */
 export function isImageAttachmentName(name: string): boolean {
   return IMAGE_EXT.test(name)
+}
+
+/** Markdown / PDF — click opens the right-side preview drawer. */
+export function isDrawerPreviewableName(name: string): boolean {
+  return DRAWER_DOC_EXT.test(name)
 }
 
 // A file selected in the composer, tracked through its upload lifecycle.
@@ -17,33 +23,46 @@ export type PendingAttachment = {
   path?: string
   status: 'uploading' | 'done' | 'error'
   error?: string
-  /** Object URL (or other) for local image hover preview; revoke when removed. */
+  /** Object URL (or authenticated content URL) for image hover preview. */
   previewUrl?: string
+  /** Platform FileRecord id — required for library file content preview. */
+  fileId?: string
 }
 
 type PendingProps = {
   items: PendingAttachment[]
   onRemove: (id: string) => void
+  /** Called when user clicks an md/pdf chip that has a fileId. */
+  onPreviewDoc?: (item: PendingAttachment) => void
 }
 
 /** Editable attachment strip shown above the composer textarea. */
-export function PendingAttachments({ items, onRemove }: PendingProps) {
+export function PendingAttachments({
+  items,
+  onRemove,
+  onPreviewDoc,
+}: PendingProps) {
   const t = useT()
   if (items.length === 0) return null
   return (
     <div className="attach-strip">
       {items.map((a) => {
-        const showPreview =
+        const showImagePreview =
           Boolean(a.previewUrl) && isImageAttachmentName(a.name)
+        const canDrawerPreview =
+          Boolean(a.fileId) && isDrawerPreviewableName(a.name)
         return (
           <span
             key={a.id}
             className={`attach-chip attach-${a.status}${
-              showPreview ? ' attach-chip--image' : ''
-            }`}
-            title={a.error || a.name}
+              showImagePreview ? ' attach-chip--image' : ''
+            }${canDrawerPreview ? ' attach-chip--doc' : ''}`}
+            title={
+              a.error ||
+              (canDrawerPreview ? t('attach.preview.clickHint') : a.name)
+            }
           >
-            {showPreview && (
+            {showImagePreview && (
               <span className="attach-preview" aria-hidden>
                 <img
                   className="attach-preview-img"
@@ -52,7 +71,7 @@ export function PendingAttachments({ items, onRemove }: PendingProps) {
                 />
               </span>
             )}
-            {showPreview ? (
+            {showImagePreview ? (
               <img
                 className="attach-chip-thumb"
                 src={a.previewUrl}
@@ -64,7 +83,17 @@ export function PendingAttachments({ items, onRemove }: PendingProps) {
                 📎
               </span>
             )}
-            <span className="attach-name">{a.name}</span>
+            {canDrawerPreview ? (
+              <button
+                type="button"
+                className="attach-name attach-name--preview"
+                onClick={() => onPreviewDoc?.(a)}
+              >
+                {a.name}
+              </button>
+            ) : (
+              <span className="attach-name">{a.name}</span>
+            )}
             <span className="attach-size">
               {a.status === 'uploading'
                 ? t('attach.uploading')

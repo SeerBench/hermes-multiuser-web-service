@@ -54,7 +54,12 @@ type ChatComposerProps = {
   pending: PendingAttachment[]
   onRemovePending: (id: string) => void
   onPickFiles: (files: FileList | null) => void
-  onAttachWorkspaceFiles: (paths: { name: string; path: string; size: number }[]) => void
+  onAttachWorkspaceFiles: (paths: {
+    name: string
+    path: string
+    size: number
+    fileId?: string
+  }[]) => void
   onStop: () => void
   placeholder: string
   showSlashPopover: boolean
@@ -72,6 +77,8 @@ type ChatComposerProps = {
   usingFavorites?: boolean
   onNavigate?: (route: 'memory' | 'skills' | 'files' | 'settings') => void
   enabledSkillsCount?: number
+  /** Open md/pdf preview drawer for a library attachment. */
+  onPreviewDoc?: (item: PendingAttachment) => void
 }
 
 type MenuItem = {
@@ -121,6 +128,7 @@ export function ChatComposer({
   usingFavorites = false,
   onNavigate,
   enabledSkillsCount = 0,
+  onPreviewDoc,
 }: ChatComposerProps) {
   const t = useT()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -254,7 +262,11 @@ export function ChatComposer({
             onClose={onSlashClose}
           />
         )}
-        <PendingAttachments items={pending} onRemove={onRemovePending} />
+        <PendingAttachments
+          items={pending}
+          onRemove={onRemovePending}
+          onPreviewDoc={onPreviewDoc}
+        />
         <textarea
           ref={textareaRef}
           className="composer-hmu-input"

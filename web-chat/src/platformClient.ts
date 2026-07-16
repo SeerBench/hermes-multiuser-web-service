@@ -114,6 +114,11 @@ export type SkillDetail = {
 
 const BASE = '/api/v1'
 
+/** Same-origin content URL (cookie auth) for img / iframe / fetch. */
+export function fileContentUrl(workspaceId: string, fileId: string): string {
+  return `${BASE}/workspaces/${workspaceId}/files/${fileId}/content`
+}
+
 class PlatformApiError extends Error {
   status: number
   detail: unknown
@@ -345,6 +350,7 @@ export const platform = {
       category_id?: string | null
       folder_id?: string | null
       tag_ids?: string[]
+      filename?: string
     },
   ) =>
     platformRequest<PlatformFile>(
@@ -478,6 +484,17 @@ export const platform = {
     platformRequest<PlatformFile>(
       `/workspaces/${workspaceId}/files/${fileId}/status`,
     ),
+
+  /** Fetch raw file bytes (markdown text, etc.). */
+  getFileContent: async (workspaceId: string, fileId: string) => {
+    const res = await fetch(fileContentUrl(workspaceId, fileId), {
+      credentials: 'include',
+    })
+    if (!res.ok) {
+      throw new PlatformApiError(res.statusText, res.status)
+    }
+    return res
+  },
 
   adminUsers: () => platformRequest<PlatformUser[]>('/admin/users'),
 
