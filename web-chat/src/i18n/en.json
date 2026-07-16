@@ -52,7 +52,7 @@
 
   "nav.mobile": "Main navigation",
 
-  "composer.placeholder": "Message Hermes…",
+  "composer.placeholder": "Start with any idea… Shift ↵ for a new line…",
   "composer.placeholder.slash": "Type a command or message…",
   "composer.send": "Send",
   "composer.stop": "Stop",
@@ -69,6 +69,8 @@
   "composer.model.current": "Using {model}",
   "composer.model.favoritesHint": "Showing your favorite models.",
   "composer.model.favoritesEdit": "Edit in Settings",
+  "composer.model.badge.pro": "Pro",
+  "composer.model.badge.new": "New",
   "composer.filePicker.title": "Choose from files",
   "composer.filePicker.empty": "No files yet.",
   "composer.filePicker.attach": "Attach ({count})",
@@ -208,6 +210,8 @@
   "settings.account.save.fail": "Failed to update profile.",
   "settings.account.avatar.pick": "Choose avatar",
   "settings.account.avatar.clear": "Remove avatar",
+  "settings.account.avatar.edit": "Edit avatar",
+  "settings.account.avatar.reset": "Restore default avatar",
   "settings.account.avatar.invalid": "Please choose an image file.",
   "settings.account.avatar.tooLarge": "Avatar is too large (keep under ~200KB).",
   "settings.password.title": "Change password",

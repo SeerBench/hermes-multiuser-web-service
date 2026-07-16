@@ -558,32 +558,34 @@ export function FilesPage() {
             </BreadcrumbList>
           </Breadcrumb>
 
-          <label>
-            {t('files.sort')}
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-            >
-              <option value="created_at">{t('files.sort.date')}</option>
-              <option value="size">{t('files.sort.size')}</option>
-              <option value="name">{t('files.sort.name')}</option>
-            </select>
-          </label>
-          <label>
-            {t('files.order')}
-            <select
-              value={order}
-              onChange={(e) => setOrder(e.target.value as 'asc' | 'desc')}
-            >
-              <option value="desc">{t('files.order.desc')}</option>
-              <option value="asc">{t('files.order.asc')}</option>
-            </select>
-          </label>
-          {uploadPct != null && (
-            <span className="files-upload-progress">
-              {t('files.uploadProgress', { pct: uploadPct })}
-            </span>
-          )}
+          <div className="files-toolbar-sort">
+            <label>
+              {t('files.sort')}
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortKey)}
+              >
+                <option value="created_at">{t('files.sort.date')}</option>
+                <option value="size">{t('files.sort.size')}</option>
+                <option value="name">{t('files.sort.name')}</option>
+              </select>
+            </label>
+            <label>
+              {t('files.order')}
+              <select
+                value={order}
+                onChange={(e) => setOrder(e.target.value as 'asc' | 'desc')}
+              >
+                <option value="desc">{t('files.order.desc')}</option>
+                <option value="asc">{t('files.order.asc')}</option>
+              </select>
+            </label>
+            {uploadPct != null && (
+              <span className="files-upload-progress">
+                {t('files.uploadProgress', { pct: uploadPct })}
+              </span>
+            )}
+          </div>
         </div>
 
         {error && <p className="auth-error">{error}</p>}

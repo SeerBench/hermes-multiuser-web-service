@@ -230,6 +230,7 @@ function AppShell() {
             )}
             <AccountMenu
               email={user.email}
+              avatarUrl={user.avatar_url}
               onOpenSettings={() => goto('settings')}
               onLogout={() => void handleLoggedOut()}
             />

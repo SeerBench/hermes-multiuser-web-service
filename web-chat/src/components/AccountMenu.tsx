@@ -10,16 +10,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 
 type Props = {
   email?: string | null
+  /** 用户自定义头像 URL；为空则显示默认图标 */
+  avatarUrl?: string | null
   onOpenSettings: () => void
   onLogout: () => void
 }
 
 /** Header account menu: language, settings, logout. */
-export function AccountMenu({ email, onOpenSettings, onLogout }: Props) {
+export function AccountMenu({
+  email,
+  avatarUrl,
+  onOpenSettings,
+  onLogout,
+}: Props) {
   const t = useT()
+  const hasAvatar = Boolean(avatarUrl?.trim())
 
   return (
     <DropdownMenu>
@@ -27,11 +36,23 @@ export function AccountMenu({ email, onOpenSettings, onLogout }: Props) {
         <Button
           type="button"
           variant="outline"
-          size="icon-sm"
           title={t('nav.account')}
           aria-label={t('nav.account')}
+          className={cn(
+            'account-menu-trigger size-8 shrink-0 overflow-hidden rounded-full p-0',
+            hasAvatar && 'border-border',
+          )}
         >
-          <CircleUserRound className="size-4" />
+          {hasAvatar ? (
+            <img
+              src={avatarUrl!}
+              alt=""
+              className="size-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <CircleUserRound className="size-4" aria-hidden />
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[12rem]">

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { ChatComposer } from './ChatComposer'
@@ -65,5 +65,92 @@ describe('ChatComposer', () => {
       .closest('[data-slot="dropdown-menu-content"]')
     expect(menu).toBeTruthy()
     expect(menu?.closest('.composer-hmu-box')).toBeNull()
+  })
+
+  it('opens a searchable model dropdown instead of a dialog', async () => {
+    const user = userEvent.setup()
+    const onModelChange = vi.fn()
+    render(
+      <LocaleProvider>
+        <ChatComposer
+          input=""
+          onInputChange={noop}
+          onSubmit={(e) => e?.preventDefault()}
+          onKeyDown={noop}
+          streaming={false}
+          uploading={false}
+          pending={[]}
+          onRemovePending={noop}
+          onPickFiles={noop}
+          onAttachWorkspaceFiles={noop}
+          onStop={noop}
+          placeholder="msg"
+          showSlashPopover={false}
+          slashQuery={null}
+          commandCatalog={[]}
+          onSlashSelect={noop}
+          onSlashClose={noop}
+          models={[
+            { id: 'deepseek-v4-pro' },
+            { id: 'claude-sonnet-4.6' },
+            { id: 'gpt-5.6-sol-pro' },
+          ]}
+          selectedModel="deepseek-v4-pro"
+          onModelChange={onModelChange}
+        />
+      </LocaleProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: /choose model/i }))
+    const search = await screen.findByPlaceholderText(/search models/i)
+    expect(search).toBeTruthy()
+    const popover = search.closest('[data-slot="popover-content"]')
+    expect(popover).toBeTruthy()
+    expect(popover).toHaveTextContent('DeepSeek V4 Pro')
+    expect(popover).toHaveTextContent('Claude Sonnet 4.6')
+
+    await user.type(search, 'claude')
+    expect(popover).not.toHaveTextContent('DeepSeek V4 Pro')
+    expect(popover).toHaveTextContent('Claude Sonnet 4.6')
+
+    await user.click(
+      within(popover as HTMLElement).getByRole('option', {
+        name: /claude sonnet 4\.6/i,
+      }),
+    )
+    expect(onModelChange).toHaveBeenCalledWith('claude-sonnet-4.6')
+  })
+
+  it('uses a 2-line autosize textarea (grows up to 5 lines in CSS/JS)', () => {
+    render(
+      <LocaleProvider>
+        <ChatComposer
+          input="hello"
+          onInputChange={noop}
+          onSubmit={(e) => e?.preventDefault()}
+          onKeyDown={noop}
+          streaming={false}
+          uploading={false}
+          pending={[]}
+          onRemovePending={noop}
+          onPickFiles={noop}
+          onAttachWorkspaceFiles={noop}
+          onStop={noop}
+          placeholder="msg"
+          showSlashPopover={false}
+          slashQuery={null}
+          commandCatalog={[]}
+          onSlashSelect={noop}
+          onSlashClose={noop}
+          models={[]}
+          selectedModel=""
+          onModelChange={noop}
+        />
+      </LocaleProvider>,
+    )
+
+    const ta = screen.getByPlaceholderText('msg') as HTMLTextAreaElement
+    expect(ta.rows).toBe(2)
+    expect(ta.className).toContain('composer-hmu-input')
   })
 })

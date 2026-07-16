@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Pencil } from 'lucide-react'
 import { ApiError, auth } from '../api'
 import type { User } from '../api'
 import { LanguageToggle } from '../components/LanguageToggle'
@@ -30,6 +31,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -81,6 +88,7 @@ export function SettingsPage({
   const [nickname, setNickname] = useState('')
   const [email, setEmail] = useState('')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const avatarFileRef = useRef<HTMLInputElement | null>(null)
   const [profileBusy, setProfileBusy] = useState(false)
   const [profileMsg, setProfileMsg] = useState<string | null>(null)
   const [currentPassword, setCurrentPassword] = useState('')
@@ -495,18 +503,64 @@ export function SettingsPage({
                   {loading ? (
                     <p className="text-muted-foreground text-sm">{t('common.loading')}</p>
                   ) : me ? (
-                    <div className="flex items-start gap-3">
-                      {me.avatar_url ? (
-                        <img
-                          src={me.avatar_url}
-                          alt=""
-                          className="size-12 rounded-full border border-border object-cover"
+                    <div className="flex items-start gap-4">
+                      {/* 账号预览头像 64×64；右下角编辑：更换 / 恢复默认 */}
+                      <div className="relative size-16 shrink-0">
+                        {avatarUrl ? (
+                          <img
+                            src={avatarUrl}
+                            alt=""
+                            className="size-16 rounded-full border border-border object-cover"
+                          />
+                        ) : (
+                          <div className="bg-muted text-muted-foreground flex size-16 items-center justify-center rounded-full text-lg font-medium">
+                            {(nickname || me.nickname || me.email || '?')
+                              .slice(0, 1)
+                              .toUpperCase()}
+                          </div>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon-xs"
+                              variant="secondary"
+                              className="absolute -right-0.5 -bottom-0.5 size-6 rounded-full border border-border shadow-sm"
+                              title={t('settings.account.avatar.edit')}
+                              aria-label={t('settings.account.avatar.edit')}
+                            >
+                              <Pencil className="size-3" aria-hidden />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="min-w-[10rem]">
+                            <DropdownMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault()
+                                avatarFileRef.current?.click()
+                              }}
+                            >
+                              {t('settings.account.avatar.pick')}
+                            </DropdownMenuItem>
+                            {avatarUrl && (
+                              <DropdownMenuItem
+                                onSelect={() => setAvatarUrl(null)}
+                              >
+                                {t('settings.account.avatar.reset')}
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <input
+                          ref={avatarFileRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            onAvatarFile(e.target.files?.[0] ?? null)
+                            e.target.value = ''
+                          }}
                         />
-                      ) : (
-                        <div className="bg-muted text-muted-foreground flex size-12 items-center justify-center rounded-full text-sm font-medium">
-                          {(me.nickname || me.email || '?').slice(0, 1).toUpperCase()}
-                        </div>
-                      )}
+                      </div>
                       <dl className="grid flex-1 gap-2 text-sm">
                         {me.nickname && (
                           <div className="flex justify-between gap-4">
@@ -553,45 +607,6 @@ export function SettingsPage({
 
                 <section className="space-y-3">
                   <h3 className="text-sm font-semibold">{t('settings.account.edit')}</h3>
-                  <div className="flex items-center gap-4">
-                    {avatarUrl ? (
-                      <img
-                        src={avatarUrl}
-                        alt=""
-                        className="size-16 rounded-full border border-border object-cover"
-                      />
-                    ) : (
-                      <div className="bg-muted flex size-16 items-center justify-center rounded-full text-lg">
-                        {(nickname || email || '?').slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <Label className="cursor-pointer">
-                        <span className="bg-secondary inline-flex h-8 items-center rounded-md px-3 text-sm">
-                          {t('settings.account.avatar.pick')}
-                        </span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            onAvatarFile(e.target.files?.[0] ?? null)
-                            e.target.value = ''
-                          }}
-                        />
-                      </Label>
-                      {avatarUrl && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setAvatarUrl(null)}
-                        >
-                          {t('settings.account.avatar.clear')}
-                        </Button>
-                      )}
-                    </div>
-                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="settings-nickname">{t('settings.account.nickname')}</Label>
                     <Input

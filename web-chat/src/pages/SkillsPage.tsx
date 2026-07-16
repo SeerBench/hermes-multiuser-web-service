@@ -197,11 +197,6 @@ export function SkillsPage() {
       hint={t('skills.hint')}
       density="reading"
       constrainWidth={false}
-      actions={
-        <Button type="button" onClick={() => setCreateOpen(true)}>
-          {t('skills.create')}
-        </Button>
-      }
     >
       {error && (
         <Alert variant="destructive" className="mb-3">
@@ -214,10 +209,20 @@ export function SkillsPage() {
         onValueChange={(v) => setTab(v as SkillsTab)}
         className="skills-tabs gap-4"
       >
-        <TabsList className="bg-muted/80">
-          <TabsTrigger value="mine">{t('skills.tab.mine')}</TabsTrigger>
-          <TabsTrigger value="catalog">{t('skills.tab.catalog')}</TabsTrigger>
-        </TabsList>
+        <div className="skills-tabs-bar">
+          <TabsList className="bg-muted/80">
+            <TabsTrigger value="mine">{t('skills.tab.mine')}</TabsTrigger>
+            <TabsTrigger value="catalog">{t('skills.tab.catalog')}</TabsTrigger>
+          </TabsList>
+          <Button
+            type="button"
+            size="sm"
+            className="skills-tabs-create"
+            onClick={() => setCreateOpen(true)}
+          >
+            {t('skills.create')}
+          </Button>
+        </div>
 
         <TabsContent value="mine" className="space-y-2 outline-none">
           {mySkills.length === 0 ? (

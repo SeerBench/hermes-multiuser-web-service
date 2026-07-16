@@ -15,7 +15,10 @@ import type {
   UploadedFile,
 } from '../api'
 import { ChatComposer } from '../components/ChatComposer'
-import type { PendingAttachment } from '../components/AttachmentChips'
+import {
+  isImageAttachmentName,
+  type PendingAttachment,
+} from '../components/AttachmentChips'
 import { ChatTurnBubble } from '../components/ChatTurnBubble'
 import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
@@ -395,41 +398,67 @@ export function ChatPage({
 
   // ── Attachments ────────────────────────────────────────────────────────
 
-  const removePending = useCallback((id: string) => {
-    setPending((prev) => prev.filter((p) => p.id !== id))
+  const revokePreview = useCallback((url?: string) => {
+    if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
   }, [])
 
-  const onPickFiles = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const picked = Array.from(files)
-    const entries: PendingAttachment[] = picked.map((f) => ({
-      id: newTurnId(),
-      name: f.name,
-      size: f.size,
-      status: 'uploading',
-    }))
-    setPending((prev) => [...prev, ...entries])
-    try {
-      const saved = await uploadsApi.create(picked)
-      // Match returned files back to the pending entries by position.
-      setPending((prev) =>
-        prev.map((p) => {
-          const idx = entries.findIndex((e) => e.id === p.id)
-          if (idx < 0 || idx >= saved.length) return p
-          const s = saved[idx]
-          return { ...p, status: 'done', path: s.path, name: s.name, size: s.size }
-        }),
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      const ids = new Set(entries.map((e) => e.id))
-      setPending((prev) =>
-        prev.map((p) =>
-          ids.has(p.id) ? { ...p, status: 'error', error: msg } : p,
-        ),
-      )
-    }
-  }, [])
+  const removePending = useCallback(
+    (id: string) => {
+      setPending((prev) => {
+        const target = prev.find((p) => p.id === id)
+        revokePreview(target?.previewUrl)
+        return prev.filter((p) => p.id !== id)
+      })
+    },
+    [revokePreview],
+  )
+
+  const onPickFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return
+      const picked = Array.from(files)
+      const entries: PendingAttachment[] = picked.map((f) => {
+        const isImage =
+          f.type.startsWith('image/') || isImageAttachmentName(f.name)
+        return {
+          id: newTurnId(),
+          name: f.name,
+          size: f.size,
+          status: 'uploading' as const,
+          // 本地图片用 blob URL 做悬停预览；移除时 revoke
+          previewUrl: isImage ? URL.createObjectURL(f) : undefined,
+        }
+      })
+      setPending((prev) => [...prev, ...entries])
+      try {
+        const saved = await uploadsApi.create(picked)
+        // Match returned files back to the pending entries by position.
+        setPending((prev) =>
+          prev.map((p) => {
+            const idx = entries.findIndex((e) => e.id === p.id)
+            if (idx < 0 || idx >= saved.length) return p
+            const s = saved[idx]
+            return {
+              ...p,
+              status: 'done',
+              path: s.path,
+              name: s.name,
+              size: s.size,
+            }
+          }),
+        )
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        const ids = new Set(entries.map((e) => e.id))
+        setPending((prev) =>
+          prev.map((p) =>
+            ids.has(p.id) ? { ...p, status: 'error', error: msg } : p,
+          ),
+        )
+      }
+    },
+    [],
+  )
 
   const runMessage = useCallback(
     async (
@@ -818,10 +847,13 @@ export function ChatPage({
         return
       }
       setInput('')
-      setPending([])
+      setPending((prev) => {
+        for (const p of prev) revokePreview(p.previewUrl)
+        return []
+      })
       await runMessage(message, undefined, ready.length ? ready : undefined)
     },
-    [input, streaming, uploading, pending, runMessage, dispatchSlash],
+    [input, streaming, uploading, pending, runMessage, dispatchSlash, revokePreview],
   )
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {

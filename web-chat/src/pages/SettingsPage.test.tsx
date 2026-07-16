@@ -1,10 +1,22 @@
 import '@testing-library/jest-dom/vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { LocaleProvider } from '../i18n'
 import { SettingsPage } from './SettingsPage'
+
+beforeAll(() => {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = () => false
+  }
+  if (!Element.prototype.setPointerCapture) {
+    Element.prototype.setPointerCapture = () => {}
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = () => {}
+  }
+})
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
@@ -115,7 +127,15 @@ describe('SettingsPage', () => {
     expect(await screen.findByText(/a@b.com/)).toBeInTheDocument()
     expect(screen.getByLabelText(/display name/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument()
+    // 头像只在预览区出现一次；右下角编辑入口，无「移除头像」独立按钮
+    expect(screen.getByRole('button', { name: /edit avatar/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /remove avatar/i })).toBeNull()
     expect(screen.getByLabelText(/current password/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /edit avatar/i }))
+    expect(await screen.findByText(/choose avatar/i)).toBeInTheDocument()
+    expect(screen.queryByText(/restore default avatar/i)).toBeNull()
+    await user.keyboard('{Escape}')
 
     await user.click(screen.getByRole('tab', { name: /models/i }))
     expect(

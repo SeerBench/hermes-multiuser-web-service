@@ -42,7 +42,8 @@ export function ChatTurnBubble({
     <Message align={align} className={`turn turn-${turn.role}`}>
       {showAvatar && (
         <MessageAvatar>
-          <Avatar size="sm">
+          {/* 全站用户头像统一 32×32（Avatar default = size-8） */}
+          <Avatar>
             <AvatarImage src={userAvatarUrl!} alt="" />
           </Avatar>
         </MessageAvatar>
