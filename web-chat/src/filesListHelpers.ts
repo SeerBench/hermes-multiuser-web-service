@@ -27,6 +27,16 @@ export function toggleFileTagId(
   return [...next]
 }
 
+/** Find an existing tag using the same trimmed, case-insensitive identity as the API. */
+export function findTagByName(
+  tags: FileTag[],
+  name: string,
+): FileTag | undefined {
+  const normalized = name.trim().toLocaleLowerCase()
+  if (!normalized) return undefined
+  return tags.find((tag) => tag.name.trim().toLocaleLowerCase() === normalized)
+}
+
 /**
  * Depth-first folder list for move-to tree pickers.
  * Roots first (name-sorted), then children.

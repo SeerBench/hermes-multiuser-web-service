@@ -89,7 +89,7 @@ describe('ChatPage', () => {
     renderChat({ signedIn: true })
 
     expect(await screen.findByText(/start a new conversation/i)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(/message hermes/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/start with any idea/i)).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
@@ -120,9 +120,9 @@ describe('ChatPage', () => {
     })
 
     renderChat({ signedIn: true })
-    await screen.findByPlaceholderText(/message hermes/i)
+    await screen.findByPlaceholderText(/start with any idea/i)
 
-    await user.type(screen.getByPlaceholderText(/message hermes/i), 'Hi there')
+    await user.type(screen.getByPlaceholderText(/start with any idea/i), 'Hi there')
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     expect(await screen.findByText(/hello world/i)).toBeInTheDocument()
@@ -138,10 +138,10 @@ describe('ChatPage', () => {
     mockAuthedChat()
     renderChat({ signedIn: true, needsBindKey: true, onGoBindSettings })
 
-    await screen.findByPlaceholderText(/message hermes/i)
+    await screen.findByPlaceholderText(/start with any idea/i)
     expect(screen.getByText(/disabled until you bind/i)).toBeInTheDocument()
 
-    await user.type(screen.getByPlaceholderText(/message hermes/i), 'Hi')
+    await user.type(screen.getByPlaceholderText(/start with any idea/i), 'Hi')
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     expect(streamChat).not.toHaveBeenCalled()
@@ -156,9 +156,9 @@ describe('ChatPage', () => {
     })
 
     renderChat({ signedIn: true })
-    await screen.findByPlaceholderText(/message hermes/i)
+    await screen.findByPlaceholderText(/start with any idea/i)
 
-    await user.type(screen.getByPlaceholderText(/message hermes/i), 'fail please')
+    await user.type(screen.getByPlaceholderText(/start with any idea/i), 'fail please')
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
     expect(await screen.findByText(/upstream down/i)).toBeInTheDocument()

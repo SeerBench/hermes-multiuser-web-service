@@ -21,6 +21,7 @@ import type { PreviewableFile } from '../components/FilePreviewDrawer'
 import {
   fetchWorkspaceImagePreviewUrl,
   isImageAttachment,
+  shouldFetchWorkspaceImagePreview,
 } from '../attachmentPreview'
 import { ChatTurnBubble } from '../components/ChatTurnBubble'
 import { ConversationHeader } from '../components/ConversationHeader'
@@ -131,7 +132,7 @@ export function ChatPage({
       for (const entry of entries) {
         if (!entry.fileId) continue
         if (
-          !isImageAttachment(entry.name, {
+          !shouldFetchWorkspaceImagePreview(entry.name, {
             mimeType: entry.mimeType,
             path: entry.path,
           })
@@ -141,7 +142,18 @@ export function ChatPage({
         void fetchWorkspaceImagePreviewUrl(ws, entry.fileId)
           .then((previewUrl) => {
             setPending((prev) =>
-              prev.map((p) => (p.id === entry.id ? { ...p, previewUrl } : p)),
+              prev.map((p) =>
+                p.id === entry.id
+                  ? {
+                      ...p,
+                      previewUrl,
+                      // The byte probe confirmed an image even if metadata did not.
+                      mimeType: p.mimeType?.startsWith('image/')
+                        ? p.mimeType
+                        : 'image/*',
+                    }
+                  : p,
+              ),
             )
           })
           .catch(() => {
@@ -1034,9 +1046,7 @@ export function ChatPage({
           </div>
         )}
         {/* Header + transcript + composer share one centered reading/full column */}
-        <div className={cn('chat-column', widthClass(chatWidth))}>
-          {(turns.length > 0 && sessionId) || enabledSkillsCount > 0 ? (
-            <ConversationHeader
+        <ConversationHeader
               title={
                 activeConvo?.title?.trim() ||
                 t('convo.untitled')
@@ -1044,6 +1054,7 @@ export function ChatPage({
               pinned={Boolean(activeConvo?.pinned)}
               chatWidth={chatWidth}
               skillsCount={enabledSkillsCount}
+              isNewConversation={!sessionId || turns.length === 0}
               onOpenSidebar={() => setSideOpen(true)}
               onRename={
                 sessionId && turns.length > 0
@@ -1070,7 +1081,8 @@ export function ChatPage({
                   : undefined
               }
             />
-          ) : null}
+        <div className={cn('chat-column', widthClass(chatWidth))}>
+
           <MessageScrollerProvider
             key={sessionId ?? 'new-chat'}
             autoScroll

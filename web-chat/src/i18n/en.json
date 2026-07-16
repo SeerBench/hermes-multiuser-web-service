@@ -305,6 +305,7 @@
   "files.tags.filterAll": "All tags",
   "files.tags.manageFile": "Manage tags",
   "files.tags.manageFileHint": "Add or remove tags for \"{name}\".",
+  "files.tags.useExisting": "Add existing tag",
   "files.tags.assign": "Assign tags to a file",
   "files.tags.assign.hint": "Pick a file, then toggle tags on or off.",
   "files.tags.pickOther": "Pick another file",

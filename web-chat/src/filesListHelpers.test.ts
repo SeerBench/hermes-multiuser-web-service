@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { FileFolder, FileTag } from './platformClient'
 import {
   assignedTagsForFile,
+  findTagByName,
   flattenFolderTree,
   toggleFileTagId,
 } from './filesListHelpers'
@@ -48,5 +49,19 @@ describe('toggleFileTagId', () => {
 
   it('removes an assigned tag', () => {
     expect(toggleFileTagId(['t1', 't2'], 't1')).toEqual(['t2'])
+  })
+})
+
+describe('findTagByName', () => {
+  const tags: FileTag[] = [
+    { id: 't1', name: 'Urgent', created_at: 1 },
+  ]
+
+  it('matches trimmed names case-insensitively', () => {
+    expect(findTagByName(tags, '  urgent ')).toEqual(tags[0])
+  })
+
+  it('returns undefined for a new tag name', () => {
+    expect(findTagByName(tags, 'review')).toBeUndefined()
   })
 })

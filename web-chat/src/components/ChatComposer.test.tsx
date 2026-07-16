@@ -153,4 +153,44 @@ describe('ChatComposer', () => {
     expect(ta.rows).toBe(2)
     expect(ta.className).toContain('composer-hmu-input')
   })
+
+  it('adds focus-inputting only while the textarea has focus', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <LocaleProvider>
+        <ChatComposer
+          input=""
+          onInputChange={noop}
+          onSubmit={(e) => e?.preventDefault()}
+          onKeyDown={noop}
+          streaming={false}
+          uploading={false}
+          pending={[]}
+          onRemovePending={noop}
+          onPickFiles={noop}
+          onAttachWorkspaceFiles={noop}
+          onStop={noop}
+          placeholder="focus message"
+          showSlashPopover={false}
+          slashQuery={null}
+          commandCatalog={[]}
+          onSlashSelect={noop}
+          onSlashClose={noop}
+          models={[]}
+          selectedModel=""
+          onModelChange={noop}
+        />
+      </LocaleProvider>,
+    )
+
+    const box = container.querySelector('.composer-hmu-box')
+    const textarea = screen.getByPlaceholderText('focus message')
+    expect(box).not.toHaveClass('focus-inputting')
+
+    await user.click(textarea)
+    expect(box).toHaveClass('focus-inputting')
+
+    await user.tab()
+    expect(box).not.toHaveClass('focus-inputting')
+  })
 })

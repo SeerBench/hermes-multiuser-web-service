@@ -11,7 +11,7 @@ import mimetypes
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from gateway.web.platform.models import (
     DocumentChunk,
@@ -632,16 +632,17 @@ def create_tag(
     store = get_store()
     from gateway.web.platform.database import session_scope
 
+    name = body.name.strip()
     with session_scope(store._engine) as db:
         existing = db.execute(
             select(FileTag).where(
                 FileTag.workspace_id == workspace_id,
-                FileTag.name == body.name.strip(),
+                func.lower(FileTag.name) == name.lower(),
             )
         ).scalar_one_or_none()
         if existing:
             return _tag_dict(existing)
-        tag = FileTag(workspace_id=workspace_id, name=body.name.strip())
+        tag = FileTag(workspace_id=workspace_id, name=name)
         db.add(tag)
         db.flush()
         return _tag_dict(tag)

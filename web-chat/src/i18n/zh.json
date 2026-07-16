@@ -305,6 +305,7 @@
   "files.tags.filterAll": "全部标签",
   "files.tags.manageFile": "管理标签",
   "files.tags.manageFileHint": "为「{name}」添加或移除标签。",
+  "files.tags.useExisting": "添加已有标签",
   "files.tags.assign": "为文件选择标签",
   "files.tags.assign.hint": "先选择一个文件，再点击标签进行添加或移除。",
   "files.tags.pickOther": "选其他文件",

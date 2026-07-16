@@ -63,5 +63,8 @@ describe('ChatTurnBubble', () => {
     expect(screen.getByText('助手回复')).toBeTruthy()
     expect(container.querySelector('[data-slot="avatar"]')).toBeNull()
     expect(container.querySelector('[data-slot="message-avatar"]')).toBeNull()
+    expect(
+      container.querySelector('[data-slot="message-content"]'),
+    ).toHaveClass('turn-assistant-content')
   })
 })

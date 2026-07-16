@@ -2,7 +2,9 @@ import { useState } from 'react'
 import {
   Check,
   Download,
+  Maximize2,
   Menu,
+  Minimize2,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -27,6 +29,7 @@ export function ConversationHeader({
   pinned,
   chatWidth,
   skillsCount,
+  isNewConversation = false,
   onOpenSidebar,
   onRename,
   onTogglePin,
@@ -38,6 +41,8 @@ export function ConversationHeader({
   pinned: boolean
   chatWidth: LayoutWidth
   skillsCount?: number
+  /** New chat: hide title/skill metadata and expose width as a direct action. */
+  isNewConversation?: boolean
   /** Mobile: open conversation list drawer. */
   onOpenSidebar?: () => void
   onRename?: (title: string) => void
@@ -76,7 +81,34 @@ export function ConversationHeader({
         </button>
       )}
 
-      {editing ? (
+      {isNewConversation ? (
+        <>
+          <span className="conversation-header-spacer" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="conversation-header-menu"
+            aria-label={
+              chatWidth === 'full'
+                ? t('layout.width.standard')
+                : t('layout.width.expand')
+            }
+            title={
+              chatWidth === 'full'
+                ? t('layout.width.standard')
+                : t('layout.width.expand')
+            }
+            onClick={onToggleChatWidth}
+          >
+            {chatWidth === 'full' ? (
+              <Minimize2 className="size-4" aria-hidden />
+            ) : (
+              <Maximize2 className="size-4" aria-hidden />
+            )}
+          </Button>
+        </>
+      ) : editing ? (
         <form
           className="conversation-header-edit"
           onSubmit={(e) => {

@@ -140,6 +140,7 @@ export function ChatComposer({
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [modelFilter, setModelFilter] = useState('')
   const [mobile, setMobile] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
 
   useEffect(() => subscribeViewport(setMobile), [])
 
@@ -254,7 +255,12 @@ export function ChatComposer({
 
   return (
     <form className="composer composer-hmu" onSubmit={onSubmit}>
-      <div className="composer-hmu-box">
+      <div
+        className={cn(
+          'composer-hmu-box',
+          inputFocused && 'focus-inputting',
+        )}
+      >
         {showSlashPopover && (
           <SlashCommandPopover
             query={slashQuery ?? ''}
@@ -275,6 +281,8 @@ export function ChatComposer({
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           placeholder={placeholder}
           rows={2}
           disabled={streaming}
@@ -424,7 +432,7 @@ export function ChatComposer({
                   side="top"
                   align="start"
                   sideOffset={8}
-                  className="composer-menu-dropdown min-w-[14rem]"
+                  className="composer-menu-dropdown min-w-56"
                 >
                   {menuItems.map((item) => (
                     <DropdownMenuItem

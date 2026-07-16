@@ -49,7 +49,11 @@ export function ChatTurnBubble({
         </MessageAvatar>
       )}
 
-      <MessageContent className={isUser ? 'max-w-[min(100%,42rem)]' : undefined}>
+      <MessageContent
+        className={
+          isUser ? 'max-w-[min(100%,42rem)]' : 'turn-assistant-content'
+        }
+      >
         <MessageHeader>
           {isUser ? t('chat.role.user') : t('chat.role.assistant')}
           {turn.usage && turn.role === 'assistant' && (
@@ -111,7 +115,7 @@ export function ChatTurnBubble({
               <BubbleContent
                 className={cn(
                   isUser
-                    ? 'bg-primary text-primary-foreground [&_*]:text-primary-foreground'
+                    ? 'bg-primary text-primary-foreground **:text-primary-foreground'
                     : 'w-full max-w-full',
                 )}
               >

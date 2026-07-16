@@ -49,6 +49,57 @@ def test_file_categories_and_tags(client, mock_upstream_key):
     assert tag_id in body["tag_ids"]
 
 
+def test_file_tags_prevent_case_insensitive_duplicates(client):
+    data, cookie = register_user(client)
+    ws_id = data["workspace"]["id"]
+    url = f"/api/v1/workspaces/{ws_id}/file-tags"
+
+    first = client.post(
+        url,
+        json={"name": "Urgent"},
+        cookies={"hermes_session": cookie},
+    )
+    duplicate = client.post(
+        url,
+        json={"name": "  urgent  "},
+        cookies={"hermes_session": cookie},
+    )
+
+    assert first.status_code == 200
+    assert duplicate.status_code == 200
+    assert duplicate.json()["id"] == first.json()["id"]
+    listed = client.get(url, cookies={"hermes_session": cookie})
+    assert [tag["name"] for tag in listed.json()] == ["Urgent"]
+
+
+def test_file_tags_are_isolated_between_users(client):
+    first_data, first_cookie = register_user(client, email="first@example.com")
+    second_data, second_cookie = register_user(client, email="second@example.com")
+    first_url = f"/api/v1/workspaces/{first_data['workspace']['id']}/file-tags"
+    second_url = f"/api/v1/workspaces/{second_data['workspace']['id']}/file-tags"
+
+    first = client.post(
+        first_url,
+        json={"name": "Personal"},
+        cookies={"hermes_session": first_cookie},
+    )
+    second = client.post(
+        second_url,
+        json={"name": "Personal"},
+        cookies={"hermes_session": second_cookie},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["id"] != second.json()["id"]
+    assert client.get(first_url, cookies={"hermes_session": first_cookie}).json() == [
+        first.json()
+    ]
+    assert client.get(second_url, cookies={"hermes_session": second_cookie}).json() == [
+        second.json()
+    ]
+
+
 def test_list_files_sort_by_name(client, mock_upstream_key):
     data, cookie = register_user(client)
     bind_upstream_key(client)

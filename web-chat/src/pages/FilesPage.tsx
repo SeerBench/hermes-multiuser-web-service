@@ -10,6 +10,7 @@ import { PageShell } from '../components/PageShell'
 import { sendFileToChat } from '../attachBridge'
 import {
   assignedTagsForFile,
+  findTagByName,
   flattenFolderTree,
   toggleFileTagId,
 } from '../filesListHelpers'
@@ -159,6 +160,7 @@ export function FilesPage() {
   const [renameFileValue, setRenameFileValue] = useState('')
   const [deletingFile, setDeletingFile] = useState<PlatformFile | null>(null)
   const [taggingFile, setTaggingFile] = useState<PlatformFile | null>(null)
+  const [newManagedTag, setNewManagedTag] = useState('')
 
   const storeUploadRef = useRef<HTMLInputElement>(null)
   const ingestUploadRef = useRef<HTMLInputElement>(null)
@@ -463,6 +465,42 @@ export function FilesPage() {
       setTaggingFile((current) =>
         current?.id === file.id ? { ...current, ...updated } : current,
       )
+    } catch (err) {
+      setError(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createAndAssignTag = async () => {
+    if (!workspaceId || !taggingFile) return
+    const name = newManagedTag.trim()
+    if (!name) return
+
+    setBusy(true)
+    try {
+      // 前后端都按忽略大小写的名称去重；已有标签直接复用并分配。
+      const tag =
+        findTagByName(tags, name) ??
+        (await platform.createFileTag(workspaceId, name))
+      setTags((prev) =>
+        prev.some((item) => item.id === tag.id) ? prev : [...prev, tag],
+      )
+
+      if (!(taggingFile.tag_ids ?? []).includes(tag.id)) {
+        const updated = await platform.patchFile(workspaceId, taggingFile.id, {
+          tag_ids: [...(taggingFile.tag_ids ?? []), tag.id],
+        })
+        setFiles((prev) =>
+          prev.map((row) =>
+            row.id === taggingFile.id ? { ...row, ...updated } : row,
+          ),
+        )
+        setTaggingFile((current) =>
+          current?.id === taggingFile.id ? { ...current, ...updated } : current,
+        )
+      }
+      setNewManagedTag('')
     } catch (err) {
       setError(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
@@ -795,7 +833,10 @@ export function FilesPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="min-w-40">
                           <DropdownMenuItem
-                            onSelect={() => setTaggingFile(f)}
+                            onSelect={() => {
+                              setNewManagedTag('')
+                              setTaggingFile(f)
+                            }}
                           >
                             {t('files.tags.manageFile')}
                           </DropdownMenuItem>
@@ -1032,7 +1073,10 @@ export function FilesPage() {
       <Dialog
         open={taggingFile != null}
         onOpenChange={(open) => {
-          if (!open) setTaggingFile(null)
+          if (!open) {
+            setTaggingFile(null)
+            setNewManagedTag('')
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -1044,6 +1088,30 @@ export function FilesPage() {
                 : null}
             </DialogDescription>
           </DialogHeader>
+          <div className="files-sidebar-form files-tags-create">
+            <Input
+              value={newManagedTag}
+              maxLength={64}
+              placeholder={t('files.newTag')}
+              onChange={(e) => setNewManagedTag(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void createAndAssignTag()
+                }
+              }}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || !newManagedTag.trim()}
+              onClick={() => void createAndAssignTag()}
+            >
+              {findTagByName(tags, newManagedTag)
+                ? t('files.tags.useExisting')
+                : t('files.tags.create')}
+            </Button>
+          </div>
           <div className="files-row-tags files-tags-pick">
             {tags.length === 0 ? (
               <span className="text-muted-foreground">
