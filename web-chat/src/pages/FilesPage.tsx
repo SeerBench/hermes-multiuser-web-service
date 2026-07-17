@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
 import { Folder, MoreHorizontal, Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import { isWorkspaceFilePreviewable } from '../attachmentPreview'
 import { formatBytes } from '../format'
 import {
   FILE_INGEST_POLL_MS,
   isTerminalFileStatus,
   mergeFileUpdates,
 } from '../fileIngestion'
+import { FilePreviewDrawer, type PreviewableFile } from '../components/FilePreviewDrawer'
 import { PageShell } from '../components/PageShell'
 import { sendFileToChat } from '../attachBridge'
 import {
   assignedTagsForFile,
+  canCiteFileToChat,
+  fileOriginLabelKey,
   findTagByName,
   flattenFolderTree,
+  folderContentCount,
   toggleFileTagId,
 } from '../filesListHelpers'
 import { useT } from '../i18n'
@@ -161,6 +167,8 @@ export function FilesPage() {
   const [deletingFile, setDeletingFile] = useState<PlatformFile | null>(null)
   const [taggingFile, setTaggingFile] = useState<PlatformFile | null>(null)
   const [newManagedTag, setNewManagedTag] = useState('')
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const storeUploadRef = useRef<HTMLInputElement>(null)
   const ingestUploadRef = useRef<HTMLInputElement>(null)
@@ -288,8 +296,9 @@ export function FilesPage() {
         return [...uploaded, ...rest]
       })
       await reload()
+      toast.success(t('files.toast.uploaded'))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
       setUploadPct(null)
@@ -302,8 +311,9 @@ export function FilesPage() {
     try {
       await platform.deleteFile(workspaceId, id)
       setFiles((prev) => prev.filter((f) => f.id !== id))
+      toast.success(t('files.toast.deleted'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -315,8 +325,9 @@ export function FilesPage() {
     try {
       const updated = await platform.ingestFile(workspaceId, id)
       setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...updated } : f)))
+      toast.success(t('files.toast.ingested'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -329,8 +340,9 @@ export function FilesPage() {
       setNewFolderName('')
       setFolderDialogOpen(false)
       await reload()
+      toast.success(t('files.toast.folderCreated'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }
 
@@ -347,8 +359,9 @@ export function FilesPage() {
       )
       setRenamingFolderId(null)
       await reload()
+      toast.success(t('files.toast.folderRenamed'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }
 
@@ -373,6 +386,7 @@ export function FilesPage() {
         return cur
       })
       await reload()
+      toast.success(t('files.toast.folderDeleted'))
     } catch (err) {
       if (
         !force &&
@@ -394,7 +408,7 @@ export function FilesPage() {
           folderCount: d.folder_count ?? 0,
         })
       } else {
-        setError(err instanceof PlatformApiError ? err.message : String(err))
+        toast.error(err instanceof PlatformApiError ? err.message : String(err))
       }
     } finally {
       setBusy(false)
@@ -421,8 +435,9 @@ export function FilesPage() {
           : prev.filter((f) => f.id !== fileId),
       )
       setMovingFile(null)
+      toast.success(t('files.toast.moved'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -439,8 +454,9 @@ export function FilesPage() {
         prev.map((f) => (f.id === renamingFile.id ? { ...f, ...updated } : f)),
       )
       setRenamingFile(null)
+      toast.success(t('files.toast.renamed'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -465,8 +481,9 @@ export function FilesPage() {
       setTaggingFile((current) =>
         current?.id === file.id ? { ...current, ...updated } : current,
       )
+      toast.success(t('files.tags.toast.updated'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -501,8 +518,9 @@ export function FilesPage() {
         )
       }
       setNewManagedTag('')
+      toast.success(t('files.tags.toast.updated'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -698,7 +716,6 @@ export function FilesPage() {
                 <th>{t('files.col.name')}</th>
                 <th>{t('files.col.size')}</th>
                 <th>{t('files.col.created')}</th>
-                <th>{t('files.col.tags')}</th>
                 <th>{t('files.col.origin')}</th>
                 {showStatusCol && <th>{t('files.col.status')}</th>}
                 <th />
@@ -708,7 +725,7 @@ export function FilesPage() {
               {/* 当前目录下的子文件夹与文件同表展示 */}
               {childFolders.map((folder) => (
                 <tr key={`folder-${folder.id}`} className="files-row--folder">
-                  <td>
+                  <td className="files-name-cell">
                     {renamingFolderId === folder.id ? (
                       <div className="files-inline-rename">
                         <Input
@@ -736,39 +753,47 @@ export function FilesPage() {
                         onClick={() => setFolderId(folder.id)}
                       >
                         <Folder className="size-4 shrink-0" aria-hidden />
-                        <span>{folder.name}</span>
+                        <span className="files-folder-name">
+                          {folder.name}
+                          <span className="files-folder-count">
+                            {t('files.folders.fileCount', {
+                              n: folderContentCount(folder, folders),
+                            })}
+                          </span>
+                        </span>
                       </button>
                     )}
                   </td>
-                  <td>—</td>
+                  <td className="files-col-size">—</td>
                   <td className="files-col-date">
                     {formatCreatedAt(folder.created_at)}
                   </td>
-                  <td>—</td>
-                  <td>{t('files.folders')}</td>
+                  <td className="files-col-origin">—</td>
                   {showStatusCol && <td>—</td>}
-                  <td className="files-row-actions">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      title={t('files.folders.rename')}
-                      onClick={() => {
-                        setRenamingFolderId(folder.id)
-                        setRenameValue(folder.name)
-                      }}
-                    >
-                      {t('files.folders.rename')}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => requestDeleteFolder(folder.id)}
-                    >
-                      {t('files.delete')}
-                    </Button>
+                  <td>
+                    <div className="files-row-actions">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        title={t('files.folders.rename')}
+                        onClick={() => {
+                          setRenamingFolderId(folder.id)
+                          setRenameValue(folder.name)
+                        }}
+                      >
+                        {t('files.folders.rename')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => requestDeleteFolder(folder.id)}
+                      >
+                        {t('files.delete')}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -776,103 +801,131 @@ export function FilesPage() {
               {files.map((f) => {
                 const image = isImageFilename(f.filename)
                 const fileTags = assignedTagsForFile(tags, f.tag_ids)
+                const citeable = canCiteFileToChat(f)
+                const previewable = isWorkspaceFilePreviewable(f.filename)
                 return (
                   <tr key={f.id}>
-                    <td>{f.filename}</td>
-                    <td>{formatBytes(f.size_bytes ?? 0)}</td>
-                    <td className="files-col-date">
-                      {formatCreatedAt(f.created_at)}
-                    </td>
-                    <td>
-                      <div className="files-row-tags">
-                        {fileTags.length === 0 ? (
-                          <span className="text-muted-foreground">—</span>
+                    <td className="files-name-cell">
+                      <div className="files-name-stack">
+                        {previewable ? (
+                          <button
+                            type="button"
+                            className="files-name-link"
+                            title={t('attach.preview.clickHint')}
+                            onClick={() => {
+                              setPreviewFile({
+                                fileId: f.id,
+                                name: f.filename,
+                              })
+                              setPreviewOpen(true)
+                            }}
+                          >
+                            {f.filename}
+                          </button>
                         ) : (
-                          fileTags.map((tg) => (
-                            <span
-                              key={tg.id}
-                              className="files-tag files-tag--active files-tag--readonly"
-                            >
-                              {tg.name}
-                            </span>
-                          ))
+                          <span className="files-name-text">{f.filename}</span>
+                        )}
+                        {fileTags.length > 0 && (
+                          <div className="files-row-tags">
+                            {fileTags.map((tg) => (
+                              <Badge
+                                key={tg.id}
+                                variant="secondary"
+                                className="files-name-tag"
+                              >
+                                {tg.name}
+                              </Badge>
+                            ))}
+                          </div>
                         )}
                       </div>
                     </td>
-                    <td>{f.origin ?? 'platform'}</td>
+                    <td className="files-col-size">
+                      {formatBytes(f.size_bytes ?? 0)}
+                    </td>
+                    <td className="files-col-date">
+                      {formatCreatedAt(f.created_at)}
+                    </td>
+                    <td className="files-col-origin">
+                      {t(fileOriginLabelKey(f.origin))}
+                    </td>
                     {showStatusCol && (
                       <td>{image ? '—' : <FileStatusBadge file={f} />}</td>
                     )}
-                    <td className="files-row-actions">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() =>
-                          sendFileToChat({
-                            name: f.filename,
-                            path: f.storage_key ?? `uploads/${f.filename}`,
-                            size: f.size_bytes ?? 0,
-                            fileId: f.id,
-                            mimeType: f.mime_type,
-                          })
-                        }
-                      >
-                        {t('files.sendToChat')}
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                    <td>
+                      <div className="files-row-actions">
+                        {citeable && (
                           <Button
                             type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label={t('files.more')}
+                            size="sm"
+                            variant="secondary"
+                            onClick={() =>
+                              sendFileToChat({
+                                name: f.filename,
+                                path: f.storage_key ?? `uploads/${f.filename}`,
+                                size: f.size_bytes ?? 0,
+                                fileId: f.id,
+                                mimeType: f.mime_type,
+                              })
+                            }
                           >
-                            <MoreHorizontal className="size-4" />
+                            {t('files.sendToChat')}
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="min-w-40">
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setNewManagedTag('')
-                              setTaggingFile(f)
-                            }}
-                          >
-                            {t('files.tags.manageFile')}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setMoveTargetId(f.folder_id ?? '__root__')
-                              setMovingFile(f)
-                            }}
-                          >
-                            {t('files.move')}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              setRenameFileValue(f.filename)
-                              setRenamingFile(f)
-                            }}
-                          >
-                            {t('files.rename')}
-                          </DropdownMenuItem>
-                          {!image && f.status === 'skipped' && (
-                            <DropdownMenuItem
-                              disabled={busy}
-                              onSelect={() => void onIngest(f.id)}
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={t('files.more')}
                             >
-                              {t('files.ingest')}
+                              <MoreHorizontal className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-40">
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setNewManagedTag('')
+                                setTaggingFile(f)
+                              }}
+                            >
+                              {t('files.tags.manageFile')}
                             </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem
-                            variant="destructive"
-                            disabled={busy}
-                            onSelect={() => setDeletingFile(f)}
-                          >
-                            {t('files.delete')}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setMoveTargetId(f.folder_id ?? '__root__')
+                                setMovingFile(f)
+                              }}
+                            >
+                              {t('files.move')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setRenameFileValue(f.filename)
+                                setRenamingFile(f)
+                              }}
+                            >
+                              {t('files.rename')}
+                            </DropdownMenuItem>
+                            {!image && f.status === 'skipped' && (
+                              <DropdownMenuItem
+                                disabled={busy}
+                                onSelect={() => void onIngest(f.id)}
+                              >
+                                {t('files.ingest')}
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem
+                              variant="destructive"
+                              disabled={busy}
+                              onSelect={() => setDeletingFile(f)}
+                            >
+                              {t('files.delete')}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -884,6 +937,16 @@ export function FilesPage() {
           )}
         </div>
       </div>
+
+      <FilePreviewDrawer
+        open={previewOpen}
+        onOpenChange={(open) => {
+          setPreviewOpen(open)
+          if (!open) setPreviewFile(null)
+        }}
+        workspaceId={workspaceId}
+        file={previewFile}
+      />
 
       <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
         <DialogContent className="sm:max-w-md">

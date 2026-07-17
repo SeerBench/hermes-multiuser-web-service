@@ -176,6 +176,11 @@ export function ConversationHeader({
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={onToggleChatWidth}>
+                  {chatWidth === 'full' ? (
+                    <Minimize2 className="size-4" aria-hidden />
+                  ) : (
+                    <Maximize2 className="size-4" aria-hidden />
+                  )}
                   {chatWidth === 'full'
                     ? t('layout.width.standard')
                     : t('layout.width.expand')}

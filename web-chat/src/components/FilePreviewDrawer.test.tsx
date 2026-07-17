@@ -58,4 +58,26 @@ describe('FilePreviewDrawer', () => {
       '/api/v1/workspaces/ws-1/files/f2/content',
     )
   })
+
+  it('renders an image preview from the content URL', () => {
+    render(
+      <LocaleProvider>
+        <FilePreviewDrawer
+          open
+          onOpenChange={() => {}}
+          workspaceId="ws-1"
+          file={{ fileId: 'f3', name: 'shot.png' }}
+        />
+      </LocaleProvider>,
+    )
+
+    const img = document.querySelector(
+      'img.file-preview-image',
+    ) as HTMLImageElement | null
+    expect(img).toBeTruthy()
+    expect(img?.getAttribute('src')).toBe(
+      '/api/v1/workspaces/ws-1/files/f3/content',
+    )
+    expect(img?.getAttribute('alt')).toBe('shot.png')
+  })
 })

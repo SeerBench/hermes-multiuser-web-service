@@ -9,9 +9,28 @@ export function isImageAttachmentName(name: string): boolean {
   return IMAGE_EXT.test(name)
 }
 
-/** Markdown / PDF — click opens the right-side preview drawer. */
+/** Markdown / PDF — chat chip click opens the right-side preview drawer. */
 export function isDrawerPreviewableName(name: string): boolean {
   return DRAWER_DOC_EXT.test(name)
+}
+
+/**
+ * Files list / workspace library: images + md/pdf open in the preview drawer.
+ * Office formats (docx/xlsx/…) stay non-previewable in-browser.
+ */
+export function isWorkspaceFilePreviewable(name: string): boolean {
+  return isImageAttachmentName(name) || isDrawerPreviewableName(name)
+}
+
+/** Resolve drawer body kind for a workspace file name. */
+export function workspacePreviewKind(
+  name: string,
+): 'image' | 'pdf' | 'md' | null {
+  if (isImageAttachmentName(name)) return 'image'
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.pdf')) return 'pdf'
+  if (lower.endsWith('.md')) return 'md'
+  return null
 }
 
 /** Detect images by mime type, display name, or storage path extension. */

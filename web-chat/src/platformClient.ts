@@ -52,6 +52,8 @@ export type FileFolder = {
   name: string
   parent_id?: string | null
   created_at: number
+  /** Direct files in this folder (not recursive). */
+  file_count?: number
 }
 
 export type FileTag = {

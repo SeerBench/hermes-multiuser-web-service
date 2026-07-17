@@ -57,6 +57,7 @@ def test_folder_create_rename_and_move_file(client, mock_upstream_key):
     folder_id = folder.json()["id"]
     assert folder.json()["name"] == "Reports"
     assert folder.json()["parent_id"] is None
+    assert folder.json().get("file_count", 0) == 0
 
     renamed = client.patch(
         f"/api/v1/workspaces/{ws_id}/file-folders/{folder_id}",
@@ -77,6 +78,28 @@ def test_folder_create_rename_and_move_file(client, mock_upstream_key):
     )
     assert moved.status_code == 200
     assert moved.json()["folder_id"] == folder_id
+
+    listing = client.get(
+        f"/api/v1/workspaces/{ws_id}/file-folders",
+        cookies={"hermes_session": cookie},
+    )
+    assert listing.status_code == 200
+    match = next(f for f in listing.json() if f["id"] == folder_id)
+    assert match["file_count"] == 1
+
+    nested = client.post(
+        f"/api/v1/workspaces/{ws_id}/file-folders",
+        json={"name": "Nested", "parent_id": folder_id},
+        cookies={"hermes_session": cookie},
+    )
+    assert nested.status_code == 200
+    # API file_count stays file-only; UI adds subfolder count client-side.
+    listing2 = client.get(
+        f"/api/v1/workspaces/{ws_id}/file-folders",
+        cookies={"hermes_session": cookie},
+    )
+    match2 = next(f for f in listing2.json() if f["id"] == folder_id)
+    assert match2["file_count"] == 1
 
     in_folder = client.get(
         f"/api/v1/workspaces/{ws_id}/files?folder_id={folder_id}",

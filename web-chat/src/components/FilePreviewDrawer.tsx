@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { XIcon } from 'lucide-react'
+import { workspacePreviewKind } from '../attachmentPreview'
 import { useT } from '../i18n'
 import { fileContentUrl } from '../platformClient'
 import { MarkdownContent } from './MarkdownContent'
@@ -13,7 +14,6 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { isDrawerPreviewableName } from './AttachmentChips'
 
 export type PreviewableFile = {
   fileId: string
@@ -27,7 +27,7 @@ type Props = {
   file: PreviewableFile | null
 }
 
-/** 右侧 Drawer：预览工作区中的 Markdown / PDF。 */
+/** 右侧 Drawer：预览工作区中的图片 / Markdown / PDF。 */
 export function FilePreviewDrawer({
   open,
   onOpenChange,
@@ -39,12 +39,7 @@ export function FilePreviewDrawer({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const kind =
-    file && isDrawerPreviewableName(file.name)
-      ? file.name.toLowerCase().endsWith('.pdf')
-        ? 'pdf'
-        : 'md'
-      : null
+  const kind = file ? workspacePreviewKind(file.name) : null
 
   const contentSrc =
     workspaceId && file?.fileId
@@ -83,6 +78,15 @@ export function FilePreviewDrawer({
     }
   }, [open, file, contentSrc, kind])
 
+  const description =
+    kind === 'image'
+      ? t('attach.preview.image')
+      : kind === 'pdf'
+        ? t('attach.preview.pdf')
+        : kind === 'md'
+          ? t('attach.preview.md')
+          : t('attach.preview.unavailable')
+
   return (
     <Drawer
       open={open}
@@ -97,11 +101,7 @@ export function FilePreviewDrawer({
               <DrawerTitle className="truncate">
                 {file?.name ?? t('attach.preview.title')}
               </DrawerTitle>
-              <DrawerDescription>
-                {kind === 'pdf'
-                  ? t('attach.preview.pdf')
-                  : t('attach.preview.md')}
-              </DrawerDescription>
+              <DrawerDescription>{description}</DrawerDescription>
             </div>
             <DrawerClose asChild>
               <Button
@@ -119,6 +119,14 @@ export function FilePreviewDrawer({
         <div className="file-preview-drawer-body flex min-h-0 flex-1 flex-col">
           {!workspaceId || !file || !contentSrc || !kind ? (
             <p className="page-hint p-4">{t('attach.preview.unavailable')}</p>
+          ) : kind === 'image' ? (
+            <div className="file-preview-image-wrap">
+              <img
+                className="file-preview-image"
+                src={contentSrc}
+                alt={file.name}
+              />
+            </div>
           ) : kind === 'pdf' ? (
             <iframe
               title={file.name}

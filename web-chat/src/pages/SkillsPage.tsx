@@ -11,7 +11,6 @@ import {
   type SkillDetail,
   type SkillRow,
 } from '../platformClient'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -47,7 +46,6 @@ export function SkillsPage() {
   const { locale } = useLocale()
   const workspaceId = getStoredWorkspaceId()
   const [skills, setSkills] = useState<SkillRow[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<SkillDetail | null>(null)
   const [detailBusy, setDetailBusy] = useState(false)
@@ -64,7 +62,7 @@ export function SkillsPage() {
     try {
       setSkills(await platform.listSkills(workspaceId))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }, [workspaceId])
 
@@ -85,14 +83,13 @@ export function SkillsPage() {
         next ? t('skills.toast.enabled') : t('skills.toast.disabled'),
       )
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }
 
   const openDetail = async (name: string) => {
     if (!workspaceId) return
     setDetailBusy(true)
-    setError(null)
     setDetailOpen(true)
     setEditing(false)
     try {
@@ -100,7 +97,7 @@ export function SkillsPage() {
       setSelected(detail)
       setEditContent(detail.content)
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
       setDetailOpen(false)
     } finally {
       setDetailBusy(false)
@@ -116,8 +113,9 @@ export function SkillsPage() {
       const detail = await platform.getSkill(workspaceId, selected.name)
       setSelected(detail)
       setEditing(false)
+      toast.success(t('skills.toast.saved'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -132,8 +130,9 @@ export function SkillsPage() {
       setDetailOpen(false)
       setSelected(null)
       await reload()
+      toast.success(t('skills.toast.deleted'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -153,9 +152,10 @@ export function SkillsPage() {
       setCreateName('')
       setCreateContent(SKILL_TEMPLATE)
       setTab('mine')
+      toast.success(t('skills.toast.created'))
       await openDetail(created)
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -164,15 +164,15 @@ export function SkillsPage() {
   const installFromCatalog = async (name: string) => {
     if (!workspaceId) return
     setBusy(true)
-    setError(null)
     try {
       await platform.installSkillFromCatalog(workspaceId, name)
       await reload()
       setSelected(await platform.getSkill(workspaceId, name))
       setDetailOpen(true)
       setTab('mine')
+      toast.success(t('skills.toast.installed'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -198,12 +198,6 @@ export function SkillsPage() {
       density="reading"
       constrainWidth={false}
     >
-      {error && (
-        <Alert variant="destructive" className="mb-3">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as SkillsTab)}

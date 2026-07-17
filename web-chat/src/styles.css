@@ -1559,6 +1559,24 @@ code {
   background: var(--bg);
 }
 
+.file-preview-image-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: color-mix(in oklab, var(--muted) 40%, transparent);
+}
+
+.file-preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius);
+}
+
 .file-preview-md .md {
   font-size: 0.95rem;
   line-height: 1.55;
@@ -2734,10 +2752,60 @@ code {
   padding: 0;
   cursor: pointer;
   text-align: left;
+  max-width: 100%;
 }
 
 .files-folder-link:hover {
   color: var(--primary, var(--accent));
+}
+
+.files-folder-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.files-folder-count {
+  color: var(--muted-foreground);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.files-name-cell {
+  min-width: 10rem;
+  max-width: 28rem;
+}
+
+.files-name-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.files-name-link {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.files-name-link:hover {
+  color: var(--primary, var(--accent));
+}
+
+.files-name-text {
+  overflow-wrap: anywhere;
 }
 
 .files-inline-rename {
@@ -2872,7 +2940,14 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-width: 220px;
+  max-width: 100%;
+}
+
+.files-name-tag {
+  /* Match status badges: secondary pill under the filename */
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .files-move-select {
@@ -2885,10 +2960,16 @@ code {
   padding: 2px 4px;
 }
 
-.files-col-date {
+.files-col-date,
+.files-col-size,
+.files-col-origin {
   white-space: nowrap;
   font-size: 12px;
   color: var(--muted-foreground);
+}
+
+.files-col-size {
+  font-variant-numeric: tabular-nums;
 }
 
 .files-toolbar {
@@ -2946,7 +3027,7 @@ code {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .files-table th {
@@ -2955,12 +3036,19 @@ code {
   font-size: 12px;
 }
 
+/* Flex must be on an inner wrapper — not the <td> — or row borders misalign. */
 .files-row-actions {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+  white-space: nowrap;
+  min-width: 10.5rem;
+}
+
+.files-table td:has(> .files-row-actions) {
+  width: 1%;
   white-space: nowrap;
 }
 

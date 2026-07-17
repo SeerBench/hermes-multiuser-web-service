@@ -2,10 +2,53 @@ import { describe, expect, it } from 'vitest'
 import type { FileFolder, FileTag } from './platformClient'
 import {
   assignedTagsForFile,
+  canCiteFileToChat,
+  fileOriginLabelKey,
   findTagByName,
   flattenFolderTree,
+  folderContentCount,
   toggleFileTagId,
 } from './filesListHelpers'
+
+describe('fileOriginLabelKey', () => {
+  it('maps chat origin to the chat label key', () => {
+    expect(fileOriginLabelKey('chat')).toBe('files.origin.chat')
+  })
+
+  it('maps platform / missing origin to workspace', () => {
+    expect(fileOriginLabelKey('platform')).toBe('files.origin.workspace')
+    expect(fileOriginLabelKey(undefined)).toBe('files.origin.workspace')
+    expect(fileOriginLabelKey(null)).toBe('files.origin.workspace')
+  })
+})
+
+describe('canCiteFileToChat', () => {
+  it('allows only ready (searchable) files', () => {
+    expect(canCiteFileToChat({ status: 'ready' })).toBe(true)
+    expect(canCiteFileToChat({ status: 'skipped' })).toBe(false)
+    expect(canCiteFileToChat({ status: 'pending' })).toBe(false)
+    expect(canCiteFileToChat({ status: 'failed' })).toBe(false)
+  })
+})
+
+describe('folderContentCount', () => {
+  it('sums API file_count with immediate subfolders', () => {
+    const folder = { id: 'parent', file_count: 2 }
+    const all = [
+      { id: 'parent', parent_id: null },
+      { id: 'c1', parent_id: 'parent' },
+      { id: 'c2', parent_id: 'parent' },
+      { id: 'other', parent_id: null },
+    ]
+    expect(folderContentCount(folder, all)).toBe(4)
+  })
+
+  it('falls back to subfolders alone when file_count is missing', () => {
+    expect(
+      folderContentCount({ id: 'p' }, [{ id: 'c', parent_id: 'p' }]),
+    ).toBe(1)
+  })
+})
 
 describe('assignedTagsForFile', () => {
   const tags: FileTag[] = [

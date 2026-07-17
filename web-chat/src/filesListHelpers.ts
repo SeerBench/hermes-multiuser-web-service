@@ -6,6 +6,35 @@ export type FolderTreeNode = {
   depth: number
 }
 
+/** Map API origin to i18n key: platform → workspace, chat → chat. */
+export function fileOriginLabelKey(
+  origin: string | undefined | null,
+): 'files.origin.workspace' | 'files.origin.chat' {
+  return origin === 'chat' ? 'files.origin.chat' : 'files.origin.workspace'
+}
+
+/** Only searchable (ready) documents can be cited into chat. */
+export function canCiteFileToChat(file: {
+  status: string
+}): boolean {
+  return file.status === 'ready'
+}
+
+/**
+ * Folder list badge count: direct files (from API) + immediate subfolders.
+ * Subfolder count is derived client-side from the loaded folder tree.
+ */
+export function folderContentCount(
+  folder: Pick<FileFolder, 'id' | 'file_count'>,
+  allFolders: Pick<FileFolder, 'id' | 'parent_id'>[],
+): number {
+  const files = folder.file_count ?? 0
+  const subfolders = allFolders.filter(
+    (f) => (f.parent_id ?? null) === folder.id,
+  ).length
+  return files + subfolders
+}
+
 /** Tags shown on a file row — display only (no toggle). */
 export function assignedTagsForFile(
   allTags: FileTag[],

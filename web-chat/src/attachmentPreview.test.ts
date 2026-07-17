@@ -4,7 +4,9 @@ import {
   isDrawerPreviewableName,
   isImageAttachment,
   isImageAttachmentName,
+  isWorkspaceFilePreviewable,
   shouldFetchWorkspaceImagePreview,
+  workspacePreviewKind,
 } from './attachmentPreview'
 
 describe('attachment preview helpers', () => {
@@ -30,6 +32,20 @@ describe('attachment preview helpers', () => {
     expect(isDrawerPreviewableName('spec.PDF')).toBe(true)
     expect(isDrawerPreviewableName('notes.txt')).toBe(false)
     expect(isDrawerPreviewableName('shot.png')).toBe(false)
+  })
+
+  it('treats images and md/pdf as workspace-list previewable', () => {
+    expect(isWorkspaceFilePreviewable('shot.png')).toBe(true)
+    expect(isWorkspaceFilePreviewable('notes.md')).toBe(true)
+    expect(isWorkspaceFilePreviewable('a.pdf')).toBe(true)
+    expect(isWorkspaceFilePreviewable('sheet.xlsx')).toBe(false)
+  })
+
+  it('resolves workspace preview kind', () => {
+    expect(workspacePreviewKind('a.PNG')).toBe('image')
+    expect(workspacePreviewKind('a.pdf')).toBe('pdf')
+    expect(workspacePreviewKind('a.md')).toBe('md')
+    expect(workspacePreviewKind('a.docx')).toBe(null)
   })
 
   it('probes extensionless library files but skips known documents', () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { useT } from '../i18n'
 import {
@@ -24,7 +25,6 @@ export function FileTagsPage() {
   const [tags, setTags] = useState<FileTag[]>([])
   const [files, setFiles] = useState<PlatformFile[]>([])
   const [newTag, setNewTag] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   /** 当前聚焦打标签的文件；null 时展示文件列表供选择 */
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null)
@@ -38,9 +38,8 @@ export function FileTagsPage() {
       ])
       setTags(tagRows)
       setFiles(fileRows)
-      setError(null)
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }, [workspaceId])
 
@@ -60,8 +59,9 @@ export function FileTagsPage() {
       await platform.createFileTag(workspaceId, newTag.trim())
       setNewTag('')
       await reload()
+      toast.success(t('files.tags.toast.created'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -73,8 +73,9 @@ export function FileTagsPage() {
     try {
       await platform.deleteFileTag(workspaceId, tagId)
       await reload()
+      toast.success(t('files.tags.toast.deleted'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -89,8 +90,9 @@ export function FileTagsPage() {
       setFiles((prev) =>
         prev.map((f) => (f.id === file.id ? { ...f, ...updated } : f)),
       )
+      toast.success(t('files.tags.toast.updated'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
     }
   }
 
@@ -118,8 +120,6 @@ export function FileTagsPage() {
           {t('files.tags.back')}
         </Button>
       </div>
-
-      {error && <p className="auth-error">{error}</p>}
 
       <section className="files-tags-section">
         <h3 className="files-tags-section-title">{t('files.tags.manage')}</h3>

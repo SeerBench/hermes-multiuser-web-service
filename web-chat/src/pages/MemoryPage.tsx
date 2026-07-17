@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { useT } from '../i18n'
@@ -16,8 +17,6 @@ export function MemoryPage() {
   const [profile, setProfile] = useState('')
   const [savedLong, setSavedLong] = useState('')
   const [savedProfile, setSavedProfile] = useState('')
-  const [status, setStatus] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -31,7 +30,9 @@ export function MemoryPage() {
         setSavedProfile(m.profile)
       })
       .catch((err) =>
-        setError(err instanceof PlatformApiError ? err.message : String(err)),
+        toast.error(
+          err instanceof PlatformApiError ? err.message : String(err),
+        ),
       )
   }, [workspaceId])
 
@@ -40,8 +41,6 @@ export function MemoryPage() {
   const save = async () => {
     if (!workspaceId) return
     setBusy(true)
-    setError(null)
-    setStatus(null)
     try {
       await platform.patchMemory(workspaceId, {
         long_term: longTerm,
@@ -49,9 +48,11 @@ export function MemoryPage() {
       })
       setSavedLong(longTerm)
       setSavedProfile(profile)
-      setStatus(t('memory.saved'))
+      toast.success(t('memory.saved'))
     } catch (err) {
-      setError(err instanceof PlatformApiError ? err.message : String(err))
+      toast.error(
+        err instanceof PlatformApiError ? err.message : String(err),
+      )
     } finally {
       setBusy(false)
     }
@@ -91,8 +92,6 @@ export function MemoryPage() {
           previewLabel={t('memory.preview')}
         />
       </section>
-      {error && <p className="auth-error">{error}</p>}
-      {status && <p className="page-ok">{status}</p>}
     </PageShell>
   )
 }

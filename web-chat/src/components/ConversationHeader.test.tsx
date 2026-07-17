@@ -29,4 +29,30 @@ describe('ConversationHeader', () => {
     await user.click(widthButton)
     expect(onToggleChatWidth).toHaveBeenCalledOnce()
   })
+
+  it('shows a width-toggle icon in the overflow menu for an existing conversation', async () => {
+    const user = userEvent.setup()
+    const onToggleChatWidth = vi.fn()
+    render(
+      <LocaleProvider>
+        <ConversationHeader
+          title="Existing chat"
+          pinned={false}
+          chatWidth="reading"
+          onRename={vi.fn()}
+          onTogglePin={vi.fn()}
+          onToggleChatWidth={onToggleChatWidth}
+        />
+      </LocaleProvider>,
+    )
+
+    await user.click(
+      screen.getByRole('button', { name: 'Conversation options' }),
+    )
+    const widthItem = screen.getByRole('menuitem', { name: 'Widen' })
+    // lucide icons render as <svg>; empty icon slot would leave only text.
+    expect(widthItem.querySelector('svg')).toBeTruthy()
+    await user.click(widthItem)
+    expect(onToggleChatWidth).toHaveBeenCalledOnce()
+  })
 })

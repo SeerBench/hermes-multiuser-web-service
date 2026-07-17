@@ -364,7 +364,22 @@ def list_folders(
             else:
                 stmt = stmt.where(FileFolder.parent_id == parent_id)
         rows = db.execute(stmt.order_by(FileFolder.name)).scalars().all()
-        return [_folder_dict(f) for f in rows]
+        folder_ids = [f.id for f in rows]
+        counts: dict[str, int] = {}
+        if folder_ids:
+            # Direct files only; UI adds immediate subfolder counts client-side.
+            count_rows = db.execute(
+                select(FileRecord.folder_id, func.count(FileRecord.id))
+                .where(
+                    FileRecord.workspace_id == workspace_id,
+                    FileRecord.folder_id.in_(folder_ids),
+                )
+                .group_by(FileRecord.folder_id)
+            ).all()
+            counts = {str(fid): int(n) for fid, n in count_rows if fid}
+        return [
+            _folder_dict(f, file_count=counts.get(f.id, 0)) for f in rows
+        ]
 
 
 @router.post("/{workspace_id}/file-folders")
@@ -709,12 +724,17 @@ def _tag_dict(tag: FileTag) -> dict[str, Any]:
     }
 
 
-def _folder_dict(folder: FileFolder) -> dict[str, Any]:
+def _folder_dict(
+    folder: FileFolder,
+    *,
+    file_count: int = 0,
+) -> dict[str, Any]:
     return {
         "id": folder.id,
         "name": folder.name,
         "parent_id": folder.parent_id,
         "created_at": folder.created_at.timestamp(),
+        "file_count": file_count,
     }
 
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil } from 'lucide-react'
+import { toast } from 'sonner'
 import { ApiError, auth } from '../api'
 import type { User } from '../api'
 import { LanguageToggle } from '../components/LanguageToggle'
@@ -73,11 +74,9 @@ export function SettingsPage({
     null,
   )
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
   const [bindKey, setBindKey] = useState('')
   const [bindBusy, setBindBusy] = useState(false)
-  const [bindMsg, setBindMsg] = useState<string | null>(null)
   const [theme, setThemeState] = useState<ThemePreference>(() => getStoredTheme())
   const [fontScale, setFontScaleState] = useState<FontScale>(() =>
     getStoredFontScale(),
@@ -90,23 +89,19 @@ export function SettingsPage({
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
   const avatarFileRef = useRef<HTMLInputElement | null>(null)
   const [profileBusy, setProfileBusy] = useState(false)
-  const [profileMsg, setProfileMsg] = useState<string | null>(null)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [passwordBusy, setPasswordBusy] = useState(false)
-  const [passwordMsg, setPasswordMsg] = useState<string | null>(null)
 
   // Models
   const [allModels, setAllModels] = useState<{ id: string; owned_by?: string }[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
   const [preferred, setPreferred] = useState('')
   const [modelsBusy, setModelsBusy] = useState(false)
-  const [modelsMsg, setModelsMsg] = useState<string | null>(null)
   const [modelFilter, setModelFilter] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
-    setError(null)
     try {
       if (platformMode) {
         const u = await platform.me()
@@ -132,7 +127,9 @@ export function SettingsPage({
       } else if (err instanceof PlatformApiError && err.status === 401) {
         setMe(null)
       } else {
-        setError(err instanceof Error ? err.message : t('settings.error.generic'))
+        toast.error(
+          err instanceof Error ? err.message : t('settings.error.generic'),
+        )
       }
     } finally {
       setLoading(false)
@@ -185,15 +182,14 @@ export function SettingsPage({
     const trimmed = bindKey.trim()
     if (!trimmed) return
     setBindBusy(true)
-    setBindMsg(null)
     try {
       const res = await platform.bindKey(trimmed)
       setBindKey('')
-      setBindMsg(t('settings.bindKey.ok'))
+      toast.success(t('settings.bindKey.ok'))
       onUserUpdated?.(res.user)
       await load()
     } catch (err) {
-      setBindMsg(
+      toast.error(
         err instanceof PlatformApiError ? err.message : t('settings.bindKey.fail'),
       )
     } finally {
@@ -216,7 +212,6 @@ export function SettingsPage({
   const saveProfile = async () => {
     if (!platformMode) return
     setProfileBusy(true)
-    setProfileMsg(null)
     try {
       const u = await platform.patchMe({
         nickname: nickname.trim(),
@@ -225,11 +220,13 @@ export function SettingsPage({
         clear_avatar: avatarUrl === null && Boolean(me?.avatar_url),
       })
       onUserUpdated?.(u)
-      setProfileMsg(t('settings.account.save.ok'))
+      toast.success(t('settings.account.save.ok'))
       await load()
     } catch (err) {
-      setProfileMsg(
-        err instanceof PlatformApiError ? err.message : t('settings.account.save.fail'),
+      toast.error(
+        err instanceof PlatformApiError
+          ? err.message
+          : t('settings.account.save.fail'),
       )
     } finally {
       setProfileBusy(false)
@@ -239,15 +236,16 @@ export function SettingsPage({
   const savePassword = async () => {
     if (!platformMode) return
     setPasswordBusy(true)
-    setPasswordMsg(null)
     try {
       await platform.changePassword(currentPassword, newPassword)
       setCurrentPassword('')
       setNewPassword('')
-      setPasswordMsg(t('settings.password.ok'))
+      toast.success(t('settings.password.ok'))
     } catch (err) {
-      setPasswordMsg(
-        err instanceof PlatformApiError ? err.message : t('settings.password.fail'),
+      toast.error(
+        err instanceof PlatformApiError
+          ? err.message
+          : t('settings.password.fail'),
       )
     } finally {
       setPasswordBusy(false)
@@ -257,18 +255,17 @@ export function SettingsPage({
   const onAvatarFile = (file: File | null) => {
     if (!file) return
     if (!file.type.startsWith('image/')) {
-      setProfileMsg(t('settings.account.avatar.invalid'))
+      toast.error(t('settings.account.avatar.invalid'))
       return
     }
     if (file.size > 200_000) {
-      setProfileMsg(t('settings.account.avatar.tooLarge'))
+      toast.error(t('settings.account.avatar.tooLarge'))
       return
     }
     const reader = new FileReader()
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : null
       setAvatarUrl(result)
-      setProfileMsg(null)
     }
     reader.readAsDataURL(file)
   }
@@ -282,7 +279,6 @@ export function SettingsPage({
   const saveFavorites = async () => {
     if (!workspaceId) return
     setModelsBusy(true)
-    setModelsMsg(null)
     try {
       const res = await platform.patchPreferences(workspaceId, {
         favorite_models: favorites,
@@ -290,11 +286,13 @@ export function SettingsPage({
       })
       setFavorites(res.favorite_models ?? favorites)
       if (res.preferred_model) setPreferred(res.preferred_model)
-      setModelsMsg(t('settings.models.save.ok'))
+      toast.success(t('settings.models.save.ok'))
       notifyPreferencesUpdated()
     } catch (err) {
-      setModelsMsg(
-        err instanceof PlatformApiError ? err.message : t('settings.models.save.fail'),
+      toast.error(
+        err instanceof PlatformApiError
+          ? err.message
+          : t('settings.models.save.fail'),
       )
     } finally {
       setModelsBusy(false)
@@ -633,11 +631,6 @@ export function SettingsPage({
                   >
                     {profileBusy ? t('common.loading') : t('settings.account.save')}
                   </Button>
-                  {profileMsg && (
-                    <Alert>
-                      <AlertDescription>{profileMsg}</AlertDescription>
-                    </Alert>
-                  )}
                 </section>
 
                 <Separator />
@@ -676,11 +669,6 @@ export function SettingsPage({
                   >
                     {passwordBusy ? t('common.loading') : t('settings.password.submit')}
                   </Button>
-                  {passwordMsg && (
-                    <Alert>
-                      <AlertDescription>{passwordMsg}</AlertDescription>
-                    </Alert>
-                  )}
                 </section>
               </TabsContent>
             )}
@@ -717,11 +705,6 @@ export function SettingsPage({
                         ? t('settings.bindKey.submit')
                         : t('settings.bindKey.update')}
                   </Button>
-                  {bindMsg && (
-                    <Alert>
-                      <AlertDescription>{bindMsg}</AlertDescription>
-                    </Alert>
-                  )}
                 </section>
 
                 <Separator />
@@ -787,11 +770,6 @@ export function SettingsPage({
                   >
                     {modelsBusy ? t('common.loading') : t('settings.models.save')}
                   </Button>
-                  {modelsMsg && (
-                    <Alert>
-                      <AlertDescription>{modelsMsg}</AlertDescription>
-                    </Alert>
-                  )}
                 </section>
               </TabsContent>
             )}
@@ -802,12 +780,6 @@ export function SettingsPage({
                   {t('settings.usage.comingSoon')}
                 </p>
               </TabsContent>
-            )}
-
-            {error && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
             )}
           </ScrollArea>
         </Tabs>

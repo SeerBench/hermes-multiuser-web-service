@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { LayoutGrid, MessageSquare } from 'lucide-react'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AuthPage } from './pages/AuthPage'
@@ -343,7 +343,7 @@ function AppShell() {
           }}
         />
       )}
-      <Toaster richColors position="top-center" closeButton />
+      <Toaster />
     </div>
   )
 }
