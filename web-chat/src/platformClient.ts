@@ -510,6 +510,24 @@ export const platform = {
 
   /** Probe whether platform-api is available (does not require auth). */
   healthz: () => platformRequest<{ status: string }>('/healthz'),
+
+  searchKnowledge: (
+    workspaceId: string,
+    query: string,
+    topK = 5,
+  ) =>
+    platformRequest<{
+      results: {
+        chunk_id: string
+        file_id: string
+        filename: string
+        score: number
+        content?: string
+      }[]
+    }>(`/workspaces/${workspaceId}/knowledge/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, top_k: topK }),
+    }),
 }
 
 export { PlatformApiError }

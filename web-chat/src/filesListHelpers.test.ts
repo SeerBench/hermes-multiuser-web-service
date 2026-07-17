@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest'
 import type { FileFolder, FileTag } from './platformClient'
 import {
   assignedTagsForFile,
+  buildFilesListRows,
   canCiteFileToChat,
   fileOriginLabelKey,
+  FILES_PAGE_SIZE,
+  filesListPageCount,
+  filesPaginationItems,
+  filterFilesListRows,
   findTagByName,
   flattenFolderTree,
   folderContentCount,
+  sliceFilesListPage,
   toggleFileTagId,
 } from './filesListHelpers'
 
@@ -47,6 +53,45 @@ describe('folderContentCount', () => {
     expect(
       folderContentCount({ id: 'p' }, [{ id: 'c', parent_id: 'p' }]),
     ).toBe(1)
+  })
+})
+
+describe('files list pagination helpers', () => {
+  const folders = [
+    { id: 'f1', name: 'Alpha', parent_id: null, created_at: 1 },
+  ]
+  const files = Array.from({ length: 30 }, (_, i) => ({
+    id: `file-${i}`,
+    filename: `doc-${i}.md`,
+    status: 'ready',
+    created_at: i,
+  }))
+
+  it('builds folder-then-file rows', () => {
+    const rows = buildFilesListRows(folders, files.slice(0, 2))
+    expect(rows[0]).toEqual({ kind: 'folder', folder: folders[0] })
+    expect(rows[1]?.kind).toBe('file')
+    expect(rows).toHaveLength(3)
+  })
+
+  it('filters by name case-insensitively', () => {
+    const rows = buildFilesListRows(folders, files.slice(0, 3))
+    expect(filterFilesListRows(rows, 'ALPHA')).toHaveLength(1)
+    expect(filterFilesListRows(rows, 'doc-1')).toHaveLength(1)
+  })
+
+  it('pages at 25 by default', () => {
+    const rows = buildFilesListRows([], files)
+    expect(FILES_PAGE_SIZE).toBe(25)
+    expect(filesListPageCount(rows.length)).toBe(2)
+    expect(sliceFilesListPage(rows, 1)).toHaveLength(25)
+    expect(sliceFilesListPage(rows, 2)).toHaveLength(5)
+  })
+
+  it('builds compact pagination items with ellipsis', () => {
+    expect(filesPaginationItems(1, 3)).toEqual([1, 2, 3])
+    expect(filesPaginationItems(5, 12)).toContain(-1)
+    expect(filesPaginationItems(5, 12)).toContain(5)
   })
 })
 

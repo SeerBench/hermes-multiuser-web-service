@@ -12,7 +12,7 @@ type Props = {
   enabledSkillsCount?: number
 }
 
-/** Empty-chat onboarding guide: suggestions + workspace shortcuts. */
+/** Empty-chat onboarding: compact suggestions + one primary workspace CTA. */
 export function ChatEmptyGuide({
   onPickSuggestion,
   onGoFiles,
@@ -21,7 +21,6 @@ export function ChatEmptyGuide({
   needsBindKey,
   hasModel = true,
   platformMode,
-  enabledSkillsCount = 0,
 }: Props) {
   const t = useT()
   const suggestions = [
@@ -38,12 +37,20 @@ export function ChatEmptyGuide({
       {(needsBindKey || (platformMode && !hasModel)) && (
         <div className="chat-empty-guide-alerts" role="status">
           {needsBindKey && (
-            <button type="button" className="chat-empty-guide-alert" onClick={onGoSettings}>
+            <button
+              type="button"
+              className="chat-empty-guide-alert"
+              onClick={onGoSettings}
+            >
               {t('chat.empty.check.bind')}
             </button>
           )}
           {platformMode && !hasModel && !needsBindKey && (
-            <button type="button" className="chat-empty-guide-alert" onClick={onGoSettings}>
+            <button
+              type="button"
+              className="chat-empty-guide-alert"
+              onClick={onGoSettings}
+            >
               {t('chat.empty.check.model')}
             </button>
           )}
@@ -70,17 +77,13 @@ export function ChatEmptyGuide({
 
       {platformMode && (
         <div className="chat-empty-guide-actions">
-          <Button type="button" variant="secondary" size="sm" onClick={onGoFiles}>
+          {/* 主 CTA：从文件开始；技能为次要入口，不展示技能数量 */}
+          <Button type="button" size="sm" onClick={onGoFiles}>
             {t('chat.empty.action.files')}
           </Button>
-          <Button type="button" variant="secondary" size="sm" onClick={onGoSkills}>
+          <Button type="button" variant="ghost" size="sm" onClick={onGoSkills}>
             {t('chat.empty.action.skills')}
           </Button>
-          {enabledSkillsCount > 0 && (
-            <span className="chat-empty-guide-meta">
-              {t('chat.skills.count', { count: enabledSkillsCount })}
-            </span>
-          )}
         </div>
       )}
     </div>

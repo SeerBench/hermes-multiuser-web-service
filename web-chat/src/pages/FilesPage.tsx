@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from 'react'
-import { Folder, MoreHorizontal, Plus } from 'lucide-react'
+import { Folder, MoreHorizontal, Plus, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { isWorkspaceFilePreviewable } from '../attachmentPreview'
 import { formatBytes } from '../format'
@@ -13,11 +13,16 @@ import { PageShell } from '../components/PageShell'
 import { sendFileToChat } from '../attachBridge'
 import {
   assignedTagsForFile,
+  buildFilesListRows,
   canCiteFileToChat,
   fileOriginLabelKey,
+  filesListPageCount,
+  filesPaginationItems,
+  filterFilesListRows,
   findTagByName,
   flattenFolderTree,
   folderContentCount,
+  sliceFilesListPage,
   toggleFileTagId,
 } from '../filesListHelpers'
 import { useT } from '../i18n'
@@ -56,6 +61,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
@@ -169,6 +183,20 @@ export function FilesPage() {
   const [newManagedTag, setNewManagedTag] = useState('')
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [listPage, setListPage] = useState(1)
+  const [nameQuery, setNameQuery] = useState('')
+  const [trySearchOpen, setTrySearchOpen] = useState(false)
+  const [trySearchQuery, setTrySearchQuery] = useState('')
+  const [trySearchBusy, setTrySearchBusy] = useState(false)
+  const [trySearchHits, setTrySearchHits] = useState<
+    {
+      chunk_id: string
+      file_id: string
+      filename: string
+      score: number
+      content?: string
+    }[]
+  >([])
 
   const storeUploadRef = useRef<HTMLInputElement>(null)
   const ingestUploadRef = useRef<HTMLInputElement>(null)
@@ -269,7 +297,51 @@ export function FilesPage() {
 
   const showStatusCol = kind !== 'image'
   const accept = uploadAcceptForTab(kind)
-  const listEmpty = childFolders.length === 0 && files.length === 0
+
+  const filteredRows = useMemo(() => {
+    const rows = buildFilesListRows(childFolders, files)
+    return filterFilesListRows(rows, nameQuery)
+  }, [childFolders, files, nameQuery])
+
+  const totalPages = filesListPageCount(filteredRows.length)
+  const safePage = Math.min(listPage, totalPages)
+  const pageRows = useMemo(
+    () => sliceFilesListPage(filteredRows, safePage),
+    [filteredRows, safePage],
+  )
+  const pageItems = useMemo(
+    () => filesPaginationItems(safePage, totalPages),
+    [safePage, totalPages],
+  )
+  const listEmpty = filteredRows.length === 0
+
+  useEffect(() => {
+    setListPage(1)
+  }, [folderId, kind, tagFilter, nameQuery, sort, order])
+
+  useEffect(() => {
+    if (listPage !== safePage) setListPage(safePage)
+  }, [listPage, safePage])
+
+  const runTrySearch = async () => {
+    if (!workspaceId || !trySearchQuery.trim()) return
+    setTrySearchBusy(true)
+    try {
+      const res = await platform.searchKnowledge(
+        workspaceId,
+        trySearchQuery.trim(),
+        8,
+      )
+      setTrySearchHits(res.results ?? [])
+      if (!(res.results ?? []).length) {
+        toast.message(t('files.trySearch.empty'))
+      }
+    } catch (err) {
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setTrySearchBusy(false)
+    }
+  }
 
   const onUpload = async (list: FileList | null, ingest = true) => {
     if (!workspaceId || !list?.length) return
@@ -537,7 +609,7 @@ export function FilesPage() {
       density="reading"
       constrainWidth={false}
     >
-      {/* Tabs 左 + 新建/标签 右 */}
+      {/* 类型 Tab + 搜索 + 新建 / 标签 / 试搜 */}
       <div className="files-tabs-bar">
         <Tabs
           value={kind}
@@ -552,6 +624,16 @@ export function FilesPage() {
         </Tabs>
 
         <div className="files-tabs-actions">
+          <div className="files-search-field">
+            <Search className="size-3.5 shrink-0 opacity-50" aria-hidden />
+            <Input
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+              placeholder={t('files.search.placeholder')}
+              aria-label={t('files.search.placeholder')}
+              className="h-8"
+            />
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" size="sm">
@@ -570,7 +652,6 @@ export function FilesPage() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
-                  // 延后一拍，避免菜单关闭抢焦点导致 file picker 被挡
                   window.setTimeout(() => storeUploadRef.current?.click(), 0)
                 }}
               >
@@ -595,6 +676,18 @@ export function FilesPage() {
             }}
           >
             {t('files.tags')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setTrySearchHits([])
+              setTrySearchQuery('')
+              setTrySearchOpen(true)
+            }}
+          >
+            {t('files.trySearch')}
           </Button>
         </div>
       </div>
@@ -681,22 +774,31 @@ export function FilesPage() {
             <label>
               {t('files.sort')}
               <select
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortKey)}
+                value={`${sort}:${order}`}
+                onChange={(e) => {
+                  const [s, o] = e.target.value.split(':') as [SortKey, 'asc' | 'desc']
+                  setSort(s)
+                  setOrder(o)
+                }}
               >
-                <option value="created_at">{t('files.sort.date')}</option>
-                <option value="size">{t('files.sort.size')}</option>
-                <option value="name">{t('files.sort.name')}</option>
-              </select>
-            </label>
-            <label>
-              {t('files.order')}
-              <select
-                value={order}
-                onChange={(e) => setOrder(e.target.value as 'asc' | 'desc')}
-              >
-                <option value="desc">{t('files.order.desc')}</option>
-                <option value="asc">{t('files.order.asc')}</option>
+                <option value="created_at:desc">
+                  {t('files.sort.date')} · {t('files.order.desc')}
+                </option>
+                <option value="created_at:asc">
+                  {t('files.sort.date')} · {t('files.order.asc')}
+                </option>
+                <option value="name:asc">
+                  {t('files.sort.name')} · {t('files.order.asc')}
+                </option>
+                <option value="name:desc">
+                  {t('files.sort.name')} · {t('files.order.desc')}
+                </option>
+                <option value="size:desc">
+                  {t('files.sort.size')} · {t('files.order.desc')}
+                </option>
+                <option value="size:asc">
+                  {t('files.sort.size')} · {t('files.order.asc')}
+                </option>
               </select>
             </label>
             {uploadPct != null && (
@@ -722,83 +824,98 @@ export function FilesPage() {
               </tr>
             </thead>
             <tbody>
-              {/* 当前目录下的子文件夹与文件同表展示 */}
-              {childFolders.map((folder) => (
-                <tr key={`folder-${folder.id}`} className="files-row--folder">
-                  <td className="files-name-cell">
-                    {renamingFolderId === folder.id ? (
-                      <div className="files-inline-rename">
-                        <Input
-                          value={renameValue}
-                          autoFocus
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') void commitRenameFolder()
-                            if (e.key === 'Escape') setRenamingFolderId(null)
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void commitRenameFolder()}
-                        >
-                          ✓
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="files-folder-link"
-                        onClick={() => setFolderId(folder.id)}
-                      >
-                        <Folder className="size-4 shrink-0" aria-hidden />
-                        <span className="files-folder-name">
-                          {folder.name}
-                          <span className="files-folder-count">
-                            {t('files.folders.fileCount', {
-                              n: folderContentCount(folder, folders),
-                            })}
-                          </span>
-                        </span>
-                      </button>
-                    )}
-                  </td>
-                  <td className="files-col-size">—</td>
-                  <td className="files-col-date">
-                    {formatCreatedAt(folder.created_at)}
-                  </td>
-                  <td className="files-col-origin">—</td>
-                  {showStatusCol && <td>—</td>}
-                  <td>
-                    <div className="files-row-actions">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        title={t('files.folders.rename')}
-                        onClick={() => {
-                          setRenamingFolderId(folder.id)
-                          setRenameValue(folder.name)
-                        }}
-                      >
-                        {t('files.folders.rename')}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => requestDeleteFolder(folder.id)}
-                      >
-                        {t('files.delete')}
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {/* 分页后的文件夹 + 文件行；文件夹操作与文件统一为 ⋯ 菜单 */}
+              {pageRows.map((row) => {
+                if (row.kind === 'folder') {
+                  const folder = row.folder
+                  return (
+                    <tr
+                      key={`folder-${folder.id}`}
+                      className="files-row--folder"
+                    >
+                      <td className="files-name-cell">
+                        {renamingFolderId === folder.id ? (
+                          <div className="files-inline-rename">
+                            <Input
+                              value={renameValue}
+                              autoFocus
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitRenameFolder()
+                                if (e.key === 'Escape') setRenamingFolderId(null)
+                              }}
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void commitRenameFolder()}
+                            >
+                              ✓
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="files-folder-link"
+                            onClick={() => setFolderId(folder.id)}
+                          >
+                            <Folder className="size-4 shrink-0" aria-hidden />
+                            <span className="files-folder-name">
+                              {folder.name}
+                              <span className="files-folder-count">
+                                {t('files.folders.fileCount', {
+                                  n: folderContentCount(folder, folders),
+                                })}
+                              </span>
+                            </span>
+                          </button>
+                        )}
+                      </td>
+                      <td className="files-col-size">—</td>
+                      <td className="files-col-date">
+                        {formatCreatedAt(folder.created_at)}
+                      </td>
+                      <td className="files-col-origin">—</td>
+                      {showStatusCol && <td>—</td>}
+                      <td>
+                        <div className="files-row-actions">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={t('files.more')}
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-40">
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setRenamingFolderId(folder.id)
+                                  setRenameValue(folder.name)
+                                }}
+                              >
+                                {t('files.folders.rename')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                variant="destructive"
+                                disabled={busy}
+                                onSelect={() => requestDeleteFolder(folder.id)}
+                              >
+                                {t('files.delete')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                }
 
-              {files.map((f) => {
+                const f = row.file
                 const image = isImageFilename(f.filename)
                 const fileTags = assignedTagsForFile(tags, f.tag_ids)
                 const citeable = canCiteFileToChat(f)
@@ -935,6 +1052,46 @@ export function FilesPage() {
           {listEmpty && (
             <p className="page-hint files-empty">{t('files.empty')}</p>
           )}
+          {!listEmpty && totalPages > 1 && (
+            <Pagination className="files-pagination">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    disabled={safePage <= 1}
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                  >
+                    {t('files.pagination.prev')}
+                  </PaginationPrevious>
+                </PaginationItem>
+                {pageItems.map((item, idx) =>
+                  item < 0 ? (
+                    <PaginationItem key={`ellipsis-${idx}`}>
+                      <PaginationEllipsis />
+                    </PaginationItem>
+                  ) : (
+                    <PaginationItem key={item}>
+                      <PaginationLink
+                        isActive={item === safePage}
+                        onClick={() => setListPage(item)}
+                      >
+                        {item}
+                      </PaginationLink>
+                    </PaginationItem>
+                  ),
+                )}
+                <PaginationItem>
+                  <PaginationNext
+                    disabled={safePage >= totalPages}
+                    onClick={() =>
+                      setListPage((p) => Math.min(totalPages, p + 1))
+                    }
+                  >
+                    {t('files.pagination.next')}
+                  </PaginationNext>
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
         </div>
       </div>
 
@@ -947,6 +1104,73 @@ export function FilesPage() {
         workspaceId={workspaceId}
         file={previewFile}
       />
+
+      {/* 知识库试搜：验证已索引文档能否被检索到 */}
+      <Dialog
+        open={trySearchOpen}
+        onOpenChange={(open) => {
+          setTrySearchOpen(open)
+          if (!open) {
+            setTrySearchHits([])
+            setTrySearchQuery('')
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t('files.trySearch')}</DialogTitle>
+            <DialogDescription>{t('files.trySearch.hint')}</DialogDescription>
+          </DialogHeader>
+          <div className="files-try-search-form">
+            <Input
+              value={trySearchQuery}
+              autoFocus
+              placeholder={t('files.trySearch.placeholder')}
+              onChange={(e) => setTrySearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void runTrySearch()
+              }}
+            />
+            <Button
+              type="button"
+              disabled={trySearchBusy || !trySearchQuery.trim()}
+              onClick={() => void runTrySearch()}
+            >
+              {trySearchBusy ? t('files.trySearch.running') : t('files.trySearch.run')}
+            </Button>
+          </div>
+          {trySearchHits.length > 0 && (
+            <ul className="files-try-search-hits">
+              {trySearchHits.map((hit) => (
+                <li key={hit.chunk_id} className="files-try-search-hit">
+                  <div className="files-try-search-hit-head">
+                    <span className="files-try-search-hit-name">
+                      {hit.filename}
+                    </span>
+                    <span className="files-try-search-hit-score">
+                      {t('files.trySearch.score', {
+                        score: hit.score.toFixed(3),
+                      })}
+                    </span>
+                  </div>
+                  {hit.content ? (
+                    <p className="files-try-search-hit-snippet">{hit.content}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setTrySearchOpen(false)}
+            >
+              {t('common.close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
         <DialogContent className="sm:max-w-md">

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent, ReactNode } from 'react'
+import type {
+  DragEvent,
+  FormEvent,
+  KeyboardEvent,
+  ClipboardEvent,
+  ReactNode,
+} from 'react'
 import {
   Brain,
   ChevronDown,
@@ -141,8 +147,62 @@ export function ChatComposer({
   const [modelFilter, setModelFilter] = useState('')
   const [mobile, setMobile] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const dragDepthRef = useRef(0)
 
   useEffect(() => subscribeViewport(setMobile), [])
+
+  /** 拖入本地文件时走现有上传链路 */
+  const hasFilePayload = (dt: DataTransfer | null | undefined) => {
+    if (!dt) return false
+    const types = dt.types ? [...dt.types] : []
+    return types.includes('Files') || (dt.files?.length ?? 0) > 0
+  }
+
+  const handleDragEnter = useCallback((e: DragEvent) => {
+    if (!hasFilePayload(e.dataTransfer)) return
+    e.preventDefault()
+    dragDepthRef.current += 1
+    setDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    if (!hasFilePayload(e.dataTransfer)) return
+    e.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setDragOver(false)
+  }, [])
+
+  const handleDragOver = useCallback((e: DragEvent) => {
+    if (!hasFilePayload(e.dataTransfer)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: DragEvent) => {
+      e.preventDefault()
+      dragDepthRef.current = 0
+      setDragOver(false)
+      if (streaming || uploading) return
+      const files = e.dataTransfer?.files
+      if (files?.length) onPickFiles(files)
+    },
+    [onPickFiles, streaming, uploading],
+  )
+
+  /** 粘贴图片/文件；纯文本粘贴不拦截 */
+  const handlePaste = useCallback(
+    (e: ClipboardEvent) => {
+      if (streaming || uploading) return
+      const files = e.clipboardData?.files
+      if (files && files.length > 0) {
+        e.preventDefault()
+        onPickFiles(files)
+      }
+    },
+    [onPickFiles, streaming, uploading],
+  )
 
   // 默认 2 行，随内容增高至最多 5 行，超出后出现滚动条
   const syncTextareaHeight = useCallback(() => {
@@ -254,11 +314,19 @@ export function ChatComposer({
     ))
 
   return (
-    <form className="composer composer-hmu" onSubmit={onSubmit}>
+    <form
+      className="composer composer-hmu"
+      onSubmit={onSubmit}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <div
         className={cn(
           'composer-hmu-box',
           inputFocused && 'focus-inputting',
+          dragOver && 'is-dragover',
         )}
       >
         {showSlashPopover && (
@@ -274,6 +342,11 @@ export function ChatComposer({
           onRemove={onRemovePending}
           onPreviewDoc={onPreviewDoc}
         />
+        {dragOver && (
+          <p className="composer-drop-hint" role="status">
+            {t('composer.dropHint')}
+          </p>
+        )}
         <div className="composer-hmu-input-container p-2.5">
         <textarea
           ref={textareaRef}
@@ -281,6 +354,7 @@ export function ChatComposer({
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={handlePaste}
           onFocus={() => setInputFocused(true)}
           onBlur={() => setInputFocused(false)}
           placeholder={placeholder}

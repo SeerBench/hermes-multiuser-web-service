@@ -491,14 +491,14 @@ flowchart TD
 | ★★★ | **Markdown 代码块高亮 + 复制** | 已有安全 Markdown 渲染；尚未接入高亮与代码块复制 |
 | ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
 | ★★☆ | ~~**用量 / 配额展示**~~ | Settings → API 密钥：new-api `usage` + logs（已完成） |
-| ★★☆ | **Composer 拖拽/粘贴上传** | 仅有 📎 按钮；无 drag-drop / paste 图片 |
+| ★★☆ | ~~**Composer 拖拽/粘贴上传**~~ | Composer：`onDrop` / `onPaste` → 现有 `uploads.create` |
 | ★★☆ | ~~**手动深色/浅色主题**~~ | Account 下拉与 Settings 均支持 system / light / dark |
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
 | ★☆☆ | ~~**模型选择器**~~ | Composer 已提供可搜索模型下拉，并支持常用模型筛选 |
 
 - [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
 - [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
-- [ ] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
+- [x] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
 - [x] `POST /api/v1/auth/change-password` + Settings 表单
 - [x] Settings：模型偏好（常用模型筛选）
@@ -509,14 +509,16 @@ flowchart TD
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
 | ★★☆ | ~~**用量 / 配额展示**~~ | 已迁至 P1「API 密钥」Tab（`/api/v1/billing/*`） |
-| ★★☆ | **知识库试搜索** | 用户想验证文件是否可被 Agent 检索；API 已有 `knowledge/search` |
+| ★★☆ | ~~**知识库试搜索**~~ | 文件页「试搜」对话框调用 `knowledge/search` |
 | ★★☆ | **Skill 详情预览** | 仅开关列表；无法浏览 SKILL 摘要/说明 |
 | ★★☆ | **Admin 分页 + 用户搜索** | 用户增多后表格不可用；API 未分页 |
 | ★☆☆ | **Admin 审计日志 UI** | `audit_logs` 已写库，前端无查看 |
 | ★☆☆ | **Admin 全局 Skill 浏览** | API `GET /admin/skills` 已有；UI 未展示 |
 
 - [x] Settings：用量卡片（余额 / 日志，代理 new-api）
-- [ ] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
+- [x] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
+- [x] 文件列表：客户端分页（25/页）+ 名称搜索 + 工具条收拢
+- [x] App：顶栏固定，主内容区独立滚动
 - [x] `SkillsPage`：技能库分区 + 安装到 workspace + 侧栏预览 SKILL.md
 - [ ] Admin：全局 Skill 浏览（可与 Skills catalog 共用扫描逻辑）
 - [ ] `AdminPage`：email 过滤、分页控件；后端补 `limit/offset` 若需要

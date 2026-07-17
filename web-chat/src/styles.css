@@ -81,6 +81,7 @@ code {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 
 .app-header {
@@ -92,6 +93,9 @@ code {
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 40;
 }
 
 .app-brand {
@@ -281,6 +285,7 @@ code {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: auto;
 }
 
 /* Fill the main flex child so chat / workspace columns can center at 960px. */
@@ -2226,25 +2231,24 @@ code {
 }
 
 .chat-empty-guide {
-  margin: 40px auto 24px;
+  margin: 16px auto 8px;
   max-width: 36rem;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .chat-empty-guide-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 600;
 }
 
 .chat-empty-guide-sub,
-.chat-empty-guide-label,
-.chat-empty-guide-meta {
+.chat-empty-guide-label {
   margin: 0;
   color: var(--fg-dim, var(--muted-foreground));
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 .chat-empty-guide-chips {
@@ -2258,6 +2262,20 @@ code {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.composer-hmu-box.is-dragover {
+  outline: 2px dashed color-mix(in srgb, var(--primary, #5b8def) 55%, var(--border));
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--primary, #5b8def) 8%, transparent);
+}
+
+.composer-drop-hint {
+  pointer-events: none;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--fg-dim, var(--muted-foreground));
+  padding: 4px 8px 0;
 }
 
 .chat-empty-guide-alert {
@@ -2631,6 +2649,84 @@ code {
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.files-search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: min(220px, 40vw);
+}
+
+.files-search-field input {
+  flex: 1;
+  min-width: 0;
+}
+
+.files-pagination {
+  margin-top: 16px;
+  padding-bottom: 8px;
+}
+
+.files-try-search-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.files-try-search-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.files-try-search-hits {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(40vh, 280px);
+  overflow: auto;
+}
+
+.files-try-search-hit {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--bg-elev, var(--muted));
+}
+
+.files-try-search-hit-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.files-try-search-hit-name {
+  font-weight: 500;
+  font-size: 0.875rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-try-search-hit-score {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--fg-dim, var(--muted-foreground));
+}
+
+.files-try-search-hit-snippet {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--fg-dim, var(--muted-foreground));
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .files-main {

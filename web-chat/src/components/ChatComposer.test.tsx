@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { ChatComposer } from './ChatComposer'
@@ -192,5 +192,68 @@ describe('ChatComposer', () => {
 
     await user.tab()
     expect(box).not.toHaveClass('focus-inputting')
+  })
+
+  it('accepts drag-and-drop and paste files via onPickFiles', () => {
+    const onPickFiles = vi.fn()
+    const { container } = render(
+      <LocaleProvider>
+        <ChatComposer
+          input=""
+          onInputChange={noop}
+          onSubmit={(e) => e?.preventDefault()}
+          onKeyDown={noop}
+          streaming={false}
+          uploading={false}
+          pending={[]}
+          onRemovePending={noop}
+          onPickFiles={onPickFiles}
+          onAttachWorkspaceFiles={noop}
+          onStop={noop}
+          placeholder="drop message"
+          showSlashPopover={false}
+          slashQuery={null}
+          commandCatalog={[]}
+          onSlashSelect={noop}
+          onSlashClose={noop}
+          models={[]}
+          selectedModel=""
+          onModelChange={noop}
+        />
+      </LocaleProvider>,
+    )
+
+    const form = container.querySelector('form.composer')!
+    const file = new File(['hello'], 'note.txt', { type: 'text/plain' })
+    const dataTransfer = {
+      types: ['Files'],
+      files: {
+        0: file,
+        length: 1,
+        item: (i: number) => (i === 0 ? file : null),
+      },
+      dropEffect: 'none',
+    }
+
+    fireEvent.dragEnter(form, { dataTransfer })
+    expect(container.querySelector('.composer-hmu-box')).toHaveClass(
+      'is-dragover',
+    )
+
+    fireEvent.drop(form, { dataTransfer })
+    expect(onPickFiles).toHaveBeenCalled()
+
+    const textarea = screen.getByPlaceholderText('drop message')
+    const pasteFile = new File(['img'], 'clip.png', { type: 'image/png' })
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: {
+          0: pasteFile,
+          length: 1,
+          item: (i: number) => (i === 0 ? pasteFile : null),
+        },
+      },
+    })
+    expect(onPickFiles).toHaveBeenCalledTimes(2)
   })
 })
