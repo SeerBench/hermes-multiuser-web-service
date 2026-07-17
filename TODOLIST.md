@@ -18,7 +18,7 @@
 | 3 文件 RAG | **~85%** | 同步 ingestion、关键词检索、文件夹/分类/标签、内容预览与 `web_knowledge_search` 已有；MinIO/Redis Worker/pgvector 待补 |
 | 4 Memory/Skill | **~98%** | API + UI + catalog install/预览/CRUD + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
 | 5 Admin | **~85%** | API + UI + `create_admin.py` 已有；分页、审计 UI 待补 |
-| 6 硬化上线 | **~50%** | 中文 README、部署文档、自动化测试与构建验证已有；压测、备份脚本、CI Compose job 待补 |
+| 6 硬化上线 | **~65%** | DEPLOY 文档、备份脚本、update-platform、登录限流已有；压测、正式安全 review、CI Compose job 待补 |
 
 **最近验证（2026-07-16）**：Platform **57 cases**、Gateway/SessionDB **291 cases**、Web Chat **164 cases** 全部通过；TypeScript typecheck 与 production build 通过。
 
@@ -37,11 +37,11 @@
 
 **下一步优先（未做项）**
 
-1. 登录速率限制（Redis 计数器）  
+1. ~~登录速率限制（Redis 计数器）~~ → **已做**：进程内滑动窗口（`platform_api/services/rate_limit.py`）；多机再接 Redis  
 2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
 3. pgvector cosine 检索（替换关键词 MVP）  
-4. 50 用户压测、备份脚本、`update-web.sh` 扩展 platform-api 部署流程
-5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx`（6 cases）+ CI `web-chat-verify.yml`
+4. ~~备份脚本、`update-web.sh` 扩展 platform-api~~ → `scripts/backup-platform.sh` + `deploy/update-platform.sh`；**50 用户压测仍待做**  
+5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx` + CI `web-chat-verify.yml`
 6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉 + 文件进度 + Onboarding~~
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
@@ -196,7 +196,7 @@ flowchart TD
   - [~] 若 key 未关联平台账号：legacy `upsert_user` 路径（**无「创建账号并绑定」向导**）
   - [x] 已关联 / 平台用户：共享 `platform_sessions` + UUID `user_id`
 - [x] 密码强度校验 + 邮箱格式校验（Pydantic `min_length=8`、`EmailStr`）
-- [ ] 登录失败速率限制（Redis 计数器）
+- [x] 登录失败速率限制（进程内滑动窗口；`PLATFORM_LOGIN_MAX_FAILURES` / `PLATFORM_LOGIN_WINDOW_SECONDS`）
 - [ ] `[-]` MVP 不做：邮件验证、忘记密码自助
 
 ### 1.3 统一 Session（双服务共用）
@@ -406,7 +406,7 @@ flowchart TD
 
 ### 6.2 可靠性
 
-- [~] PostgreSQL / MinIO / `web_workspaces` / `state.db` 备份 — **文档说明，无自动化脚本**
+- [x] PostgreSQL / `web_workspaces` / `state.db` / key vault 备份 — `scripts/backup-platform.sh` + DEPLOY §12
 - [~] 健康检查 — 双服务 `/healthz` 存活探测（**无聚合面板**）
 - [ ] 优雅停机（gateway drain）
 
@@ -419,8 +419,9 @@ flowchart TD
 ### 6.4 文档与部署
 
 - [x] `docs/user-guide/platform-saas.md`
-- [ ] 更新 `update-web.sh` 或新建 `deploy/update-platform.sh`
-- [~] 生产 checklist — 见 `deploy/README.md` + `platform-saas.md`
+- [x] `deploy/update-platform.sh`（双服务更新；legacy 仍用 `update-web.sh`）
+- [x] `docs/user-guide/DEPLOY.md` 生产部署 / 更新 / 备份
+- [~] 生产 checklist — 见 `deploy/README.md` + `platform-saas.md` + `DEPLOY.md`
 - [x] 更新 `README.zh-CN.md`
 
 ### 6.5 CI

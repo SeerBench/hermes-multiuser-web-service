@@ -4,15 +4,30 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Cookie, HTTPException, Response
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from gateway.web.key_storage import KeyVaultError
 from gateway.web.platform.store import PlatformStore
 from gateway.web.users import InvalidCredentialsError, UserStoreError
 from platform_api.deps import get_settings, get_store, get_vault
+from platform_api.services.rate_limit import get_login_rate_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP (honour first X-Forwarded-For hop behind nginx)."""
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _login_rate_key(email: str, request: Request) -> str:
+    return f"login:{email.strip().lower()}:{_client_ip(request)}"
 
 
 class RegisterBody(BaseModel):
@@ -101,13 +116,23 @@ def register(body: RegisterBody, response: Response) -> dict[str, Any]:
 
 
 @router.post("/login")
-def login(body: LoginBody, response: Response) -> dict[str, Any]:
+def login(body: LoginBody, response: Response, request: Request) -> dict[str, Any]:
     store = get_store()
+    limiter = get_login_rate_limiter()
+    rate_key = _login_rate_key(body.email, request)
+    if limiter.is_blocked(rate_key):
+        raise HTTPException(
+            status_code=429,
+            detail="too many login attempts; try again later",
+            headers={"Retry-After": "300"},
+        )
     try:
         result = store.authenticate_user(body.email, body.password)
     except InvalidCredentialsError as exc:
+        limiter.record_failure(rate_key)
         raise HTTPException(status_code=401, detail="invalid credentials") from exc
 
+    limiter.clear(rate_key)
     user = result["user"]
     key_enc = store.get_user_upstream_key_enc(user["user_id"]) or ""
     _issue_cookie(response, store, user["user_id"], key_enc)

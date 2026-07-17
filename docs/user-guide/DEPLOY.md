@@ -541,7 +541,31 @@ sudo journalctl -u hermes-platform-api -u hermes-gateway \
 ## 11. 日常更新
 
 不要只执行 `git pull`。SPA 构建产物不会提交到 Git，Python/Node 依赖也可能
-发生变化。生产更新建议：
+发生变化。生产更新推荐一键脚本（同时处理 platform-api + gateway）：
+
+```bash
+sudo -u hermes -H bash -lc '
+  set -e
+  export PATH="$HOME/.local/bin:$PATH"
+  cd /opt/hermes/app
+  ./deploy/update-platform.sh --systemd hermes-platform-api,hermes-gateway
+'
+```
+
+常用选项：
+
+```bash
+# 只拉代码 + 装依赖 + 构建 SPA，自行重启
+./deploy/update-platform.sh --no-restart
+
+# 更新前跑平台与 gateway 冒烟测试
+./deploy/update-platform.sh --test --no-restart
+
+# 仅 gateway / 旧版 key-only 部署仍可用
+./update-web.sh --systemd hermes-gateway
+```
+
+手工等价步骤：
 
 ```bash
 sudo -u hermes -H bash -lc '
@@ -566,17 +590,6 @@ curl -fsS http://127.0.0.1:8643/api/healthz
 
 sudo nginx -t
 ```
-
-也可用仓库脚本完成拉取和前端构建：
-
-```bash
-sudo -u hermes -H bash -lc \
-  'cd /opt/hermes/app && ./update-web.sh --no-restart --test'
-sudo systemctl restart hermes-platform-api hermes-gateway
-```
-
-`update-web.sh --systemd <unit>` 一次只重启指定 unit；平台部署同时有两个服务，
-所以推荐使用 `--no-restart` 后显式重启二者。
 
 更新后：
 
@@ -604,7 +617,21 @@ curl -fsS https://hermes.example.com/api/v1/healthz
 数据库与 `web_users_master.key` 必须一起保留，否则恢复后无法解密用户绑定的
 key。
 
-### 12.1 备份示例
+### 12.1 备份脚本
+
+推荐：
+
+```bash
+sudo -u hermes -H bash -lc '
+  cd /opt/hermes/app
+  BACKUP_ROOT=/var/backups/hermes \
+  HERMES_HOME=$HOME/.hermes \
+  COMPOSE_DIR=/opt/hermes/infra \
+  ./scripts/backup-platform.sh
+'
+```
+
+也可手工执行（与脚本等价）：
 
 ```bash
 BACKUP_DIR="/var/backups/hermes/$(date -u +%Y%m%dT%H%M%SZ)"

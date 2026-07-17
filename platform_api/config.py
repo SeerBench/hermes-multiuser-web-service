@@ -13,6 +13,9 @@ class Settings:
     cookie_ttl_seconds: int
     cookie_secure: bool
     session_cookie: str = "hermes_session"
+    # Login brute-force guard (in-process; see platform_api.services.rate_limit).
+    login_max_failures: int = 5
+    login_window_seconds: float = 300.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -25,4 +28,8 @@ class Settings:
             cookie_ttl_seconds=int(os.environ.get("PLATFORM_COOKIE_TTL_SECONDS", "604800")),
             cookie_secure=os.environ.get("PLATFORM_COOKIE_SECURE", "false").lower()
             in ("1", "true", "yes"),
+            login_max_failures=int(os.environ.get("PLATFORM_LOGIN_MAX_FAILURES", "5")),
+            login_window_seconds=float(
+                os.environ.get("PLATFORM_LOGIN_WINDOW_SECONDS", "300")
+            ),
         )
