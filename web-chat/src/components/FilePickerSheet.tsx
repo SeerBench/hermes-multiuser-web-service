@@ -94,7 +94,9 @@ export function FilePickerSheet({
                 onCheckedChange={() => toggle(f.id)}
               />
               <span className="file-picker-name">{f.filename}</span>
-              <small>{formatBytes(f.size_bytes ?? 0)}</small>
+              <small className="file-picker-size">
+                {formatBytes(f.size_bytes ?? 0)}
+              </small>
             </label>
           ))}
         </ScrollArea>

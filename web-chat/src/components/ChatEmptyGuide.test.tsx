@@ -24,9 +24,17 @@ describe('ChatEmptyGuide', () => {
     expect(screen.getByText(/start a new conversation/i)).toBeTruthy()
     // 技能数量不再展示在空态（避免运营数字抢视觉）
     expect(screen.queryByText(/85|skills \(3/i)).toBeNull()
-    await user.click(screen.getByRole('button', { name: /from files/i }))
+    const filesButton = screen.getByRole('button', { name: /from files/i })
+    const skillsButton = screen.getByRole('button', { name: /browse skills/i })
+    expect(filesButton).toHaveClass('chat-empty-guide-action')
+    expect(skillsButton).toHaveClass('chat-empty-guide-action')
+    for (const suggestion of screen.getAllByRole('button').slice(0, 3)) {
+      expect(suggestion).toHaveClass('chat-empty-guide-chip')
+    }
+
+    await user.click(filesButton)
     expect(onFiles).toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: /browse skills/i }))
+    await user.click(skillsButton)
     expect(onSkills).toHaveBeenCalled()
   })
 

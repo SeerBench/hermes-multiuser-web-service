@@ -212,6 +212,35 @@ or "attached" an image without including its Markdown link.
 """
 
 
+def _workspace_runtime_prompt(*, workspace: Any, model: str) -> str:
+    """Per-request facts the model must not invent from MEMORY.md / SOUL.md.
+
+    ``workspace`` is the absolute path of the active user sandbox (bound by
+    ``enter_user_context``).  File tools (``web_file_*``) are confined there;
+    the process CWD of the gateway is never the user's working directory.
+    """
+    lines = [
+        "[hermes-multiuser-web-service runtime]",
+        f"Active model for this turn: {model}",
+        "When asked which model you are using, report that id exactly — "
+        "do not invent a different model from memory or identity files.",
+    ]
+    if workspace is not None:
+        ws = str(workspace)
+        lines.extend(
+            [
+                f"User workspace root (your only working directory): {ws}",
+                "All file reads/writes/searches must use paths under this "
+                "workspace via ``web_file_read`` / ``web_file_write`` / "
+                "``web_file_patch`` / ``web_file_search``.  Relative paths "
+                "resolve from the workspace root (e.g. ``uploads/data.csv``, "
+                "``files/notes.md``).  Never claim the gateway process CWD "
+                "or the hermes-agent checkout is the user's directory.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 class WebChatAgentRunner:
     """Stateless factory + runner for AIAgent instances behind ``web_chat``.
 
@@ -308,12 +337,19 @@ class WebChatAgentRunner:
         # appended after so anything the user specifies overrides on conflict
         # (LLMs typically weight later instructions more heavily when they
         # disagree, and we want user intent to win).
+        from gateway.web.sandbox import get_user_workspace
+
+        workspace = get_user_workspace()
+        runtime_block = _workspace_runtime_prompt(workspace=workspace, model=model)
+        base_ephemeral = (
+            _WEB_PLATFORM_PROMPT_ADDENDUM.strip() + "\n\n" + runtime_block
+        )
         if ephemeral_system_prompt:
             effective_ephemeral = (
-                _WEB_PLATFORM_PROMPT_ADDENDUM + "\n\n" + ephemeral_system_prompt
+                base_ephemeral + "\n\n" + ephemeral_system_prompt
             ).strip()
         else:
-            effective_ephemeral = _WEB_PLATFORM_PROMPT_ADDENDUM.strip()
+            effective_ephemeral = base_ephemeral
 
         agent = AIAgent(
             model=model,
@@ -322,6 +358,9 @@ class WebChatAgentRunner:
             quiet_mode=True,
             verbose_logging=False,
             ephemeral_system_prompt=effective_ephemeral,
+            # Context files (AGENTS.md etc.) load from TERMINAL_CWD override
+            # bound by enter_user_context — the user workspace, not process CWD.
+            skip_context_files=False,
             enabled_toolsets=enabled_toolsets,
             session_id=session_id,
             platform="web_chat",

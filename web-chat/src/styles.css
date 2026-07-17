@@ -1457,6 +1457,7 @@ code {
   gap: 6px;
   margin-bottom: 8px;
   padding: 10px 12px 0;
+  min-width: 0;
 }
 
 .attach-strip-readonly {
@@ -1468,13 +1469,16 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 240px;
+  /* Flex 子项必须允许收缩，长文件名才不会把尺寸和删除按钮推出窗口。 */
+  min-width: 0;
+  max-width: min(240px, 100%);
   padding: 4px 8px;
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 12px;
-  color: var(--fg-dim);
+  /* 文件名属于主要内容；light theme 下不要使用过淡的 muted 色。 */
+  color: var(--fg);
   position: relative;
 }
 
@@ -1520,6 +1524,8 @@ code {
 }
 
 .attach-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1590,7 +1596,7 @@ code {
 
 .attach-size {
   flex-shrink: 0;
-  color: var(--fg-faint);
+  color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1617,9 +1623,23 @@ code {
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--fg-faint);
+  color: var(--fg-dim);
   font-size: 14px;
   line-height: 1;
+}
+
+@media (max-width: 767px) {
+  .attach-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .attach-chip {
+    /* 单个附件占可用宽度；多个附件横向滚动，不撑破 composer。 */
+    width: 100%;
+    max-width: 100%;
+    flex: 0 0 100%;
+  }
 }
 
 .attach-remove:hover {
@@ -2230,9 +2250,21 @@ code {
   transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
+/* 空态：滚动区占满剩余高度，内容块用 auto margin 安全垂直居中 */
+[data-slot='message-scroller-content'].chat-transcript-content--empty {
+  min-height: 100%;
+}
+
+.chat-empty-guide-item {
+  width: 100%;
+  margin-block: auto;
+  padding-inline: 12px;
+  box-sizing: border-box;
+}
+
 .chat-empty-guide {
-  margin: 16px auto 8px;
-  max-width: 36rem;
+  width: min(36rem, 100%);
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2240,7 +2272,8 @@ code {
 
 .chat-empty-guide-title {
   margin: 0;
-  font-size: 1.1rem;
+  /* 跟随账户菜单中的聊天字体缩放设置。 */
+  font-size: calc(1.1rem * var(--chat-font-scale, 1));
   font-weight: 600;
 }
 
@@ -2248,7 +2281,14 @@ code {
 .chat-empty-guide-label {
   margin: 0;
   color: var(--fg-dim, var(--muted-foreground));
-  font-size: 0.875rem;
+  font-size: calc(0.875rem * var(--chat-font-scale, 1));
+}
+
+.chat-empty-guide-suggestions {
+  display: flex;
+  flex-direction: column;
+  /* “试试这些问题”与问题按钮之间保留明确的视觉间距。 */
+  gap: 15px;
 }
 
 .chat-empty-guide-chips {
@@ -2257,11 +2297,25 @@ code {
   gap: 8px;
 }
 
+.chat-empty-guide-chip {
+  min-height: 36px;
+  height: auto;
+  padding: 7px 16px;
+  white-space: normal;
+  line-height: 1.35;
+  text-align: left;
+}
+
 .chat-empty-guide-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.chat-empty-guide-action {
+  min-height: 38px;
+  padding-inline: 18px;
 }
 
 .composer-hmu-box.is-dragover {
@@ -2289,6 +2343,34 @@ code {
   padding: 10px 12px;
   font-size: 0.875rem;
   cursor: pointer;
+}
+
+/* 窄屏 / 低高度：略靠上，避免与底部 Composer 挤在一起 */
+@media (max-width: 720px), (max-height: 640px) {
+  .chat-empty-guide-item {
+    margin-block: clamp(20px, 6vh, 40px) auto;
+    padding-inline: 8px;
+  }
+
+  .chat-empty-guide {
+    gap: 12px;
+  }
+
+  .chat-empty-guide-chip,
+  .chat-empty-guide-action {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-empty-guide-chips {
+    flex-direction: column;
+  }
+
+  .chat-empty-guide-chip {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .conversation-header-skills {
@@ -2424,37 +2506,6 @@ code {
 
 .composer-hmu-left {
   position: relative;
-}
-
-.composer-menu-panel {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  min-width: 220px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--popover, var(--bg-elev));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  padding: 6px;
-  z-index: 50;
-}
-
-.composer-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: inherit;
-  padding: 10px 12px;
-  border-radius: var(--radius);
-  text-align: left;
-  font-size: 13px;
-}
-
-.composer-menu-item:hover {
-  background: var(--muted);
 }
 
 /* ── Composer model picker (popover dropdown) ────────────────────── */
@@ -2611,6 +2662,7 @@ code {
   gap: 10px;
   padding: 8px 4px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 
 .file-picker-name {
@@ -2618,6 +2670,13 @@ code {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker-size {
+  flex-shrink: 0;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Files page layout ───────────────────────────────────────────── */

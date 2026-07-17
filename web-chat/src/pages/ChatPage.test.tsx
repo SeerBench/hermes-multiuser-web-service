@@ -6,6 +6,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocaleProvider } from '../i18n'
 import { ChatPage } from './ChatPage'
 
+vi.mock('../platformClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../platformClient')>()
+  return {
+    ...actual,
+    getStoredWorkspaceId: vi.fn(() => 'ws-1'),
+    platform: {
+      ...actual.platform,
+      listModels: vi.fn().mockResolvedValue({
+        models: [{ id: 'gpt-5.6-luna' }, { id: 'claude-sonnet-4.6' }],
+        preferred_model: 'gpt-5.6-luna',
+      }),
+      listSkills: vi.fn().mockResolvedValue([]),
+      patchPreferences: vi.fn().mockResolvedValue(undefined),
+    },
+  }
+})
+
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
   return {
@@ -40,6 +57,7 @@ import {
   conversations as convosApi,
   streamChat,
 } from '../api'
+import { platform } from '../platformClient'
 
 const mockUser = {
   user_id: 'u_test',
@@ -71,6 +89,11 @@ function mockAuthedChat() {
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(platform.listModels).mockResolvedValue({
+      models: [{ id: 'gpt-5.6-luna' }, { id: 'claude-sonnet-4.6' }],
+      preferred_model: 'gpt-5.6-luna',
+    })
+    vi.mocked(platform.listSkills).mockResolvedValue([])
   })
 
   it('opens key modal when legacy auth probe returns 401', async () => {
@@ -88,7 +111,11 @@ describe('ChatPage', () => {
     mockAuthedChat()
     renderChat({ signedIn: true })
 
-    expect(await screen.findByText(/start a new conversation/i)).toBeInTheDocument()
+    const title = await screen.findByText(/start a new conversation/i)
+    expect(title).toBeInTheDocument()
+    expect(title.closest('[data-slot="message-scroller-item"]')).toHaveClass(
+      'chat-empty-guide-item',
+    )
     expect(screen.getByPlaceholderText(/start with any idea/i)).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
@@ -104,6 +131,38 @@ describe('ChatPage', () => {
       expect(screen.getByText(/start a new conversation/i)).toBeInTheDocument()
     })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('includes the selected model when sending in platform mode', async () => {
+    const user = userEvent.setup()
+    mockAuthedChat()
+    vi.mocked(streamChat).mockImplementation(async function* () {
+      yield {
+        type: 'done',
+        session_id: 'sess-model',
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      }
+    })
+
+    renderChat({ signedIn: true, platformMode: true })
+    await screen.findByPlaceholderText(/start with any idea/i)
+    await waitFor(() => {
+      expect(platform.listModels).toHaveBeenCalledWith('ws-1')
+    })
+    expect(
+      await screen.findByRole('button', { name: /choose model/i }),
+    ).toHaveTextContent(/gpt 5\.6 luna/i)
+
+    await user.type(screen.getByPlaceholderText(/start with any idea/i), 'Hi there')
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+
+    expect(streamChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Hi there',
+        model: 'gpt-5.6-luna',
+      }),
+      expect.any(AbortSignal),
+    )
   })
 
   it('streams assistant tokens after send', async () => {

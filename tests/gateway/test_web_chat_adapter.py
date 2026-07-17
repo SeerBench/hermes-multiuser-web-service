@@ -314,6 +314,33 @@ async def test_chat_failed_run_emits_sse_error_event(adapter_app, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_forwards_request_model_to_runner(adapter_app, monkeypatch):
+    """Composer-selected model must reach WebChatAgentRunner.run."""
+    await _patch_validator(monkeypatch, valid=True)
+    await adapter_app.client.post("/api/auth/login", json={"api_key": "sk-good"})
+
+    seen = {}
+
+    async def _ok(**kw):
+        seen["model_override"] = kw.get("model_override")
+        return (
+            {"final_response": "ok", "session_id": "s_model", "failed": False},
+            {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+
+    adapter_app.adapter._runner.run = _ok
+
+    resp = await adapter_app.client.post(
+        "/api/chat",
+        json={"message": "hi", "model": "gpt-5.6-luna"},
+    )
+    assert resp.status == 200
+    text = await resp.text()
+    assert "event: done" in text
+    assert seen["model_override"] == "gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
 async def test_chat_successful_run_emits_done(adapter_app, monkeypatch):
     """Sanity counterpart to the failed-run test: a non-failed result
     still emits ``done`` (not ``error``).

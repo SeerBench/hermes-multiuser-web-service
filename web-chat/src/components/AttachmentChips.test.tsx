@@ -17,6 +17,30 @@ describe('isImageAttachmentName', () => {
 })
 
 describe('PendingAttachments', () => {
+  it('keeps long file metadata inside a shrinkable attachment chip', () => {
+    const longName =
+      'Python开发技术选型对比与项目实施方案-这是一个非常长的文件名称.pdf'
+    const items: PendingAttachment[] = [
+      {
+        id: 'long-file',
+        name: longName,
+        size: 4_321_000,
+        status: 'done',
+        path: `uploads/${longName}`,
+      },
+    ]
+    render(
+      <LocaleProvider>
+        <PendingAttachments items={items} onRemove={vi.fn()} />
+      </LocaleProvider>,
+    )
+
+    const chip = screen.getByTitle(longName)
+    expect(chip).toHaveClass('attach-chip')
+    expect(chip.querySelector('.attach-name')).toHaveTextContent(longName)
+    expect(chip.querySelector('.attach-size')).toHaveTextContent('4.1 MB')
+  })
+
   it('renders hover image preview when previewUrl is set for an image', () => {
     const items: PendingAttachment[] = [
       {

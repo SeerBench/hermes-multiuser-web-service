@@ -78,10 +78,21 @@ export function ChatEmptyGuide({
       {platformMode && (
         <div className="chat-empty-guide-actions">
           {/* 主 CTA：从文件开始；技能为次要入口，不展示技能数量 */}
-          <Button type="button" size="sm" onClick={onGoFiles}>
+          <Button
+            type="button"
+            size="sm"
+            className="chat-empty-guide-action"
+            onClick={onGoFiles}
+          >
             {t('chat.empty.action.files')}
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onGoSkills}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="chat-empty-guide-action"
+            onClick={onGoSkills}
+          >
             {t('chat.empty.action.skills')}
           </Button>
         </div>

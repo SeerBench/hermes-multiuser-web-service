@@ -37,7 +37,9 @@ from typing import Iterator, Optional
 from hermes_constants import (
     get_hermes_home,
     reset_hermes_home_override,
+    reset_terminal_cwd_override,
     set_hermes_home_override,
+    set_terminal_cwd_override,
 )
 
 logger = logging.getLogger("hermes.web.sandbox")
@@ -51,7 +53,7 @@ _USER_WORKSPACE: ContextVar[Optional[Path]] = ContextVar(
 # Canonical layout inside a user workspace.  The web_chat platform
 # enforces these subdirs exist on first request; sandboxed tools rely on
 # them.
-_USER_SUBDIRS = ("memories", "files", "cache", "skills")
+_USER_SUBDIRS = ("memories", "files", "cache", "skills", "uploads")
 
 
 class PathSandboxViolation(PermissionError):
@@ -152,6 +154,7 @@ def enter_user_context(
     """
     ws = ensure_workspace(user_id, base=workspaces_base)
     home_token = set_hermes_home_override(ws)
+    cwd_token = set_terminal_cwd_override(ws)
     workspace_token = _USER_WORKSPACE.set(ws)
     try:
         yield ws
@@ -159,4 +162,5 @@ def enter_user_context(
         # Reset in reverse order of acquisition to be tidy, though
         # ContextVar resets are independent.
         _USER_WORKSPACE.reset(workspace_token)
+        reset_terminal_cwd_override(cwd_token)
         reset_hermes_home_override(home_token)

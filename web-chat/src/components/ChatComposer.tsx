@@ -29,12 +29,6 @@ import {
 import { FilePickerSheet } from './FilePickerSheet'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -46,7 +40,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
-import { subscribeViewport } from '@/lib/breakpoints'
 
 export type ModelOption = { id: string; owned_by?: string }
 
@@ -145,12 +138,9 @@ export function ChatComposer({
   const [modelOpen, setModelOpen] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const [modelFilter, setModelFilter] = useState('')
-  const [mobile, setMobile] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const dragDepthRef = useRef(0)
-
-  useEffect(() => subscribeViewport(setMobile), [])
 
   /** 拖入本地文件时走现有上传链路 */
   const hasFilePayload = (dt: DataTransfer | null | undefined) => {
@@ -299,19 +289,6 @@ export function ChatComposer({
       },
     })
   }
-
-  const renderMenuButtons = () =>
-    menuItems.map((item) => (
-      <button
-        key={item.key}
-        type="button"
-        className="composer-menu-item"
-        onClick={item.action}
-      >
-        {item.icon}
-        <span>{item.label}</span>
-      </button>
-    ))
 
   return (
     <form
@@ -479,48 +456,37 @@ export function ChatComposer({
               </PopoverContent>
             </Popover>
 
-            {mobile ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-expanded={menuOpen}
-                aria-label={t('composer.menu.title')}
-                onClick={() => setMenuOpen((o) => !o)}
-              >
-                <Plus className="size-4" />
-              </Button>
-            ) : (
-              <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('composer.menu.title')}
-                  >
-                    <Plus className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  side="top"
-                  align="start"
-                  sideOffset={8}
-                  className="composer-menu-dropdown min-w-56"
+            {/* 移动端也使用锚定式菜单，避免全屏 Dialog 与 + 按钮脱节。 */}
+            <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('composer.menu.title')}
                 >
-                  {menuItems.map((item) => (
-                    <DropdownMenuItem
-                      key={item.key}
-                      className="gap-2"
-                      onSelect={() => item.action()}
-                    >
-                      {item.icon}
-                      <span>{item.label}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                  <Plus className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                collisionPadding={12}
+                className="composer-menu-dropdown min-w-56"
+              >
+                {menuItems.map((item) => (
+                  <DropdownMenuItem
+                    key={item.key}
+                    className="gap-2"
+                    onSelect={() => item.action()}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div className="composer-hmu-right">
             {streaming ? (
@@ -537,19 +503,6 @@ export function ChatComposer({
           </div>
         </div>
       </div>
-
-      {mobile && (
-        <Dialog open={menuOpen} onOpenChange={setMenuOpen}>
-          <DialogContent className="composer-menu-sheet">
-            <DialogHeader>
-              <DialogTitle>{t('composer.menu.title')}</DialogTitle>
-            </DialogHeader>
-            <div className="composer-menu-panel composer-menu-panel--sheet">
-              {renderMenuButtons()}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
 
       <input
         ref={fileInputRef}

@@ -77,6 +77,24 @@ def test_enter_user_context_sets_both_contextvars(hermes_home):
     assert get_hermes_home() == hermes_home
 
 
+def test_enter_user_context_sets_terminal_cwd_override(hermes_home):
+    """Web chat must not discover context files from the process CWD
+    (the hermes-agent checkout). Bind TERMINAL_CWD to the user workspace.
+    """
+    from hermes_constants import get_terminal_cwd
+
+    assert get_terminal_cwd() is None
+    with enter_user_context("u_alice") as ws:
+        assert get_terminal_cwd() == str(ws)
+    assert get_terminal_cwd() is None
+
+
+def test_ensure_workspace_includes_uploads(hermes_home):
+    ws = ensure_workspace("u_alice")
+    assert (ws / "uploads").is_dir()
+    assert (ws / "skills").is_dir()
+
+
 def test_enter_user_context_is_reentrant(hermes_home):
     """Nested entry (e.g. spawn subagent for a different user) works
     correctly — outer context restored on inner exit.

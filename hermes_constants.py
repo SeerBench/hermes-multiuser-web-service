@@ -40,6 +40,34 @@ def get_hermes_home_override() -> str | None:
     return str(override)
 
 
+# Per-request TERMINAL_CWD for multi-user web_chat — mirrors HERMES_HOME
+# override so context-file discovery and subdirectory hints do not fall
+# back to the gateway process CWD (the hermes-agent checkout).
+_TERMINAL_CWD_OVERRIDE: ContextVar[str | object] = ContextVar(
+    "_TERMINAL_CWD_OVERRIDE", default=_UNSET
+)
+
+
+def set_terminal_cwd_override(path: str | Path | None) -> Token:
+    """Set a context-local TERMINAL_CWD override (does not mutate os.environ)."""
+    value: str | object = _UNSET if path is None else str(path)
+    return _TERMINAL_CWD_OVERRIDE.set(value)
+
+
+def reset_terminal_cwd_override(token: Token) -> None:
+    """Restore the previous context-local TERMINAL_CWD override."""
+    _TERMINAL_CWD_OVERRIDE.reset(token)
+
+
+def get_terminal_cwd() -> str | None:
+    """Return active TERMINAL_CWD: context override, else env, else None."""
+    override = _TERMINAL_CWD_OVERRIDE.get()
+    if override is not _UNSET and override:
+        return str(override)
+    env = os.environ.get("TERMINAL_CWD", "").strip()
+    return env or None
+
+
 def get_hermes_home() -> Path:
     """Return the Hermes home directory (default: ~/.hermes).
 

@@ -23,7 +23,7 @@ beforeAll(() => {
 })
 
 describe('ChatComposer', () => {
-  it('opens the plus menu via portal so items are not clipped by overflow', async () => {
+  it('opens an anchored plus menu via portal without a detached dialog', async () => {
     const user = userEvent.setup()
     render(
       <LocaleProvider>
@@ -65,6 +65,7 @@ describe('ChatComposer', () => {
       .closest('[data-slot="dropdown-menu-content"]')
     expect(menu).toBeTruthy()
     expect(menu?.closest('.composer-hmu-box')).toBeNull()
+    expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull()
   })
 
   it('opens a searchable model dropdown instead of a dialog', async () => {

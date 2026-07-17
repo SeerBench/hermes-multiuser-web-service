@@ -250,12 +250,8 @@ def test_create_agent_always_prepends_platform_addendum(monkeypatch):
     assert eph.index("web_skills_list") < eph.index("Be terse.")
 
 
-def test_create_agent_supports_model_name_override(monkeypatch):
-    """If the runner is constructed with a custom model_name, that takes
-    precedence over `_resolve_gateway_model()`.  Lets the platform expose
-    a vanity name (e.g. "Hermes Agent") to clients while using a
-    different actual model under the hood.
-    """
+def test_create_agent_passes_per_request_model_override(monkeypatch):
+    """SPA-selected model must win over gateway default / vanity name."""
     _patch_gateway_runtime(monkeypatch)
     captured = {}
     monkeypatch.setattr(
@@ -264,8 +260,35 @@ def test_create_agent_supports_model_name_override(monkeypatch):
     )
 
     runner = WebChatAgentRunner(model_name="vanity/name")
-    runner._create_agent(user_id="u_alice")
-    assert captured["model"] == "vanity/name"
+    with patch("gateway.web.sandbox.get_user_workspace") as mock_ws:
+        mock_ws.return_value = None
+        runner._create_agent(
+            user_id="u_alice",
+            model_override="gpt-5.6-luna",
+        )
+    assert captured["model"] == "gpt-5.6-luna"
+    assert "gpt-5.6-luna" in (captured.get("ephemeral_system_prompt") or "")
+
+
+def test_create_agent_binds_workspace_in_prompt(monkeypatch, tmp_path):
+    """Ephemeral prompt must state the per-user workspace root."""
+    _patch_gateway_runtime(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        "run_agent.AIAgent",
+        lambda **kw: (captured.update(kw), MagicMock())[1],
+    )
+    ws = tmp_path / "web_workspaces" / "u_alice"
+    ws.mkdir(parents=True)
+
+    with patch("gateway.web.sandbox.get_user_workspace", return_value=ws):
+        WebChatAgentRunner()._create_agent(user_id="u_alice")
+
+    eph = captured.get("ephemeral_system_prompt") or ""
+    assert str(ws) in eph
+    assert "web_file_read" in eph
+    assert captured.get("skip_context_files") is False
+
 
 
 # ── run() ─────────────────────────────────────────────────────────────────

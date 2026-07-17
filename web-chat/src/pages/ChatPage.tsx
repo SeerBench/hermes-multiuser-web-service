@@ -1091,9 +1091,17 @@ export function ChatPage({
           >
             <MessageScroller className="chat-transcript-scroller min-h-0 flex-1">
               <MessageScrollerViewport className="chat-transcript">
-                <MessageScrollerContent className="gap-5 px-1 py-5">
+                <MessageScrollerContent
+                  className={cn(
+                    'gap-5 px-1 py-5',
+                    turns.length === 0 && 'chat-transcript-content--empty',
+                  )}
+                >
                   {turns.length === 0 ? (
-                    <MessageScrollerItem messageId="empty-guide">
+                    <MessageScrollerItem
+                      messageId="empty-guide"
+                      className="chat-empty-guide-item"
+                    >
                       <ChatEmptyGuide
                         platformMode={platformMode}
                         needsBindKey={needsBindKey}
