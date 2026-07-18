@@ -228,6 +228,103 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class KnowledgeBase(Base):
+    """User knowledge collection (Knowledge Center) — decoupled from File storage."""
+
+    __tablename__ = "knowledge_bases"
+    __table_args__ = (
+        Index("ix_knowledge_bases_workspace_status", "workspace_id", "status"),
+        Index("ix_knowledge_bases_user_updated", "user_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="other")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="processing")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class KnowledgeFile(Base):
+    """Link between a knowledge base and a source FileRecord."""
+
+    __tablename__ = "knowledge_files"
+    __table_args__ = (UniqueConstraint("knowledge_id", "file_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    knowledge_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    file_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("files.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class KnowledgeChunk(Base):
+    """Indexed text chunk for Knowledge Center retrieval."""
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_knowledge", "knowledge_id"),
+        Index("ix_knowledge_chunks_workspace_user", "workspace_id", "user_id"),
+        Index("ix_knowledge_chunks_file", "file_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    knowledge_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False
+    )
+    file_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class UsageRecord(Base):
+    """Platform activity / cost ledger (Usage Center) — not upstream billing."""
+
+    __tablename__ = "usage_records"
+    __table_args__ = (
+        Index("ix_usage_records_user_created", "user_id", "created_at"),
+        Index("ix_usage_records_workspace_created", "workspace_id", "created_at"),
+        Index("ix_usage_records_type_created", "type", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    skill_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    knowledge_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    tool_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class MemoryItem(Base):
     """Structured per-user memory entry (Memory Center source of truth)."""
 

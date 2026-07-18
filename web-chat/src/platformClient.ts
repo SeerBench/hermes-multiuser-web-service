@@ -66,6 +66,91 @@ export type MemoryStats = {
   last_updated_at?: string | null
 }
 
+export type KnowledgeBase = {
+  id: string
+  user_id: string
+  workspace_id: string
+  tenant_id?: string
+  name: string
+  description?: string
+  category: string
+  status: string
+  error_message?: string | null
+  file_count: number
+  chunk_count: number
+  files?: {
+    file_id: string
+    filename: string
+    mime_type?: string
+    status?: string
+  }[]
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type KnowledgeStats = {
+  knowledge_count: number
+  document_count: number
+  chunk_count: number
+  last_updated_at?: string | null
+}
+
+export type KnowledgeSearchHit = {
+  chunk_id: string
+  knowledge_id: string
+  knowledge_name?: string
+  file_id?: string | null
+  filename?: string
+  content: string
+  score: number
+}
+
+export type UsagePeriodStats = {
+  requests: number
+  tokens: number
+  cost: number
+}
+
+export type UsageSummary = {
+  today: UsagePeriodStats
+  month: UsagePeriodStats
+}
+
+export type UsageTrendPoint = {
+  date: string
+  requests: number
+  tokens: number
+}
+
+export type UsageModelRow = {
+  model: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
+export type UsageSkillRow = {
+  skill_name: string
+  requests: number
+  last_used_at?: string | null
+}
+
+export type UsageLogItem = {
+  id: string
+  type: string
+  model?: string | null
+  skill_name?: string | null
+  knowledge_id?: string | null
+  tool_name?: string | null
+  session_id?: string | null
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cost: number
+  metadata?: Record<string, unknown>
+  created_at?: string | null
+}
+
 export type AuthResponse = {
   user: PlatformUser
   workspace?: Workspace
@@ -320,6 +405,41 @@ export const platform = {
     platformRequest<{ items: BillingLogItem[] }>(
       `/billing/logs?limit=${limit}`,
     ),
+
+  getUsageSummary: () => platformRequest<UsageSummary>('/usage/summary'),
+
+  getUsageTrend: (days: 7 | 30 = 7) =>
+    platformRequest<{ days: number; points: UsageTrendPoint[] }>(
+      `/usage/trend?days=${days}`,
+    ),
+
+  getUsageByModel: (days = 30) =>
+    platformRequest<{ days: number; items: UsageModelRow[] }>(
+      `/usage/by-model?days=${days}`,
+    ),
+
+  getUsageBySkill: (days = 30) =>
+    platformRequest<{ days: number; items: UsageSkillRow[] }>(
+      `/usage/by-skill?days=${days}`,
+    ),
+
+  getUsageLogs: (opts?: {
+    limit?: number
+    offset?: number
+    type?: string
+  }) => {
+    const params = new URLSearchParams()
+    if (opts?.limit != null) params.set('limit', String(opts.limit))
+    if (opts?.offset != null) params.set('offset', String(opts.offset))
+    if (opts?.type) params.set('type', opts.type)
+    const q = params.toString()
+    return platformRequest<{
+      total: number
+      limit: number
+      offset: number
+      items: UsageLogItem[]
+    }>(`/usage/logs${q ? `?${q}` : ''}`)
+  },
 
   listWorkspaces: () =>
     platformRequest<Workspace[]>('/workspaces'),
@@ -729,6 +849,67 @@ export const platform = {
       method: 'POST',
       body: JSON.stringify({ query, top_k: topK }),
     }),
+
+  listKnowledgeBases: (workspaceId: string) =>
+    platformRequest<{ items: KnowledgeBase[] }>(
+      `/workspaces/${workspaceId}/knowledge-bases`,
+    ),
+
+  getKnowledgeStats: (workspaceId: string) =>
+    platformRequest<KnowledgeStats>(
+      `/workspaces/${workspaceId}/knowledge-bases/stats`,
+    ),
+
+  getKnowledgeBase: (workspaceId: string, knowledgeId: string) =>
+    platformRequest<KnowledgeBase>(
+      `/workspaces/${workspaceId}/knowledge-bases/${knowledgeId}`,
+    ),
+
+  createKnowledgeBase: (
+    workspaceId: string,
+    body: {
+      name: string
+      description?: string
+      category?: string
+      file_ids: string[]
+    },
+  ) =>
+    platformRequest<KnowledgeBase>(
+      `/workspaces/${workspaceId}/knowledge-bases`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
+
+  deleteKnowledgeBase: (workspaceId: string, knowledgeId: string) =>
+    platformRequest<{ status: string }>(
+      `/workspaces/${workspaceId}/knowledge-bases/${knowledgeId}`,
+      { method: 'DELETE' },
+    ),
+
+  reindexKnowledgeBase: (workspaceId: string, knowledgeId: string) =>
+    platformRequest<KnowledgeBase>(
+      `/workspaces/${workspaceId}/knowledge-bases/${knowledgeId}/reindex`,
+      { method: 'POST' },
+    ),
+
+  searchKnowledgeBases: (
+    workspaceId: string,
+    query: string,
+    opts?: { top_k?: number; knowledge_id?: string },
+  ) =>
+    platformRequest<{ results: KnowledgeSearchHit[]; query: string }>(
+      `/workspaces/${workspaceId}/knowledge-bases/search`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          query,
+          top_k: opts?.top_k ?? 5,
+          knowledge_id: opts?.knowledge_id,
+        }),
+      },
+    ),
 }
 
 export { PlatformApiError }

@@ -145,6 +145,8 @@ describe('SettingsPage', () => {
     expect(screen.getByText('gpt-pro')).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: /usage/i }))
-    expect(await screen.findByText(/coming soon/i)).toBeInTheDocument()
+    expect(
+      await screen.findByRole('button', { name: /open usage center/i }),
+    ).toBeInTheDocument()
   })
 })

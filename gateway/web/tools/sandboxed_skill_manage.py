@@ -511,6 +511,20 @@ def _handle_web_skill_view(args: Dict[str, Any], **kw: Any) -> str:
     except OSError as exc:
         return _json({"success": False, "error": f"could not read skill file: {exc}"})
 
+    # Usage Center: skill view (representative skill tool hook)
+    try:
+        from gateway.web.usage_tracker import track
+
+        track(
+            ws.name,
+            "skill",
+            skill_name=name,
+            tool_name="web_skill_view",
+            metadata={"source": source},
+        )
+    except Exception:
+        pass
+
     return _json({
         "success": True,
         "name": name,
@@ -638,6 +652,19 @@ def _handle_web_skill_install(args: Dict[str, Any], **kw: Any) -> str:
     # new-api gateway's responsibility.  The per-file MAX_FILE_BYTES /
     # per-skill MAX_SKILL_BYTES caps above bound the per-tenant disk
     # footprint without any local accounting.
+
+    try:
+        from gateway.web.usage_tracker import track
+
+        track(
+            ws.name,
+            "skill",
+            skill_name=name,
+            tool_name="web_skill_install",
+            metadata={"category": category},
+        )
+    except Exception:
+        pass
 
     return _json({
         "success": True,

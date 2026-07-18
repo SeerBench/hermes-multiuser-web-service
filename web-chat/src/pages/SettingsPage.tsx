@@ -54,6 +54,8 @@ type Props = {
   user?: PlatformUser | null
   onLoggedOut: () => void
   onUserUpdated?: (user: PlatformUser) => void
+  /** Navigate to Usage Center (`#/usage`) and close settings. */
+  onOpenUsageCenter?: () => void
 }
 
 type SettingsTab = 'general' | 'account' | 'models' | 'usage'
@@ -66,6 +68,7 @@ export function SettingsPage({
   user: platformUser,
   onLoggedOut,
   onUserUpdated,
+  onOpenUsageCenter,
 }: Props) {
   const t = useT()
   const workspaceId = getStoredWorkspaceId()
@@ -776,8 +779,22 @@ export function SettingsPage({
 
             {platformMode && (
               <TabsContent value="usage" className="mt-0 space-y-4 pb-4">
-                <p className="text-muted-foreground text-sm py-8 text-center">
-                  {t('settings.usage.comingSoon')}
+                <p className="text-muted-foreground text-sm">
+                  {t('settings.usage.centerHint')}
+                </p>
+                <div className="flex justify-center py-4">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      onOpenChange(false)
+                      onOpenUsageCenter?.()
+                    }}
+                  >
+                    {t('settings.usage.openCenter')}
+                  </Button>
+                </div>
+                <p className="text-muted-foreground text-xs text-center">
+                  {t('settings.usage.billingNote')}
                 </p>
               </TabsContent>
             )}

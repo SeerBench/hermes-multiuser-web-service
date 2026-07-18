@@ -85,8 +85,10 @@ Outputs to `../gateway/web/_static/`.
 | `#/settings` | Settings dialog |
 | `#/files` | Workspace files |
 | `#/file-tags` | File tags |
-| `#/memory` | Memory |
-| `#/skills` | Skills |
+| `#/knowledge` | Knowledge Center |
+| `#/memory` | Memory Center |
+| `#/skills` | Skill Center |
+| `#/usage` | Usage Center |
 | `#/admin` | Admin users (admin only) |
 | `#/admin/audit` | Admin audit log |
 | `#/reset-password?token=` | Password reset (auth gate) |
@@ -112,8 +114,10 @@ web-chat/
 │   │   ├── SettingsPage.tsx
 │   │   ├── FilesPage.tsx
 │   │   ├── FileTagsPage.tsx
+│   │   ├── KnowledgePage.tsx
 │   │   ├── MemoryPage.tsx
 │   │   ├── SkillsPage.tsx
+│   │   ├── UsagePage.tsx
 │   │   ├── AdminPage.tsx
 │   │   └── AdminAuditPage.tsx
 │   └── components/

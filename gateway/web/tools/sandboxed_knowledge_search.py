@@ -1,7 +1,8 @@
-"""Sandboxed knowledge-base search for the web_chat platform.
+"""Sandboxed Knowledge Center search for the web_chat platform.
 
-Queries document chunks scoped to the active user's workspace via the
-platform control-plane database (``PLATFORM_DATABASE_URL``).
+Queries ``knowledge_chunks`` for ready Knowledge Center bases owned by the
+active user (via ``PLATFORM_DATABASE_URL``). File-page ``DocumentChunk``
+ingest remains separate and is not used here.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def _active_user_id() -> str | None:
 
 
 def web_knowledge_search(query: str, top_k: int = 5, task_id: str = None) -> str:
-    """Search the user's uploaded knowledge base for relevant passages."""
+    """Search the user's Knowledge Center (ready bases) for relevant passages."""
     _ = task_id
     user_id = _active_user_id()
     if not user_id:
@@ -38,7 +39,7 @@ def web_knowledge_search(query: str, top_k: int = 5, task_id: str = None) -> str
     try:
         from gateway.web.platform.store import PlatformStore
         from gateway.web.user_store_factory import create_user_store
-        from platform_api.services.knowledge import search_knowledge
+        from platform_api.services.knowledge_center import search_knowledge_chunks
     except ImportError as exc:
         return json.dumps({
             "success": False,
@@ -56,21 +57,48 @@ def web_knowledge_search(query: str, top_k: int = 5, task_id: str = None) -> str
     if not ws:
         return json.dumps({"success": False, "error": "no workspace for user"})
 
-    hits = search_knowledge(
+    hits = search_knowledge_chunks(
         tenant_id=ws["tenant_id"],
         workspace_id=ws["id"],
+        user_id=user_id,
         query=query,
         top_k=max(1, min(int(top_k or 5), 20)),
     )
+
+    # Usage Center: knowledge search (representative knowledge tool hook)
+    try:
+        from gateway.web.usage_tracker import track
+
+        track(
+            user_id,
+            "knowledge",
+            tool_name="web_knowledge_search",
+            workspace_id=ws["id"],
+            tenant_id=ws.get("tenant_id"),
+            metadata={"hit_count": len(hits), "top_k": max(1, min(int(top_k or 5), 20))},
+        )
+    except Exception:
+        pass
+
+    if not hits:
+        return json.dumps({
+            "success": True,
+            "results": [],
+            "query": query,
+            "hint": (
+                "No matching passages in ready Knowledge Center bases. "
+                "Create a knowledge base from uploaded files in the Knowledge Center UI."
+            ),
+        })
     return json.dumps({"success": True, "results": hits, "query": query})
 
 
 _WEB_KNOWLEDGE_SCHEMA: Dict[str, Any] = {
     "name": "web_knowledge_search",
     "description": (
-        "Search the user's uploaded documents (PDF, DOCX, etc.) for passages "
-        "relevant to a natural-language query. Use when the user refers to "
-        "uploaded files or a personal knowledge base."
+        "Search the user's Knowledge Center (ready knowledge bases built from "
+        "uploaded files) for passages relevant to a natural-language query. "
+        "Use when the user refers to their personal knowledge bases."
     ),
     "parameters": {
         "type": "object",

@@ -10,7 +10,7 @@ import {
   type WorkspaceTab,
 } from '../routing'
 
-/** Sub-nav: Files → Skills → Memory, centered 960 / 98% column. */
+/** Sub-nav: Files → Knowledge → Skills → Memory, centered 960 / 98% column. */
 export function WorkspaceShell({
   active,
   children,
@@ -35,6 +35,7 @@ export function WorkspaceShell({
       >
         <TabsList className="bg-muted/80">
           <TabsTrigger value="files">{t('nav.files')}</TabsTrigger>
+          <TabsTrigger value="knowledge">{t('nav.knowledge')}</TabsTrigger>
           <TabsTrigger value="skills">{t('nav.skills')}</TabsTrigger>
           <TabsTrigger value="memory">{t('nav.memory')}</TabsTrigger>
         </TabsList>

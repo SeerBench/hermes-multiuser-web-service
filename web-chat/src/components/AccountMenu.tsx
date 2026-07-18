@@ -28,6 +28,8 @@ type Props = {
   /** 用户自定义头像 URL；为空则显示默认图标 */
   avatarUrl?: string | null
   onOpenSettings: () => void
+  /** Platform mode: open Usage Center */
+  onOpenUsage?: () => void
   onLogout: () => void
 }
 
@@ -36,6 +38,7 @@ export function AccountMenu({
   email,
   avatarUrl,
   onOpenSettings,
+  onOpenUsage,
   onLogout,
 }: Props) {
   const t = useT()
@@ -141,6 +144,15 @@ export function AccountMenu({
         >
           {t('nav.settings')}
         </DropdownMenuItem>
+        {onOpenUsage ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              onOpenUsage()
+            }}
+          >
+            {t('nav.usage')}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem
           variant="destructive"
           onSelect={() => {

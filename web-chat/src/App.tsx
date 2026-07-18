@@ -6,8 +6,10 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AuthPage } from './pages/AuthPage'
 import { FilesPage } from './pages/FilesPage'
 import { FileTagsPage } from './pages/FileTagsPage'
+import { KnowledgePage } from './pages/KnowledgePage'
 import { MemoryPage } from './pages/MemoryPage'
 import { SkillsPage } from './pages/SkillsPage'
+import { UsagePage } from './pages/UsagePage'
 import { AdminPage } from './pages/AdminPage'
 import { AdminAuditPage } from './pages/AdminAuditPage'
 import { AccountMenu } from './components/AccountMenu'
@@ -171,6 +173,8 @@ function AppShell() {
       <FilesPage key={`files-${pageKey}`} />
     ) : pageRoute === 'file-tags' ? (
       <FileTagsPage key={`file-tags-${pageKey}`} />
+    ) : pageRoute === 'knowledge' ? (
+      <KnowledgePage key={`knowledge-${pageKey}`} />
     ) : pageRoute === 'memory' ? (
       <MemoryPage key={`memory-${pageKey}`} />
     ) : pageRoute === 'skills' ? (
@@ -238,6 +242,9 @@ function AppShell() {
               email={user.email}
               avatarUrl={user.avatar_url}
               onOpenSettings={() => goto('settings')}
+              onOpenUsage={
+                platformMode ? () => goto('usage') : undefined
+              }
               onLogout={() => void handleLoggedOut()}
             />
           </div>
@@ -298,6 +305,9 @@ function AppShell() {
                   {workspaceBody}
                 </WorkspaceShell>
               )}
+              {pageRoute === 'usage' && platformMode && (
+                <UsagePage key={`usage-${pageKey}`} />
+              )}
               {pageRoute === 'admin' && <AdminPage key={`admin-${pageKey}`} />}
               {pageRoute === 'admin-audit' && (
                 <AdminAuditPage key={`admin-audit-${pageKey}`} />
@@ -314,6 +324,7 @@ function AppShell() {
               user={user}
               onLoggedOut={handleLoggedOut}
               onUserUpdated={setUser}
+              onOpenUsageCenter={() => goto('usage')}
             />
           </>
         )}

@@ -22,8 +22,10 @@ describe('routing', () => {
     expect(parseRoute('#/settings')).toBe('settings')
     expect(parseRoute('#/files')).toBe('files')
     expect(parseRoute('#/file-tags')).toBe('file-tags')
+    expect(parseRoute('#/knowledge')).toBe('knowledge')
     expect(parseRoute('#/memory')).toBe('memory')
     expect(parseRoute('#/skills')).toBe('skills')
+    expect(parseRoute('#/usage')).toBe('usage')
     expect(parseRoute('#/admin')).toBe('admin')
     expect(parseRoute('#/admin/audit')).toBe('admin-audit')
     expect(parseRoute('#/reset-password')).toBe('reset-password')
@@ -66,6 +68,7 @@ describe('routing', () => {
   it('maps file-tags into the Files shell tab', () => {
     expect(workspaceShellTab('files')).toBe('files')
     expect(workspaceShellTab('file-tags')).toBe('files')
+    expect(workspaceShellTab('knowledge')).toBe('knowledge')
     expect(workspaceShellTab('skills')).toBe('skills')
     expect(workspaceShellTab('chat')).toBe(null)
   })

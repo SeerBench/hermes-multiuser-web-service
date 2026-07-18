@@ -5,8 +5,10 @@ export type Route =
   | 'settings'
   | 'files'
   | 'file-tags'
+  | 'knowledge'
   | 'memory'
   | 'skills'
+  | 'usage'
   | 'admin'
   | 'admin-audit'
   | 'reset-password'
@@ -14,22 +16,24 @@ export type Route =
 /** Top-level chrome tabs (settings lives in AccountMenu). */
 export type MainTab = 'chat' | 'workspace'
 
-export type WorkspaceTab = 'files' | 'memory' | 'skills'
+export type WorkspaceTab = 'files' | 'knowledge' | 'memory' | 'skills'
 
 const ROUTES: Route[] = [
   'settings',
   'files',
   'file-tags',
+  'knowledge',
   'memory',
   'skills',
+  'usage',
   'admin-audit',
   'admin',
   'reset-password',
   'chat',
 ]
 
-/** Display / entry order: Files → Skills → Memory. */
-const WORKSPACE_TABS: WorkspaceTab[] = ['files', 'skills', 'memory']
+/** Display / entry order: Files → Knowledge → Skills → Memory. */
+const WORKSPACE_TABS: WorkspaceTab[] = ['files', 'knowledge', 'skills', 'memory']
 const LAST_WS_KEY = 'hermes_last_workspace_tab'
 
 /** Strip query string from a hash path (`reset-password?token=…` → path). */
@@ -70,6 +74,7 @@ export function isWorkspaceRoute(route: Route): boolean {
   return (
     route === 'files' ||
     route === 'file-tags' ||
+    route === 'knowledge' ||
     route === 'memory' ||
     route === 'skills'
   )
@@ -78,7 +83,9 @@ export function isWorkspaceRoute(route: Route): boolean {
 /** WorkspaceShell 顶栏高亮的子 Tab（file-tags 挂在「文件」下）。 */
 export function workspaceShellTab(route: Route): WorkspaceTab | null {
   if (route === 'files' || route === 'file-tags') return 'files'
-  if (route === 'memory' || route === 'skills') return route
+  if (route === 'knowledge' || route === 'memory' || route === 'skills') {
+    return route
+  }
   return null
 }
 

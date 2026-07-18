@@ -1478,6 +1478,27 @@ class WebChatAdapter(BasePlatformAdapter):
                             "usage": usage,
                         },
                     })
+                    # Usage Center: ledger chat turn (tokens + model); best-effort.
+                    try:
+                        from gateway.web.usage_tracker import track_chat_turn
+
+                        ws = None
+                        if hasattr(self.user_store, "get_default_workspace"):
+                            ws = self.user_store.get_default_workspace(user_id)
+                        track_chat_turn(
+                            user_id=user_id,
+                            session_id=str(effective_session_id),
+                            model=request_model,
+                            usage=usage if isinstance(usage, dict) else {},
+                            workspace_id=ws["id"] if ws else None,
+                            tenant_id=ws.get("tenant_id") if ws else None,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[%s] usage tracker hook skipped",
+                            self.name,
+                            exc_info=True,
+                        )
                     # Memory Center: optional post-turn extraction (feature-flagged
                     # stub — never writes permanent memory; see memory_extractor).
                     try:

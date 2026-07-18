@@ -332,7 +332,10 @@ def delete_file(
     _get_workspace(workspace_id, user_id)
     store = get_store()
     from gateway.web.platform.database import session_scope
+    from gateway.web.platform.models import KnowledgeChunk, KnowledgeFile
+    from platform_api.services import knowledge_center as kc
 
+    affected_kb: list[str] = []
     with enter_user_context(user_id):
         from gateway.web.sandbox import unlink_storage_key
 
@@ -340,11 +343,28 @@ def delete_file(
             rec = db.get(FileRecord, file_id)
             if not rec or rec.workspace_id != workspace_id:
                 raise HTTPException(status_code=404, detail="not found")
+            affected_kb = [
+                r.knowledge_id
+                for r in db.execute(
+                    select(KnowledgeFile).where(KnowledgeFile.file_id == file_id)
+                ).scalars().all()
+            ]
             # 越权 storage_key 只跳过 unlink，仍删除 DB 行（防毒化记录）
             unlink_storage_key(rec.storage_key)
             db.execute(delete(FileTagLink).where(FileTagLink.file_id == file_id))
             db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_id))
+            # Knowledge Center: drop chunks for this file; knowledge_files CASCADE
+            db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.file_id == file_id))
             db.delete(rec)
+
+    # 删文件后：空库标 failed，仍有文件则同步 reindex 剩余来源
+    for kid in affected_kb:
+        try:
+            kc.reindex_or_fail_after_file_removed(
+                knowledge_id=kid, user_id=user_id
+            )
+        except Exception:
+            pass
     return {"status": "deleted"}
 
 

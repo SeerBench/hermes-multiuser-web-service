@@ -15,7 +15,7 @@
 | 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
 | 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；速率限制待补 |
 | 2 隔离加固 | **~95%** | UUID 贯穿 + 隔离 E2E；UUID 并发 ContextVar + Legacy→UUID 知识库越权已补测 |
-| 3 文件 RAG | **~85%** | 同步 ingestion、关键词检索、文件夹/分类/标签、内容预览与 `web_knowledge_search` 已有；MinIO/Redis Worker/pgvector 待补 |
+| 3 文件 RAG | **~90%** | Files ingest + DocumentChunk 试搜；**Knowledge Center** 独立建库/检索；Agent 走 `knowledge_chunks`；MinIO/Redis Worker/pgvector 待补 |
 | 4 Memory/Skill | **~98%** | API + UI + catalog install/预览/CRUD + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
 | 5 Admin | **~95%** | 用户分页/email 过滤、审计只读 API+UI（`#/admin/audit`）；全局 Skill UI 仍待 |
 | 6 硬化上线 | **~70%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie 验收脚本已有；压测与正式安全 review 待补 |
@@ -306,10 +306,21 @@ flowchart TD
 ### 3.5 Agent 工具 `web_knowledge_search`
 
 - [x] `gateway/web/tools/sandboxed_knowledge_search.py`
-- [x] 调用 `search_knowledge()`（同进程，非 HTTP）
-- [x] `workspace_id` 来自当前 `enter_user_context`
+- [x] 改为检索 Knowledge Center `knowledge_chunks`（`status=ready`）；无库返回 hint
+- [x] `workspace_id` / `user_id` 来自当前 `enter_user_context`
 - [x] 注册到 `hermes-web-chat` toolset
-- [x] `tests/platform/test_knowledge.py`
+- [x] `tests/platform/test_knowledge.py` + `test_web_sandboxed_knowledge.py`
+- [x] Files 页 `DocumentChunk` 试搜仍保留（与 Center 解耦）
+
+### 3.5b Knowledge Center MVP
+
+- [x] 表 `knowledge_bases` / `knowledge_files` / `knowledge_chunks` + Alembic `003`
+- [x] `platform_api/services/knowledge_center.py` — 建库 / reindex / 检索 / 删库保留 File
+- [x] API：`/knowledge-bases` CRUD、stats、reindex、search
+- [x] 删 File 时清理关联与对应 chunks，空库标 `failed`，有剩余则 reindex
+- [x] UI：`#/knowledge` Knowledge Center（Files → Knowledge → Skills → Memory）
+- [x] 隔离 / 删库保留 File 测试：`tests/platform/test_knowledge_center.py`
+- [ ] Redis Worker / 真 pgvector cosine（后续）
 
 ### 3.6 前端文件管理 UI
 
@@ -374,6 +385,17 @@ flowchart TD
 - [x] skill hint 改为 `web_skill_view` / `web_skills_list`
 - [x] mutate 路径 AuditLog（`skills.*`）
 - [ ] Skill Router / 使用日志产品化（后续）
+
+### 4.4c Usage Center MVP
+
+- [x] 表 `usage_records` + Alembic `004_usage_records`
+- [x] `platform_api/services/usage.py` + `gateway/web/usage_tracker.py`
+- [x] API：`/usage/summary|trend|by-model|by-skill|logs`；`POST /usage/record` → 403
+- [x] Chat turn done → `track_chat_turn`（不改 `run_agent.py`）
+- [x] 代表工具埋点：`web_skill_view` / `web_skill_install` / `web_knowledge_search`
+- [x] UI：`#/usage` + Settings / AccountMenu 入口；与 `/billing/*` 并存
+- [x] 测试：`tests/platform/test_usage_center.py`
+- [ ] 全量工具自动埋点 / 硬配额拦截（后续）
 
 ### 4.5 Agent 启动时 Skill Hint 注入
 
@@ -654,7 +676,18 @@ flowchart TD
 | CRUD | `/workspaces/{id}/file-folders*` | 3 | [x] |
 | CRUD | `/workspaces/{id}/file-categories*` | 3 | [x] |
 | CRUD | `/workspaces/{id}/file-tags*` | 3 | [x] |
-| POST | `/workspaces/{id}/knowledge/search` | 3 | [x] |
+| POST | `/workspaces/{id}/knowledge/search` | 3 | [x] Files 试搜（DocumentChunk） |
+| GET/POST | `/workspaces/{id}/knowledge-bases` | 3 | [x] Knowledge Center |
+| GET | `/workspaces/{id}/knowledge-bases/stats` | 3 | [x] |
+| GET/DELETE | `/workspaces/{id}/knowledge-bases/{kid}` | 3 | [x] 删库不删 File |
+| POST | `/workspaces/{id}/knowledge-bases/{kid}/reindex` | 3 | [x] |
+| POST | `/workspaces/{id}/knowledge-bases/search` | 3 | [x] Center / Agent |
+| GET | `/usage/summary` | 4 | [x] Usage Center |
+| GET | `/usage/trend` | 4 | [x] |
+| GET | `/usage/by-model` | 4 | [x] |
+| GET | `/usage/by-skill` | 4 | [x] |
+| GET | `/usage/logs` | 4 | [x] |
+| POST | `/usage/record` | 4 | [x] 对外 403（仅 Tracker） |
 | GET | `/workspaces/{id}/memory` | 4 | [x] |
 | PATCH | `/workspaces/{id}/memory` | 4 | [x] |
 | GET | `/workspaces/{id}/skills` | 4 | [x] |
