@@ -13,11 +13,27 @@ public-facing multi-user surface:
 
 - Auth (email register / login, or legacy API-key login)
 - Chat with SSE streaming
-- Workspace: files, tags, memory, skills
-- Settings (account, models, usage / billing proxy)
+- Workspace: **Files → Knowledge → Skills → Memory**
+- **Usage Center** (`#/usage`) — platform activity / token ledger
+- Settings (account, models; Usage tab links to Usage Center; new-api billing proxy)
 - Admin console (`role=admin`): users + audit log
 
-There is **no** `QuotaBadge` component — usage lives under Settings → Usage.
+There is **no** `QuotaBadge`. Two usage surfaces coexist:
+
+| Surface | Route / API | Role |
+|---------|-------------|------|
+| Usage Center | `#/usage` → `/api/v1/usage/*` | Platform ledger (chat / skill / knowledge) |
+| Upstream wallet | Settings / `/api/v1/billing/*` | new-api balance & logs |
+
+## Centers (workspace + account)
+
+| Center | Hash | Notes |
+|--------|------|--------|
+| Files | `#/files` | Upload, folders, tags; DocumentChunk trial search |
+| Knowledge | `#/knowledge` | Build bases from files; delete base keeps files; agent retrieves `knowledge_chunks` |
+| Skill | `#/skills` | Enable/disable, create, catalog install, config |
+| Memory | `#/memory` | Structured items + pending AI suggestions |
+| Usage | `#/usage` | Today/month summary, trend, by-model / by-skill, logs |
 
 ## Stack
 
@@ -122,6 +138,7 @@ web-chat/
 │   │   └── AdminAuditPage.tsx
 │   └── components/
 │       ├── ui/                 shadcn primitives
+│       ├── WorkspaceShell.tsx  Files → Knowledge → Skills → Memory
 │       ├── MarkdownContent.tsx
 │       ├── ChatComposer.tsx
 │       ├── ShortcutsHelpDialog.tsx

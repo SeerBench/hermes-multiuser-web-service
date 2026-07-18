@@ -8,41 +8,42 @@
 >
 > **规模目标**：50 用户；PostgreSQL + pgvector + MinIO 单机部署。
 
-**执行状态（2026-07-16）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**；Phase 6 仍以文档和基础验证为主，压测、正式安全 review 与生产自动化待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
+**执行状态（2026-07-18）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 仍以文档和基础验证为主，压测、正式安全 review 与生产自动化待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
 | 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
-| 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；速率限制待补 |
+| 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；进程内登录限流已做 |
 | 2 隔离加固 | **~95%** | UUID 贯穿 + 隔离 E2E；UUID 并发 ContextVar + Legacy→UUID 知识库越权已补测 |
 | 3 文件 RAG | **~90%** | Files ingest + DocumentChunk 试搜；**Knowledge Center** 独立建库/检索；Agent 走 `knowledge_chunks`；MinIO/Redis Worker/pgvector 待补 |
-| 4 Memory/Skill | **~98%** | API + UI + catalog install/预览/CRUD + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
+| 4 Memory/Skill/Usage | **~98%** | Memory / Skill / **Usage Center** 已落地；`platform_settings` 运营配置、全量工具埋点待补 |
 | 5 Admin | **~95%** | 用户分页/email 过滤、审计只读 API+UI（`#/admin/audit`）；全局 Skill UI 仍待 |
 | 6 硬化上线 | **~70%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie 验收脚本已有；压测与正式安全 review 待补 |
 
-**最近验证（2026-07-16）**：Platform **57 cases**、Gateway/SessionDB **291 cases**、Web Chat **164 cases** 全部通过；TypeScript typecheck 与 production build 通过。
+**最近交付（2026-07-18）**：Knowledge Center（`#/knowledge` + `knowledge_*` 表 + Agent 检索切库）与 Usage Center（`#/usage` + `usage_records` + Gateway Tracker；与 new-api `/billing/*` 并存）。
 
 **关键产物**
 
 | 类别 | 路径 |
 |------|------|
-| 控制面 API | `platform_api/`、`hermes-platform-api` |
-| 持久化 | `gateway/web/platform/`（`PlatformStore`） |
+| 控制面 API | `platform_api/`（含 `routers/knowledge.py`、`routers/usage.py`） |
+| 持久化 | `gateway/web/platform/`（`PlatformStore` + ORM models） |
 | 部署 | `deploy/docker-compose.yml`、`deploy/nginx.conf` |
-| 前端 | `web-chat/src/platformClient.ts`、`AuthPage`、`FilesPage`、`MemoryPage`、`SkillsPage`、`AdminPage` |
-| Agent 工具 | `gateway/web/tools/sandboxed_knowledge_search.py` |
-| 测试 | `tests/platform/` |
-| 文档 | `docs/user-guide/platform-saas.md`、`deploy/README.md` |
-| 运维脚本 | `scripts/create_admin.py` |
+| 前端 | `web-chat`：`FilesPage`、`KnowledgePage`、`SkillsPage`、`MemoryPage`、`UsagePage`、`AdminPage` |
+| Agent 工具 | `gateway/web/tools/sandboxed_*.py`；用量入口 `gateway/web/usage_tracker.py` |
+| 测试 | `tests/platform/`（含 `test_knowledge_center`、`test_usage_center`） |
+| 文档 | `docs/user-guide/platform-saas.md`、`docs/user-guide/DEPLOY.md`、`web-chat/README.md` |
+| 运维脚本 | `scripts/create_admin.py`、`scripts/backup-platform.sh`、`deploy/update-platform.sh` |
 
 **下一步优先（未做项）**
 
 1. ~~登录速率限制（Redis 计数器）~~ → **已做**：进程内滑动窗口（`platform_api/services/rate_limit.py`）；多机再接 Redis  
 2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
-3. pgvector cosine 检索（替换关键词 MVP）  
+3. pgvector cosine 检索（替换关键词 / Knowledge Center MVP）  
 4. ~~备份脚本、`update-web.sh` 扩展 platform-api~~ → `scripts/backup-platform.sh` + `deploy/update-platform.sh`；**50 用户压测仍待做**  
 5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx` + CI `web-chat-verify.yml`
-6. **web-chat UX P0**：~~`pending_bind` 引导 + 对话搜索 + 移动端抽屉 + 文件进度 + Onboarding~~
+6. ~~Memory / Skill / Knowledge / Usage Center MVP~~ → **已做**（见 §3.5b、§4.2b、§4.4b、§4.4c）
+7. Usage：全量工具自动埋点 / 硬配额（明确不做于 MVP）
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -334,7 +335,7 @@ flowchart TD
 
 ---
 
-## Phase 4 — Memory 与 Skill UI（预估 1.5 周）✅ 基本完成
+## Phase 4 — Memory / Skill / Usage UI（预估 1.5 周）✅ 基本完成
 
 ### 4.1 Memory API
 
@@ -536,7 +537,7 @@ flowchart TD
 |--------|------|------|
 | ★★★ | ~~**Markdown 代码块高亮 + 复制**~~ | `MarkdownContent` + hljs + 「复制代码」 |
 | ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
-| ★★☆ | ~~**用量 / 配额展示**~~ | Settings → API 密钥：new-api `usage` + logs（已完成） |
+| ★★☆ | ~~**用量 / 配额展示**~~ | new-api 钱包：Settings 账户侧 `/billing/*`；平台账本：**Usage Center** `#/usage`（已完成） |
 | ★★☆ | ~~**Composer 拖拽/粘贴上传**~~ | Composer：`onDrop` / `onPaste` → 现有 `uploads.create` |
 | ★★☆ | ~~**手动深色/浅色主题**~~ | Account 下拉与 Settings 均支持 system / light / dark |
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
@@ -554,18 +555,19 @@ flowchart TD
 
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
-| ★★☆ | ~~**用量 / 配额展示**~~ | 已迁至 P1「API 密钥」Tab（`/api/v1/billing/*`） |
-| ★★☆ | ~~**知识库试搜索**~~ | 文件页「试搜」对话框调用 `knowledge/search` |
-| ★★☆ | **Skill 详情预览** | 仅开关列表；无法浏览 SKILL 摘要/说明 |
+| ★★☆ | ~~**用量 / 配额展示**~~ | `/billing/*` + `#/usage` Usage Center（已完成） |
+| ★★☆ | ~~**知识库试搜索**~~ | Files 页 DocumentChunk 试搜 + **Knowledge Center** `#/knowledge`（已完成） |
+| ★★☆ | ~~**Skill 详情预览**~~ | Skill Center：列表 / 预览 / 创建 / enable（已完成） |
 | ★★☆ | ~~**Admin 分页 + 用户搜索**~~ | `AdminPage` + `GET /admin/users?limit&offset&email` |
 | ★☆☆ | ~~**Admin 审计日志 UI**~~ | `#/admin/audit` + `GET /admin/audit` |
 | ★☆☆ | **Admin 全局 Skill 浏览** | API `GET /admin/skills` 已有；UI 未展示 |
 
-- [x] Settings：用量卡片（余额 / 日志，代理 new-api）
-- [x] `FilesPage` 或独立面板：输入 query → 展示 chunk 命中与来源文件名
+- [x] Settings：用量卡片（余额 / 日志，代理 new-api）+ 链入 Usage Center
+- [x] `FilesPage` 试搜 + `KnowledgePage` 建库 / 试搜 / reindex
 - [x] 文件列表：客户端分页（25/页）+ 名称搜索 + 工具条收拢
 - [x] App：顶栏固定，主内容区独立滚动
-- [x] `SkillsPage`：技能库分区 + 安装到 workspace + 侧栏预览 SKILL.md
+- [x] `SkillsPage`：Skill Center（我的 / 全局库 / 创建 / 配置）
+- [x] `UsagePage`：今日/本月、趋势、按模型/技能、明细日志
 - [ ] Admin：全局 Skill 浏览（可与 Skills catalog 共用扫描逻辑）
 - [x] `AdminPage`：email 过滤、分页控件；后端 `limit/offset/email`
 - [x] `AdminPage`：`#/admin/audit` 只读表格（时间、操作、目标）
@@ -688,8 +690,13 @@ flowchart TD
 | GET | `/usage/by-skill` | 4 | [x] |
 | GET | `/usage/logs` | 4 | [x] |
 | POST | `/usage/record` | 4 | [x] 对外 403（仅 Tracker） |
-| GET | `/workspaces/{id}/memory` | 4 | [x] |
-| PATCH | `/workspaces/{id}/memory` | 4 | [x] |
+| GET | `/workspaces/{id}/memory` | 4 | [x] legacy md |
+| PATCH | `/workspaces/{id}/memory` | 4 | [x] legacy md |
+| GET | `/workspaces/{id}/memory/stats` | 4 | [x] Memory Center |
+| GET/POST | `/workspaces/{id}/memory/items` | 4 | [x] |
+| PUT/DELETE | `/workspaces/{id}/memory/items/{id}` | 4 | [x] |
+| POST | `/workspaces/{id}/memory/items/{id}/approve|reject` | 4 | [x] |
+| POST | `/workspaces/{id}/memory/migrate-from-files` | 4 | [x] |
 | GET | `/workspaces/{id}/skills` | 4 | [x] |
 | GET | `/workspaces/{id}/skills/{name}` | 4 | [x] |
 | POST | `/workspaces/{id}/skills/install-from-catalog` | 4 | [x] |
@@ -745,7 +752,7 @@ flowchart TD
 | 1 | 身份与鉴权 | 2 周 |
 | 2 | 隔离加固 | 1 周 |
 | 3 | 文件与 RAG | 3 周 |
-| 4 | Memory / Skill UI | 1.5 周 |
+| 4 | Memory / Skill / Knowledge / Usage UI | 1.5 周 |
 | 5 | Admin | 1 周 |
 | 6 | 硬化上线 | 1 周 |
 | **合计** | **MVP** | **~11 人周** |
@@ -762,3 +769,5 @@ flowchart TD
 | 2026-07-13 | **web-chat UX 待办**：按用户视角补充 P0–P3 功能缺口（§ web-chat SPA） |
 | 2026-07-16 | 对齐当前实现：文件夹/分类/标签与预览、Skill 预览/CRUD、模型与账户偏好、用量、主题/字号及产品化 Chat UX |
 | 2026-07-16 | 完整验证：Platform 57 + Gateway/SessionDB 291 + Web Chat 164 cases 全绿，typecheck/build 通过；README 中文版改为 Platform SaaS 主路径 |
+| 2026-07-18 | **Knowledge Center MVP**：`knowledge_*` 表、`/knowledge-bases*`、`#/knowledge`；Agent `web_knowledge_search` 改搜 `knowledge_chunks` |
+| 2026-07-18 | **Usage Center MVP**：`usage_records`、`/usage/*`、`usage_tracker`、`#/usage`；chat/skill/knowledge 埋点；与 new-api billing 并存 |
