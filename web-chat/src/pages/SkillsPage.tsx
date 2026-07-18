@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { MarkdownEditor } from '../components/MarkdownEditor'
@@ -22,24 +22,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-const SKILL_TEMPLATE = `---
-name: my-skill
-description: Short one-line description.
-version: "1.0"
----
-
-# My Skill
-
-## When to Use
-
-## Procedure
-`
-
 type SkillsTab = 'mine' | 'catalog'
+
+function formatWhen(iso?: string | null): string {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString()
+  } catch {
+    return iso
+  }
+}
 
 export function SkillsPage() {
   const t = useT()
@@ -53,9 +48,18 @@ export function SkillsPage() {
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [advancedMd, setAdvancedMd] = useState(false)
   const [createName, setCreateName] = useState('')
-  const [createContent, setCreateContent] = useState(SKILL_TEMPLATE)
+  const [createDesc, setCreateDesc] = useState('')
+  const [createWorkflow, setCreateWorkflow] = useState('')
+  const [createInputs, setCreateInputs] = useState('')
+  const [createOutputs, setCreateOutputs] = useState('')
+  const [createType, setCreateType] = useState('assistant')
+  const [createContent, setCreateContent] = useState('')
   const [tab, setTab] = useState<SkillsTab>('mine')
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configSkill, setConfigSkill] = useState<SkillRow | null>(null)
+  const [configText, setConfigText] = useState('{}')
 
   const reload = useCallback(async () => {
     if (!workspaceId) return
@@ -73,17 +77,24 @@ export function SkillsPage() {
   const describe = (skill: { name: string; description?: string | null }) =>
     skillDisplayDescription(locale, skill.name, skill.description)
 
-  const toggle = async (name: string, enabled: boolean) => {
+  const stats = useMemo(() => {
+    const mine = skills.filter((s) => s.source === 'user' || s.source === 'entitlement')
+    const enabled = skills.filter((s) => s.enabled !== false).length
+    return { total: skills.length, mine: mine.length, enabled }
+  }, [skills])
+
+  const setEnabled = async (name: string, next: boolean) => {
     if (!workspaceId) return
+    setBusy(true)
     try {
-      const next = !enabled
-      await platform.patchSkill(workspaceId, name, { enabled: next })
+      if (next) await platform.enableSkill(workspaceId, name)
+      else await platform.disableSkill(workspaceId, name)
       await reload()
-      toast.success(
-        next ? t('skills.toast.enabled') : t('skills.toast.disabled'),
-      )
+      toast.success(next ? t('skills.toast.enabled') : t('skills.toast.disabled'))
     } catch (err) {
       toast.error(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -138,22 +149,47 @@ export function SkillsPage() {
     }
   }
 
+  const resetCreateForm = () => {
+    setCreateName('')
+    setCreateDesc('')
+    setCreateWorkflow('')
+    setCreateInputs('')
+    setCreateOutputs('')
+    setCreateType('assistant')
+    setCreateContent('')
+    setAdvancedMd(false)
+  }
+
   const createSkill = async () => {
     if (!workspaceId || !createName.trim()) return
     setBusy(true)
     try {
-      await platform.createSkill(workspaceId, {
-        name: createName.trim(),
-        skill_md: createContent,
-      })
+      if (advancedMd) {
+        await platform.createSkill(workspaceId, {
+          name: createName.trim(),
+          skill_md: createContent,
+        })
+      } else {
+        if (!createDesc.trim()) {
+          toast.error(t('skills.create.needDesc'))
+          setBusy(false)
+          return
+        }
+        await platform.createSkill(workspaceId, {
+          name: createName.trim(),
+          description: createDesc.trim(),
+          workflow: createWorkflow.trim() || undefined,
+          inputs: createInputs.trim() || undefined,
+          outputs: createOutputs.trim() || undefined,
+          type: createType,
+          version: '1.0',
+        })
+      }
       await reload()
-      const created = createName.trim()
       setCreateOpen(false)
-      setCreateName('')
-      setCreateContent(SKILL_TEMPLATE)
+      resetCreateForm()
       setTab('mine')
       toast.success(t('skills.toast.created'))
-      await openDetail(created)
     } catch (err) {
       toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
@@ -171,6 +207,37 @@ export function SkillsPage() {
       setDetailOpen(true)
       setTab('mine')
       toast.success(t('skills.toast.installed'))
+    } catch (err) {
+      toast.error(err instanceof PlatformApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openConfig = (skill: SkillRow) => {
+    setConfigSkill(skill)
+    setConfigText(JSON.stringify(skill.config ?? {}, null, 2))
+    setConfigOpen(true)
+  }
+
+  const saveConfig = async () => {
+    if (!workspaceId || !configSkill) return
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(configText || '{}') as Record<string, unknown>
+      if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error('config must be a JSON object')
+      }
+    } catch {
+      toast.error(t('skills.config.invalid'))
+      return
+    }
+    setBusy(true)
+    try {
+      await platform.patchSkill(workspaceId, configSkill.name, { config: parsed })
+      await reload()
+      setConfigOpen(false)
+      toast.success(t('skills.config.saved'))
     } catch (err) {
       toast.error(err instanceof PlatformApiError ? err.message : String(err))
     } finally {
@@ -197,26 +264,33 @@ export function SkillsPage() {
       hint={t('skills.hint')}
       density="reading"
       constrainWidth={false}
+      actions={
+        <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+          {t('skills.create')}
+        </Button>
+      }
     >
+      <div className="skill-stats" aria-live="polite">
+        <span>
+          {t('skills.stats.total')}: <strong>{stats.total}</strong>
+        </span>
+        <span>
+          {t('skills.stats.mine')}: <strong>{stats.mine}</strong>
+        </span>
+        <span>
+          {t('skills.stats.enabled')}: <strong>{stats.enabled}</strong>
+        </span>
+      </div>
+
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as SkillsTab)}
         className="skills-tabs gap-4"
       >
-        <div className="skills-tabs-bar">
-          <TabsList className="bg-muted/80">
-            <TabsTrigger value="mine">{t('skills.tab.mine')}</TabsTrigger>
-            <TabsTrigger value="catalog">{t('skills.tab.catalog')}</TabsTrigger>
-          </TabsList>
-          <Button
-            type="button"
-            size="sm"
-            className="skills-tabs-create"
-            onClick={() => setCreateOpen(true)}
-          >
-            {t('skills.create')}
-          </Button>
-        </div>
+        <TabsList className="bg-muted/80">
+          <TabsTrigger value="mine">{t('skills.tab.mine')}</TabsTrigger>
+          <TabsTrigger value="catalog">{t('skills.tab.catalog')}</TabsTrigger>
+        </TabsList>
 
         <TabsContent value="mine" className="space-y-2 outline-none">
           {mySkills.length === 0 ? (
@@ -229,14 +303,21 @@ export function SkillsPage() {
                 description={describe(s)}
                 busy={busy || detailBusy}
                 onSelect={() => void openDetail(s.name)}
-                onToggle={() => void toggle(s.name, s.enabled !== false)}
-                enabledLabel={t('skills.enabled')}
+                onEnable={() => void setEnabled(s.name, true)}
+                onDisable={() => void setEnabled(s.name, false)}
+                onConfig={() => openConfig(s)}
+                enableLabel={t('skills.action.enable')}
+                disableLabel={t('skills.action.disable')}
+                configLabel={t('skills.action.config')}
                 onDelete={
                   s.source === 'user'
                     ? () => void removeSkill(s.name)
                     : undefined
                 }
                 deleteLabel={t('skills.delete')}
+                statusLabel={t('skills.field.status')}
+                versionLabel={t('skills.field.version')}
+                updatedLabel={t('skills.field.updated')}
               />
             ))
           )}
@@ -258,10 +339,17 @@ export function SkillsPage() {
                 description={describe(s)}
                 busy={busy || detailBusy}
                 onSelect={() => void openDetail(s.name)}
-                onToggle={() => void toggle(s.name, s.enabled !== false)}
-                enabledLabel={t('skills.enabled')}
+                onEnable={() => void setEnabled(s.name, true)}
+                onDisable={() => void setEnabled(s.name, false)}
+                onConfig={() => openConfig(s)}
+                enableLabel={t('skills.action.enable')}
+                disableLabel={t('skills.action.disable')}
+                configLabel={t('skills.action.config')}
                 onInstall={() => void installFromCatalog(s.name)}
                 installLabel={t('skills.install')}
+                statusLabel={t('skills.field.status')}
+                versionLabel={t('skills.field.version')}
+                updatedLabel={t('skills.field.updated')}
               />
             ))
           )}
@@ -284,13 +372,25 @@ export function SkillsPage() {
                 : selected
                   ? `${t('skills.detail.source')}: ${selected.source}${
                       selected.category ? ` · ${selected.category}` : ''
-                    }`
+                    }${selected.version ? ` · v${selected.version}` : ''}`
                   : t('skills.detail.empty')}
             </DialogDescription>
           </DialogHeader>
           {selected && !detailBusy && (
             <>
               <div className="overlay-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-4">
+                <div className="skill-detail-meta mb-3 text-xs text-muted-foreground">
+                  <span>
+                    {t('skills.field.status')}: {selected.status ?? '—'}
+                  </span>
+                  <span>
+                    {t('skills.field.type')}: {selected.type ?? '—'}
+                  </span>
+                  <span>
+                    {t('skills.field.updated')}:{' '}
+                    {formatWhen(selected.updated_at)}
+                  </span>
+                </div>
                 {!editing && describe(selected) && (
                   <p className="text-muted-foreground mb-3 text-sm">
                     {describe(selected)}
@@ -359,22 +459,95 @@ export function SkillsPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open)
+          if (!open) resetCreateForm()
+        }}
+      >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t('skills.create')}</DialogTitle>
             <DialogDescription>{t('skills.createHint')}</DialogDescription>
           </DialogHeader>
-          <Input
-            value={createName}
-            onChange={(e) => setCreateName(e.target.value)}
-            placeholder={t('skills.createName')}
-          />
-          <MarkdownEditor
-            value={createContent}
-            onChange={setCreateContent}
-            minHeight={280}
-          />
+          <label className="skill-field">
+            <span>{t('skills.createName')}</span>
+            <Input
+              value={createName}
+              onChange={(e) => setCreateName(e.target.value)}
+              placeholder={t('skills.createName.placeholder')}
+            />
+          </label>
+          {!advancedMd ? (
+            <>
+              <label className="skill-field">
+                <span>{t('skills.create.desc')}</span>
+                <textarea
+                  className="skill-textarea"
+                  rows={2}
+                  value={createDesc}
+                  onChange={(e) => setCreateDesc(e.target.value)}
+                  aria-label={t('skills.create.desc')}
+                />
+              </label>
+              <label className="skill-field">
+                <span>{t('skills.create.workflow')}</span>
+                <textarea
+                  className="skill-textarea"
+                  rows={4}
+                  value={createWorkflow}
+                  onChange={(e) => setCreateWorkflow(e.target.value)}
+                  placeholder={t('skills.create.workflow.placeholder')}
+                />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="skill-field">
+                  <span>{t('skills.create.inputs')}</span>
+                  <Input
+                    value={createInputs}
+                    onChange={(e) => setCreateInputs(e.target.value)}
+                  />
+                </label>
+                <label className="skill-field">
+                  <span>{t('skills.create.outputs')}</span>
+                  <Input
+                    value={createOutputs}
+                    onChange={(e) => setCreateOutputs(e.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="skill-field">
+                <span>{t('skills.field.type')}</span>
+                <select
+                  className="skill-select"
+                  value={createType}
+                  onChange={(e) => setCreateType(e.target.value)}
+                >
+                  <option value="assistant">assistant</option>
+                  <option value="analysis">analysis</option>
+                  <option value="workflow">workflow</option>
+                  <option value="tool">tool</option>
+                </select>
+              </label>
+            </>
+          ) : (
+            <MarkdownEditor
+              value={createContent}
+              onChange={setCreateContent}
+              minHeight={280}
+            />
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setAdvancedMd((v) => !v)}
+          >
+            {advancedMd
+              ? t('skills.create.structured')
+              : t('skills.create.advanced')}
+          </Button>
           <DialogFooter>
             <Button
               type="button"
@@ -393,6 +566,41 @@ export function SkillsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {t('skills.config.title')}
+              {configSkill ? ` — ${configSkill.name}` : ''}
+            </DialogTitle>
+            <DialogDescription>{t('skills.config.hint')}</DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="skill-textarea font-mono"
+            rows={10}
+            value={configText}
+            onChange={(e) => setConfigText(e.target.value)}
+            aria-label={t('skills.config.title')}
+          />
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfigOpen(false)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() => void saveConfig()}
+            >
+              {t('skills.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   )
 }
@@ -402,12 +610,19 @@ type ItemProps = {
   description: string
   busy: boolean
   onSelect: () => void
-  onToggle: () => void
-  enabledLabel: string
+  onEnable: () => void
+  onDisable: () => void
+  onConfig: () => void
+  enableLabel: string
+  disableLabel: string
+  configLabel: string
   onInstall?: () => void
   installLabel?: string
   onDelete?: () => void
   deleteLabel?: string
+  statusLabel: string
+  versionLabel: string
+  updatedLabel: string
 }
 
 function SkillListItem({
@@ -415,17 +630,25 @@ function SkillListItem({
   description,
   busy,
   onSelect,
-  onToggle,
-  enabledLabel,
+  onEnable,
+  onDisable,
+  onConfig,
+  enableLabel,
+  disableLabel,
+  configLabel,
   onInstall,
   installLabel,
   onDelete,
   deleteLabel,
+  statusLabel,
+  versionLabel,
+  updatedLabel,
 }: ItemProps) {
+  const enabled = skill.enabled !== false
   return (
     <div
       className={cn(
-        'flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between',
+        'skill-item flex flex-col gap-3 rounded-lg border border-border p-3',
       )}
     >
       <button
@@ -438,25 +661,55 @@ function SkillListItem({
           <Badge variant="outline" className="text-[10px] uppercase">
             {skill.source}
           </Badge>
+          <Badge variant={enabled ? 'secondary' : 'outline'}>
+            {skill.status ?? (enabled ? 'enabled' : 'disabled')}
+          </Badge>
+          {skill.version ? (
+            <span className="text-muted-foreground text-xs">
+              {versionLabel}: {skill.version}
+            </span>
+          ) : null}
         </div>
         {description && (
           <p className="text-muted-foreground mt-1 line-clamp-2 text-xs">
             {description}
           </p>
         )}
+        <p className="text-muted-foreground mt-1 text-[11px]">
+          {statusLabel}: {skill.status ?? '—'} · {updatedLabel}:{' '}
+          {formatWhen(skill.updated_at)}
+        </p>
       </button>
-      <div className="flex shrink-0 items-center gap-3">
-        {onDelete && deleteLabel && (
+      <div className="flex flex-wrap shrink-0 items-center gap-2">
+        {enabled ? (
           <Button
             type="button"
             size="sm"
-            variant="destructive"
+            variant="outline"
             disabled={busy}
-            onClick={onDelete}
+            onClick={onDisable}
           >
-            {deleteLabel}
+            {disableLabel}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy}
+            onClick={onEnable}
+          >
+            {enableLabel}
           </Button>
         )}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={onConfig}
+        >
+          {configLabel}
+        </Button>
         {onInstall && installLabel && (
           <Button
             type="button"
@@ -468,15 +721,17 @@ function SkillListItem({
             {installLabel}
           </Button>
         )}
-        <label className="flex items-center gap-2 text-xs">
-          <Switch
-            checked={skill.enabled !== false}
+        {onDelete && deleteLabel && (
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
             disabled={busy}
-            onCheckedChange={onToggle}
-            aria-label={enabledLabel}
-          />
-          <span className="text-muted-foreground">{enabledLabel}</span>
-        </label>
+            onClick={onDelete}
+          >
+            {deleteLabel}
+          </Button>
+        )}
       </div>
     </div>
   )

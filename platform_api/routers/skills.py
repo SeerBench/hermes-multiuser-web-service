@@ -1,4 +1,4 @@
-"""Skill entitlements + catalog install into workspace."""
+"""Skill Center API — entitlements, catalog install, structured create."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, List, Optional
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from gateway.web.platform.models import SkillEntitlement, Workspace
@@ -15,6 +15,7 @@ from gateway.web.sandbox import enter_user_context
 from gateway.web.skill_filters import is_web_excluded_skill
 from hermes_constants import get_hermes_home
 from platform_api.deps import get_current_user_id, get_store
+from platform_api.services import skill_center as sc
 
 router = APIRouter(prefix="/workspaces", tags=["skills"])
 
@@ -30,9 +31,26 @@ class InstallFromCatalogBody(BaseModel):
 
 
 class SkillCreateBody(BaseModel):
+    """Either provide full ``skill_md`` or structured fields for generation."""
+
     name: str = Field(..., min_length=1, max_length=64)
-    skill_md: str = Field(..., min_length=1)
+    skill_md: Optional[str] = None
     category: str = Field(default="productivity", min_length=1, max_length=64)
+    description: Optional[str] = None
+    workflow: Optional[str] = None
+    inputs: Optional[str] = None
+    outputs: Optional[str] = None
+    type: str = "assistant"
+    version: str = "1.0"
+    config: Optional[dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _require_md_or_structured(self) -> "SkillCreateBody":
+        if self.skill_md and self.skill_md.strip():
+            return self
+        if self.description and self.description.strip():
+            return self
+        raise ValueError("provide skill_md or description for structured create")
 
 
 class SkillWriteBody(BaseModel):
@@ -42,6 +60,7 @@ class SkillWriteBody(BaseModel):
 @router.get("/{workspace_id}/skills")
 def list_skills(workspace_id: str, user_id: str = Depends(get_current_user_id)) -> List[dict[str, Any]]:
     ws = _get_workspace(workspace_id, user_id)
+    del ws
     entitlements = _load_entitlements(workspace_id)
     global_skills = _scan_skills(get_hermes_home() / "skills", source="global")
     user_skills: list[dict[str, Any]] = []
@@ -65,7 +84,13 @@ def list_skills(workspace_id: str, user_id: str = Depends(get_current_user_id)) 
                 "config": ent.get("config") or {},
             }
     for s in merged.values():
-        s.setdefault("enabled", True)
+        enabled = bool(s.get("enabled", True))
+        s["enabled"] = enabled
+        s["status"] = sc.status_from_enabled(enabled)
+        s.setdefault("version", None)
+        s.setdefault("type", "assistant")
+        s.setdefault("updated_at", None)
+        s.setdefault("config", {})
     visible = [
         s for s in merged.values()
         if not is_web_excluded_skill(
@@ -121,22 +146,65 @@ def create_skill(
     body: SkillCreateBody,
     user_id: str = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    """Create a new user-owned skill in the caller's workspace."""
+    """Create a user-owned skill (raw SKILL.md or structured fields)."""
     _get_workspace(workspace_id, user_id)
     from gateway.web.tools.sandboxed_skill_manage import create_user_skill
 
+    name = body.name.strip()
+    # Allow display names from the form — slugify unless already valid.
+    if not re_match_name(name):
+        name = sc.slugify_skill_name(name)
+
+    try:
+        if body.skill_md and body.skill_md.strip():
+            skill_md = body.skill_md
+        else:
+            skill_md = sc.build_skill_md(
+                name=name,
+                description=body.description or "",
+                workflow=body.workflow or "",
+                inputs=body.inputs or "",
+                outputs=body.outputs or "",
+                skill_type=body.type,
+                version=body.version,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
     with enter_user_context(user_id):
         result = create_user_skill(
-            body.name.strip(),
-            body.skill_md,
+            name,
+            skill_md,
             category=body.category.strip(),
         )
+        if result.get("success") and body.config is not None:
+            from gateway.web.sandbox import get_user_workspace
+
+            ws_root = get_user_workspace()
+            skill_dir = sc.find_user_skill_dir(ws_root, name)
+            if skill_dir is not None:
+                sc.write_config_json(skill_dir, body.config)
+
     if not result.get("success"):
         code = result.get("code")
         err = str(result.get("error") or "create failed")
         if code == "already_installed":
             raise HTTPException(status_code=409, detail=err)
         raise HTTPException(status_code=400, detail=err)
+
+    if body.config is not None:
+        _upsert_entitlement(
+            workspace_id, user_id, name, enabled=True, config=body.config
+        )
+
+    store = get_store()
+    store.audit(
+        user_id,
+        "skills.create",
+        target_type="skill",
+        target_id=name,
+        workspace_id=workspace_id,
+    )
     return result
 
 
@@ -158,6 +226,14 @@ def replace_skill(
         if "not found" in err.lower():
             raise HTTPException(status_code=404, detail=err)
         raise HTTPException(status_code=400, detail=err)
+    store = get_store()
+    store.audit(
+        user_id,
+        "skills.update",
+        target_type="skill",
+        target_id=skill_name.strip(),
+        workspace_id=workspace_id,
+    )
     return result
 
 
@@ -180,6 +256,14 @@ def remove_skill(
         if "read-only" in err.lower() or "global" in err.lower():
             raise HTTPException(status_code=403, detail=err)
         raise HTTPException(status_code=400, detail=err)
+    store = get_store()
+    store.audit(
+        user_id,
+        "skills.delete",
+        target_type="skill",
+        target_id=skill_name.strip(),
+        workspace_id=workspace_id,
+    )
     return result
 
 
@@ -200,11 +284,13 @@ def get_skill(
         if not located:
             raise HTTPException(status_code=404, detail="not found")
         skill_dir, source = located
-        skill_md = skill_dir / "SKILL.md"
+        skill_md_path = skill_dir / "SKILL.md"
         try:
-            content = skill_md.read_text(encoding="utf-8")
+            content = skill_md_path.read_text(encoding="utf-8")
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+        disk_config = sc.read_config_json(skill_dir)
+        category = skill_dir.parent.name
 
     meta: dict[str, Any] = {}
     if content.startswith("---"):
@@ -213,21 +299,35 @@ def get_skill(
             meta = yaml.safe_load(parts[1]) or {} if len(parts) >= 3 else {}
         except yaml.YAMLError:
             meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
 
     if is_web_excluded_skill(
-        category=skill_dir.parent.name,
+        category=category,
         name=str(meta.get("name") or skill_name),
         frontmatter=meta,
     ):
         raise HTTPException(status_code=404, detail="not found")
 
+    extra = sc.enrich_skill_meta(skill_md_path, meta)
+    ents = _load_entitlements(workspace_id)
+    ent = ents.get(skill_name.strip()) or {}
+    enabled = bool(ent["enabled"]) if ent else True
+    config = ent["config"] if ent and ent.get("config") is not None else disk_config
+
     return {
         "name": str(meta.get("name") or skill_name),
         "source": source,
-        "category": skill_dir.parent.name,
+        "category": category,
         "description": meta.get("description") or "",
         "path": str(skill_dir),
         "content": content,
+        "version": extra.get("version"),
+        "type": extra.get("type"),
+        "updated_at": extra.get("updated_at"),
+        "enabled": enabled,
+        "status": sc.status_from_enabled(enabled),
+        "config": config or {},
     }
 
 
@@ -240,6 +340,93 @@ def patch_skill(
 ) -> dict[str, Any]:
     if is_web_excluded_skill(name=skill_name.strip()):
         raise HTTPException(status_code=404, detail="not found")
+    name = skill_name.strip()
+    row = _upsert_entitlement(
+        workspace_id,
+        user_id,
+        name,
+        enabled=body.enabled,
+        config=body.config,
+    )
+
+    if body.config is not None:
+        with enter_user_context(user_id):
+            from gateway.web.sandbox import get_user_workspace
+            from gateway.web.tools.sandboxed_skill_manage import _find_skill
+
+            located = _find_skill(name)
+            if located and located[1] == "user":
+                sc.write_config_json(located[0], body.config)
+            else:
+                # Global-only: still store config in DB; write sidecar if forked later.
+                ws_root = get_user_workspace()
+                skill_dir = sc.find_user_skill_dir(ws_root, name)
+                if skill_dir is not None:
+                    sc.write_config_json(skill_dir, body.config)
+
+    action = "skills.config" if body.config is not None else "skills.patch"
+    if body.enabled is True:
+        action = "skills.enable"
+    elif body.enabled is False:
+        action = "skills.disable"
+    store = get_store()
+    store.audit(
+        user_id,
+        action,
+        target_type="skill",
+        target_id=name,
+        workspace_id=workspace_id,
+    )
+    return {
+        "name": name,
+        "enabled": row["enabled"],
+        "status": sc.status_from_enabled(row["enabled"]),
+        "config": row["config"],
+    }
+
+
+@router.post("/{workspace_id}/skills/{skill_name}/enable")
+def enable_skill(
+    workspace_id: str,
+    skill_name: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    return patch_skill(
+        workspace_id,
+        skill_name,
+        SkillPatch(enabled=True),
+        user_id=user_id,
+    )
+
+
+@router.post("/{workspace_id}/skills/{skill_name}/disable")
+def disable_skill(
+    workspace_id: str,
+    skill_name: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, Any]:
+    return patch_skill(
+        workspace_id,
+        skill_name,
+        SkillPatch(enabled=False),
+        user_id=user_id,
+    )
+
+
+def re_match_name(name: str) -> bool:
+    import re
+
+    return bool(re.match(r"^[A-Za-z0-9_-]{1,64}$", name))
+
+
+def _upsert_entitlement(
+    workspace_id: str,
+    user_id: str,
+    skill_name: str,
+    *,
+    enabled: Optional[bool] = None,
+    config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     ws = _get_workspace(workspace_id, user_id)
     store = get_store()
     from gateway.web.platform.database import session_scope
@@ -256,16 +443,17 @@ def patch_skill(
                 tenant_id=ws.tenant_id,
                 workspace_id=workspace_id,
                 skill_name=skill_name,
-                enabled=True if body.enabled is None else body.enabled,
-                config=body.config or {},
+                enabled=True if enabled is None else enabled,
+                config=config or {},
             )
             db.add(row)
         else:
-            if body.enabled is not None:
-                row.enabled = body.enabled
-            if body.config is not None:
-                row.config = body.config
-    return {"name": skill_name, "enabled": body.enabled, "config": body.config}
+            if enabled is not None:
+                row.enabled = enabled
+            if config is not None:
+                row.config = config
+        db.flush()
+        return {"enabled": bool(row.enabled), "config": row.config or {}}
 
 
 def _get_workspace(workspace_id: str, user_id: str) -> Workspace:
@@ -297,7 +485,6 @@ def _scan_skills(root: Path, *, source: str) -> List[dict[str, Any]]:
         try:
             text = skill_md.read_text(encoding="utf-8")
             if text.startswith("---"):
-                # Frontmatter: ---\n<yaml>\n---
                 parts = text.split("---", 2)
                 meta = yaml.safe_load(parts[1]) or {} if len(parts) >= 3 else {}
             else:
@@ -312,12 +499,18 @@ def _scan_skills(root: Path, *, source: str) -> List[dict[str, Any]]:
                 category=category, name=name, frontmatter=meta,
             ):
                 continue
+            extra = sc.enrich_skill_meta(skill_md, meta if isinstance(meta, dict) else {})
+            disk_cfg = sc.read_config_json(skill_md.parent) if source == "user" else {}
             out.append({
                 "name": name,
                 "source": source,
                 "category": category,
                 "path": str(skill_md.parent),
-                "description": meta.get("description", ""),
+                "description": meta.get("description", "") if isinstance(meta, dict) else "",
+                "version": extra.get("version"),
+                "type": extra.get("type"),
+                "updated_at": extra.get("updated_at"),
+                "config": disk_cfg,
             })
         except (OSError, yaml.YAMLError):
             continue

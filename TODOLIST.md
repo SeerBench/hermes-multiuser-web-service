@@ -366,6 +366,15 @@ flowchart TD
 - [x] SKILL.md 侧栏预览
 - [x] 路由 `#/skills`
 
+### 4.4b Skill Center MVP
+
+- [x] 结构化创建 → 生成 SKILL.md；`config.json` 与 entitlement 双写
+- [x] 列表元数据：version / status / updated_at / type
+- [x] enable / disable API + Skill Center UI（配置 Dialog）
+- [x] skill hint 改为 `web_skill_view` / `web_skills_list`
+- [x] mutate 路径 AuditLog（`skills.*`）
+- [ ] Skill Router / 使用日志产品化（后续）
+
 ### 4.5 Agent 启动时 Skill Hint 注入
 
 - [x] `web_chat.py::_build_skill_hint()` 读取 enabled skills

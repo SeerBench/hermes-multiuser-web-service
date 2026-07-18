@@ -2706,6 +2706,53 @@ code {
   gap: 8px;
 }
 
+.skill-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--muted-foreground, #64748b);
+}
+
+.skill-stats strong {
+  color: var(--foreground, inherit);
+  font-weight: 600;
+}
+
+.skill-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.skill-textarea,
+.skill-select {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elev, transparent);
+  color: inherit;
+  padding: 8px 10px;
+  font: inherit;
+  width: 100%;
+}
+
+.skill-textarea {
+  resize: vertical;
+}
+
+.skill-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.skill-item {
+  background: var(--bg-elev, transparent);
+}
+
 .markdown-editor-preview {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

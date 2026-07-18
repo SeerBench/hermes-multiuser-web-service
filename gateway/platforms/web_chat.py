@@ -730,7 +730,7 @@ class WebChatAdapter(BasePlatformAdapter):
         for name in names:
             lines.append(f"- `{name}`")
         lines.append(
-            "Use `skill_manage(action='view', name=...)` when a skill's procedure is needed."
+            "Use `web_skill_view` (or `web_skills_list`) when a skill's procedure is needed."
         )
         return "\n".join(lines)
 

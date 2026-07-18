@@ -150,6 +150,10 @@ export type SkillRow = {
   description?: string
   category?: string
   enabled?: boolean
+  status?: string
+  version?: string | null
+  type?: string
+  updated_at?: string | null
   config?: Record<string, unknown>
 }
 
@@ -160,6 +164,12 @@ export type SkillDetail = {
   description?: string
   path?: string
   content: string
+  version?: string | null
+  type?: string
+  updated_at?: string | null
+  enabled?: boolean
+  status?: string
+  config?: Record<string, unknown>
 }
 
 const BASE = '/api/v1'
@@ -599,12 +609,35 @@ export const platform = {
 
   createSkill: (
     workspaceId: string,
-    body: { name: string; skill_md: string; category?: string },
+    body: {
+      name: string
+      skill_md?: string
+      category?: string
+      description?: string
+      workflow?: string
+      inputs?: string
+      outputs?: string
+      type?: string
+      version?: string
+      config?: Record<string, unknown>
+    },
   ) =>
     platformRequest<Record<string, unknown>>(`/workspaces/${workspaceId}/skills`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  enableSkill: (workspaceId: string, skillName: string) =>
+    platformRequest<{ name: string; enabled: boolean; status: string }>(
+      `/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}/enable`,
+      { method: 'POST' },
+    ),
+
+  disableSkill: (workspaceId: string, skillName: string) =>
+    platformRequest<{ name: string; enabled: boolean; status: string }>(
+      `/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}/disable`,
+      { method: 'POST' },
+    ),
 
   replaceSkill: (workspaceId: string, skillName: string, skill_md: string) =>
     platformRequest<Record<string, unknown>>(
