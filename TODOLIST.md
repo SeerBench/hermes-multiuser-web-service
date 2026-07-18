@@ -6,16 +6,16 @@
 >
 > **计费**：LLM 调用继续委托 **new-api**；平台注册时自动为用户 provisioning upstream API key。
 >
-> **规模目标**：50 用户；PostgreSQL + pgvector + MinIO 单机部署。
+> **规模目标**：50 用户；控制面默认 **SQLite**（可选 PostgreSQL）；**无 pgvector**（进程内 cosine）；Redis / MinIO 可选。
 
 **执行状态（2026-07-18）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 仍以文档和基础验证为主，压测、正式安全 review 与生产自动化待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
-| 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
+| 0 基础设施 | **~95%** | Compose/nginx/Alembic/ORM；**Redis Worker + MinIO 抽象已接**；无 pgvector；深度 healthz 未做 |
 | 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；进程内登录限流已做 |
 | 2 隔离加固 | **~95%** | UUID 贯穿 + 隔离 E2E；UUID 并发 ContextVar + Legacy→UUID 知识库越权已补测 |
-| 3 文件 RAG | **~90%** | Files ingest + DocumentChunk 试搜；**Knowledge Center** 独立建库/检索；Agent 走 `knowledge_chunks`；MinIO/Redis Worker/pgvector 待补 |
+| 3 文件 RAG | **~98%** | Storage 抽象（local/MinIO）；Redis ingest + sync fallback；**进程内 cosine**（DocumentChunk + KnowledgeChunk） |
 | 4 Memory/Skill/Usage | **~98%** | Memory / Skill / **Usage Center** 已落地；`platform_settings` 运营配置、全量工具埋点待补 |
 | 5 Admin | **~95%** | 用户分页/email 过滤、审计只读 API+UI（`#/admin/audit`）；全局 Skill UI 仍待 |
 | 6 硬化上线 | **~70%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie 验收脚本已有；压测与正式安全 review 待补 |
@@ -38,12 +38,13 @@
 **下一步优先（未做项）**
 
 1. ~~登录速率限制（Redis 计数器）~~ → **已做**：进程内滑动窗口（`platform_api/services/rate_limit.py`）；多机再接 Redis  
-2. Redis 异步 Ingestion Worker + MinIO 对象存储接入  
-3. pgvector cosine 检索（替换关键词 / Knowledge Center MVP）  
+2. ~~Redis 异步 Ingestion Worker + MinIO 对象存储接入~~ → **已做**（SQLite 路径；见 §3.1 / `object_store` / `queue` / `hermes-platform-worker`）  
+3. ~~pgvector cosine~~ → **改为不做 pgvector**；**已做**进程内 cosine + 关键词 fallback（见 §3.4）  
 4. ~~备份脚本、`update-web.sh` 扩展 platform-api~~ → `scripts/backup-platform.sh` + `deploy/update-platform.sh`；**50 用户压测仍待做**  
 5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx` + CI `web-chat-verify.yml`
 6. ~~Memory / Skill / Knowledge / Usage Center MVP~~ → **已做**（见 §3.5b、§4.2b、§4.4b、§4.4c）
 7. Usage：全量工具自动埋点 / 硬配额（明确不做于 MVP）
+8. Knowledge Center 建库异步化（follow-up；当前仍同步）
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -121,7 +122,7 @@ flowchart TD
   - [x] `platform_api/services/` — chunking、extract、ingest、knowledge
   - [x] `platform_api/migrations/` + 根目录 `alembic.ini` — 初始迁移（`001_initial`）
   - [x] `pyproject.toml` `[platform]` extra（依赖 pin 与主 repo 一致）
-- [ ] 新建 `platform_api/worker/` — Ingestion Worker 骨架（**未做**，当前为 API 内同步 ingest）
+- [x] `platform_api/worker/` + `hermes-platform-worker` — Redis 消费；无 `REDIS_URL` 时 API 内同步 fallback
 - [x] 新建 `deploy/docker-compose.yml`
 - [x] 新建 `deploy/nginx.conf` — 路由规则
 - [x] 新建 `deploy/.env.example` — 平台层环境变量模板
@@ -129,8 +130,8 @@ flowchart TD
 ### 0.2 Docker Compose 服务
 
 - [x] PostgreSQL 16 + **pgvector** 扩展（Compose 镜像已配置）
-- [x] Redis（Compose 已配置；**业务未接入**）
-- [x] MinIO（Compose 已配置；**业务未接入**，MVP 文件落盘 workspace）
+- [x] Redis（Compose + `REDIS_URL` → ingest 队列 / DLQ；未配置则同步 ingest）
+- [x] MinIO（Compose + `MINIO_*` → Platform `object_store`；未配置则本地 `uploads/`）
 - [x] nginx 反向代理
   - [x] `/api/v1/*` → Platform API（`:8700`）
   - [x] `/api/chat`、`/api/conversations*`、`/api/uploads` → Agent Gateway（`:8643`）
@@ -144,7 +145,7 @@ flowchart TD
 - [x] `workspaces` 表
 - [x] `platform_sessions` 表（统一鉴权）
 - [x] `files` 表
-- [~] `document_chunks` 表 — ORM 已有；**pgvector `ivfflat` 索引未建**（MVP 用 `embedding_json` + 关键词检索）
+- [x] `document_chunks` — SQLite `embedding_json` + **进程内 cosine**（**明确不做 pgvector**）
 - [x] `skill_entitlements` 表
 - [x] `conversation_flags` 表（`PlatformStore` 实现，启用 PG 时写入）
 - [x] `audit_logs` 表
@@ -272,7 +273,7 @@ flowchart TD
 
 ### 3.1 对象存储
 
-- [ ] MinIO bucket 初始化（Compose 有服务，**业务未接**）
+- [x] MinIO bucket 初始化（`object_store.ensure_bucket`；本地 fallback 无需 Compose）
 - [ ] S3 客户端封装（`boto3`）
 - [~] 存储 key 规范 — 当前为 `<workspace>/uploads/{file_id}_{name}` 本地路径
 
@@ -282,27 +283,30 @@ flowchart TD
   - [x] 格式白名单：PDF、DOCX、XLSX、PPTX、**TXT、MD**
   - [x] 单文件 ≤ 20MB
   - [x] 写入 workspace + `files` 表（`status=pending` → ingest 后 `ready`）
-  - [ ] 推送 Redis ingestion 任务（**当前 API 内同步 ingest**）
+  - [x] 推送 Redis ingestion 任务（`enqueue_ingest`；无 Redis 同步 fallback）
 - [x] `GET  /api/v1/workspaces/{id}/files` — 列表 + 状态
 - [x] `GET  /api/v1/workspaces/{id}/files/{file_id}/status` — 状态
 - [x] `DELETE /api/v1/workspaces/{id}/files/{file_id}` — 删文件 + chunks + 元数据
 
 ### 3.3 Ingestion Worker
 
-- [~] **同步** ingestion（`platform_api/services/ingest.py`），非 Redis Worker
+- [x] `ingest.py` + `queue.py`：有 `REDIS_URL` 异步；否则 API 内同步 fallback
+- [x] `hermes-platform-worker`（`platform_api/worker`）消费队列
 - [x] 解析器：PDF / DOCX / XLSX / PPTX / TXT / MD
 - [x] Chunk 切分（`chunking.py`，1200 字符 + overlap）
-- [~] Embedding — 可选 OpenAI-compatible API；**离线回退伪向量 + 关键词检索**
-- [~] 写入 `document_chunks`（**无 pgvector 列**，SQLite 用 `embedding_json`）
-- [x] 状态机：`pending` → `ready` | `failed`
-- [ ] 失败重试 + 死信队列
+- [x] Embedding — 可选 OpenAI-compatible API；离线伪向量；检索用 cosine
+- [x] 写入 `document_chunks`（SQLite `embedding_json`；**不做 pgvector**）
+- [x] 状态机：`pending` → `processing` → `ready` | `failed`
+- [x] 失败重试 + Redis DLQ（`hermes:ingest:dlq`）
 - [ ] `[-]` MVP 不做：OCR
 
 ### 3.4 知识库检索
 
 - [x] `POST /api/v1/workspaces/{id}/knowledge/search`
-- [x] `search_knowledge()` — 关键词 token 重叠（**非 pgvector cosine**）
+- [x] `search_knowledge()` — **进程内 cosine**（`embedding_json`）+ 关键词 fallback
+- [x] Knowledge Center `search_knowledge_chunks` — 同上（仅 `ready`）
 - [x] 结果含 chunk 文本、文件名、分数
+- [ ] `[-]` pgvector / ivfflat（SQLite 路径明确不做）
 
 ### 3.5 Agent 工具 `web_knowledge_search`
 
@@ -321,7 +325,8 @@ flowchart TD
 - [x] 删 File 时清理关联与对应 chunks，空库标 `failed`，有剩余则 reindex
 - [x] UI：`#/knowledge` Knowledge Center（Files → Knowledge → Skills → Memory）
 - [x] 隔离 / 删库保留 File 测试：`tests/platform/test_knowledge_center.py`
-- [ ] Redis Worker / 真 pgvector cosine（后续）
+- [x] File ingest Redis Worker（KC 建库仍同步；异步为 follow-up）
+- [ ] `[-]` 真 pgvector cosine（不上 PG 扩展）
 
 ### 3.6 前端文件管理 UI
 

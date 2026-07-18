@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LayoutGrid, MessageSquare } from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
 import { ChatPage } from './pages/ChatPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -13,6 +12,7 @@ import { UsagePage } from './pages/UsagePage'
 import { AdminPage } from './pages/AdminPage'
 import { AdminAuditPage } from './pages/AdminAuditPage'
 import { AccountMenu } from './components/AccountMenu'
+import { MainNavMenu } from './components/MainNavMenu'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PendingBindBanner } from './components/PendingBindBanner'
 import { BrandLogo } from './components/BrandLogo'
@@ -37,14 +37,12 @@ import {
   type MainTab,
   type Route,
 } from './routing'
-import { subscribeViewport } from './lib/breakpoints'
 import {
   isOnboardingComplete,
   markOnboardingComplete,
   resetOnboarding,
 } from './onboardingStorage'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 function goto(route: Route) {
@@ -63,10 +61,6 @@ function AppShell() {
     const initial = parseRoute(window.location.hash)
     return initial === 'settings' ? 'chat' : initial
   })
-  const [mobileNav, setMobileNav] = useState(false)
-
-  useEffect(() => subscribeViewport(setMobileNav), [])
-
   const refreshAuth = useCallback(async () => {
     setAuthLoading(true)
     try {
@@ -206,38 +200,24 @@ function AppShell() {
             </button>
           </div>
 
-          <div className="app-nav-center">
-            <Tabs
-              value={activeTab}
-              onValueChange={(v) => onMainTab(v as MainTab)}
-              className="gap-0"
-            >
-              <TabsList className="bg-muted/80">
-                <TabsTrigger value="chat" className="gap-1.5">
-                  <MessageSquare className="size-4" aria-hidden />
-                  {t('nav.chat')}
-                </TabsTrigger>
-                {platformMode && (
-                  <TabsTrigger value="workspace" className="gap-1.5">
-                    <LayoutGrid className="size-4" aria-hidden />
-                    {t('nav.workspace')}
-                  </TabsTrigger>
-                )}
-              </TabsList>
-            </Tabs>
-          </div>
-
+          {/* 主导航靠右：桌面 pill；移动端菜单紧贴头像左侧 */}
           <div className="app-nav-actions">
             {user.role === 'admin' && (
               <Button
                 type="button"
                 variant={isAdminRoute(route) ? 'secondary' : 'ghost'}
                 size="sm"
+                className="app-nav-admin"
                 onClick={() => goto('admin')}
               >
                 {t('nav.admin')}
               </Button>
             )}
+            <MainNavMenu
+              activeTab={activeTab}
+              platformMode={platformMode}
+              onMainTab={onMainTab}
+            />
             <AccountMenu
               email={user.email}
               avatarUrl={user.avatar_url}
@@ -329,36 +309,6 @@ function AppShell() {
           </>
         )}
       </main>
-      {user && mobileNav && (
-        <nav className="app-mobile-nav" aria-label={t('nav.mobile')}>
-          <button
-            type="button"
-            className={activeTab === 'chat' ? 'app-mobile-nav--active' : undefined}
-            onClick={() => onMainTab('chat')}
-          >
-            <MessageSquare className="size-4" aria-hidden />
-            {t('nav.chat')}
-          </button>
-          {platformMode && (
-            <button
-              type="button"
-              className={
-                activeTab === 'workspace' ? 'app-mobile-nav--active' : undefined
-              }
-              onClick={() => onMainTab('workspace')}
-            >
-              <LayoutGrid className="size-4" aria-hidden />
-              {t('nav.workspace')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => goto('settings')}
-          >
-            {t('nav.account')}
-          </button>
-        </nav>
-      )}
       {onboardingOpen && user && (
         <OnboardingModal
           user={user}

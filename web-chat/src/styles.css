@@ -47,7 +47,8 @@ body,
   color: var(--fg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
-  font-size: 14px;
+  /* 界面字号随 --ui-font-scale（与对话区同一偏好）缩放 */
+  font-size: calc(14px * var(--ui-font-scale, var(--chat-font-scale, 1)));
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -86,7 +87,8 @@ code {
 
 .app-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* 左品牌 · 右导航/头像（对话/工作区不再居中） */
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px 18px;
@@ -138,7 +140,7 @@ code {
 
 .app-title {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--ui-font-scale, var(--chat-font-scale, 1)));
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
@@ -146,12 +148,16 @@ code {
   text-overflow: ellipsis;
 }
 
-.app-nav-center {
+/* 桌面：pill Tabs；移动端：汉堡菜单（见下方 media） */
+.app-nav-tabs {
   display: flex;
   align-items: center;
-  justify-content: center;
-  justify-self: center;
   min-width: 0;
+}
+
+.app-nav-menu {
+  display: none;
+  align-items: center;
 }
 
 .app-nav-actions {
@@ -175,7 +181,7 @@ code {
   border-radius: var(--radius);
   color: var(--fg-dim);
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-font-scale, var(--chat-font-scale, 1)));
 }
 
 .app-nav button:hover {
@@ -2330,18 +2336,17 @@ code {
   }
 
   .app-title {
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-font-scale, var(--chat-font-scale, 1)));
   }
+}
 
-  .app-nav-center {
+/* 移动端：对话/工作区收进顶栏菜单；取消底部 tab 栏占位 */
+@media (max-width: 767px) {
+  .app-nav-tabs {
     display: none;
   }
 
-  .app-main {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .app-mobile-nav {
+  .app-nav-menu {
     display: flex;
   }
 }
@@ -2771,8 +2776,8 @@ code {
 
 .composer.composer-hmu {
   display: block;
-  /* 与周围容器保持 15px 边距 */
-  margin: 15px;
+  /* 左右/上 15px；距底部 30px（截图 2） */
+  margin: 15px 15px 30px;
   width: auto;
   box-sizing: border-box;
   border-top: none;
@@ -3494,7 +3499,7 @@ code {
 .files-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: calc(13px * var(--ui-font-scale, var(--chat-font-scale, 1)));
 }
 
 .files-table th,
@@ -3532,7 +3537,7 @@ code {
   text-align: center;
 }
 
-/* ── Mobile bottom nav ─────────────────────────────────────────── */
+/* ── Conversation header ─────────────────────────────────────────── */
 
 .conversation-header {
   display: flex;
@@ -3548,7 +3553,7 @@ code {
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--ui-font-scale, var(--chat-font-scale, 1)));
   font-weight: 600;
   min-width: 0;
   flex: 1;
@@ -3572,40 +3577,6 @@ code {
   min-width: 0;
 }
 
-.app-mobile-nav {
-  display: none;
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 100;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elev);
-  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
-  justify-content: space-around;
-  gap: 4px;
-}
-
-.app-mobile-nav button {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border: none;
-  background: transparent;
-  color: var(--fg-dim);
-  font-size: 11px;
-  padding: 6px 4px;
-  border-radius: var(--radius);
-}
-
-.app-mobile-nav button.app-mobile-nav--active {
-  color: var(--primary, var(--accent));
-  background: var(--muted);
-}
-
 @media (max-width: 767px) {
   .files-table thead {
     display: none;
@@ -3619,15 +3590,40 @@ code {
 
   .files-table td {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
     border: none;
-    padding: 4px 12px;
+    padding: 6px 12px;
+    gap: 4px;
   }
 
   .files-table td::before {
     content: attr(data-label);
     color: var(--fg-dim);
-    font-size: 11px;
-    margin-right: 8px;
+    font-size: calc(11px * var(--ui-font-scale, var(--chat-font-scale, 1)));
+    margin-right: 0;
+  }
+
+  .files-name-stack {
+    align-items: center;
+    width: 100%;
+  }
+
+  .files-name-link,
+  .files-name-text {
+    text-align: center;
+  }
+
+  .files-row-actions {
+    justify-content: center;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .files-table td:has(> .files-row-actions) {
+    width: auto;
+    white-space: normal;
   }
 }

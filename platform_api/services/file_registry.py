@@ -20,13 +20,14 @@ def register_sandbox_file(
     origin: str = "chat",
     auto_ingest: bool = False,
     folder_id: Optional[str] = None,
+    file_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Create a FileRecord pointing at an existing sandbox path.
+    """Create a FileRecord pointing at an existing sandbox / object key.
 
     Chat attachments use ``auto_ingest=False`` and get ``status='skipped'``.
     Platform uploads with ingest enabled start at ``pending``.
     """
-    file_id = str(uuid.uuid4())
+    file_id = file_id or str(uuid.uuid4())
     initial_status = "pending" if auto_ingest else "skipped"
     store = get_store()
     with session_scope(store._engine) as db:

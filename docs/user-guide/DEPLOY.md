@@ -1,6 +1,17 @@
 # Hermes Multi-User Web Service VPS 部署手册
 
-本文面向 Ubuntu 22.04/24.04 LTS VPS，给出一套适合约 50 名用户的生产部署流程。目标架构为：
+本文面向 Ubuntu 22.04/24.04 LTS VPS，给出一套适合约 50 名用户的生产部署流程。
+
+## 控制面数据路径（当前默认）
+
+| 组件 | MVP 默认 | 说明 |
+|------|----------|------|
+| 控制面 DB | **SQLite**（`PLATFORM_DATABASE_URL=sqlite:///...`） | `startplatform.sh` 默认；可选 `--postgres` |
+| 向量检索 | **进程内 cosine**（`embedding_json`） | **无 pgvector / ivfflat**；关键词为 fallback |
+| 对象存储 | 本地 workspace `uploads/` | 配置 `MINIO_*` 后 Platform 文件走 MinIO/S3 |
+| 异步 ingest | 同步（API 内） | 配置 `REDIS_URL` 后需跑 `hermes-platform-worker` |
+
+目标架构（可按需叠加 Redis / MinIO / PostgreSQL）：
 
 ```text
 Internet
@@ -11,18 +22,21 @@ nginx（TLS、静态 SPA、反向代理）
   ├─ /api/*    ──→ web_chat gateway 127.0.0.1:8643
   └─ /*        ──→ gateway/web/_static/
 
-platform-api + web_chat
-  ├─ PostgreSQL + pgvector（Docker，仅监听 127.0.0.1:5432）
+platform-api (+ optional worker) + web_chat
+  ├─ SQLite 控制面（默认）或 PostgreSQL（可选；业务不依赖 pgvector）
+  ├─ Redis（可选：异步 file ingest 队列 + DLQ）
+  ├─ MinIO（可选：Platform 文件对象存储）
   ├─ $HERMES_HOME/web_workspaces/<user_id>/
   └─ new-api（外部或独立部署的 LLM 网关）
 ```
 
-推荐在一台 VPS 上运行一个 `platform-api` 进程和一个 `web_chat` gateway
-进程，由 systemd 管理。PostgreSQL 使用 Docker 持久卷；nginx 安装在主机上。
-Redis 和 MinIO 在当前 MVP 中仍属预留组件，不是启动平台的必需项。
+推荐在一台 VPS 上运行 `platform-api`、（可选）`hermes-platform-worker` 与
+`web_chat` gateway，由 systemd 管理。本地开发用 `./startplatform.sh`（SQLite）；
+若环境中设置了 `REDIS_URL`，脚本会自动拉起 worker。Compose 可用
+`docker compose up redis minio` 按需启动可选组件。
 
 > `startplatform.sh` 适合本地开发和私有测试。生产环境建议使用本文的
-> systemd 双服务方案，因为脚本会以前台方式管理 gateway，并会写入
+> systemd 方案，因为脚本会以前台方式管理 gateway，并会写入
 > `allow_insecure_bind: true`，不适合作为公网 TLS 部署的长期进程管理方式。
 
 ## 1. 部署前准备

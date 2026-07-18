@@ -25,8 +25,13 @@ from gateway.web.platform.models import (
 from gateway.web.sandbox import enter_user_context
 from platform_api.deps import get_current_user_id, get_store
 from platform_api.services.file_registry import file_record_dict, register_sandbox_file
-from platform_api.services.ingest import ingest_file_record
 from platform_api.services.knowledge import search_knowledge
+from platform_api.services.object_store import (
+    delete_object,
+    open_local_path,
+    put_bytes,
+)
+from platform_api.services.queue import enqueue_ingest
 
 router = APIRouter(prefix="/workspaces", tags=["files"])
 
@@ -92,11 +97,6 @@ async def upload_files(
     results: list[dict[str, Any]] = []
     pending_ingest: list[str] = []
     with enter_user_context(user_id):
-        from gateway.web.sandbox import get_user_workspace
-
-        upload_dir = get_user_workspace() / "uploads"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-
         for uf in files:
             suffix = Path(uf.filename or "").suffix.lower()
             if suffix not in _ALLOWED_SUFFIXES:
@@ -106,9 +106,13 @@ async def upload_files(
                 raise HTTPException(status_code=400, detail="file too large")
             file_id = str(uuid.uuid4())
             safe_name = Path(uf.filename or "upload").name
-            dest = upload_dir / f"{file_id}_{safe_name}"
-            dest.write_bytes(data)
-            storage_key = str(dest.relative_to(get_user_workspace()))
+            storage_key = put_bytes(
+                workspace_id=ws.id,
+                file_id=file_id,
+                filename=safe_name,
+                data=data,
+                user_id=user_id,
+            )
             # Images are archive-only — no RAG extractors for binary images.
             want_ingest = bool(ingest) and not _is_image_filename(safe_name)
             rec_dict = register_sandbox_file(
@@ -120,19 +124,25 @@ async def upload_files(
                 origin="platform",
                 auto_ingest=want_ingest,
                 folder_id=folder_id,
+                file_id=file_id,
             )
             if want_ingest:
                 pending_ingest.append(rec_dict["id"])
             results.append(rec_dict)
+
     for file_id in pending_ingest:
-        ingest_file_record(file_id, user_id)
+        enqueue_ingest(
+            file_id=file_id, user_id=user_id, workspace_id=ws.id
+        )
     if pending_ingest:
         store = get_store()
         with store._session_factory() as db:
             for i, r in enumerate(results):
                 rec = db.get(FileRecord, r["id"])
                 if rec:
-                    results[i] = file_record_dict(rec, tag_ids=_tag_ids_for_file(db, r["id"]))
+                    results[i] = file_record_dict(
+                        rec, tag_ids=_tag_ids_for_file(db, r["id"])
+                    )
     return results
 
 
@@ -261,7 +271,9 @@ def trigger_ingest(
         if rec.status == "ready":
             return file_record_dict(rec, tag_ids=_tag_ids_for_file(db, file_id))
 
-    ingest_file_record(file_id, user_id)
+    enqueue_ingest(
+        file_id=file_id, user_id=user_id, workspace_id=workspace_id
+    )
     with store._session_factory() as db:
         rec = db.get(FileRecord, file_id)
         assert rec is not None
@@ -293,8 +305,6 @@ def download_file_content(
     _get_workspace(workspace_id, user_id)
     store = get_store()
     with enter_user_context(user_id):
-        from gateway.web.sandbox import PathSandboxViolation, confine_path
-
         with store._session_factory() as db:
             rec = db.get(FileRecord, file_id)
             if not rec or rec.workspace_id != workspace_id:
@@ -303,24 +313,47 @@ def download_file_content(
             filename = rec.filename
             mime_type = rec.mime_type
 
-        # storage_key 必须落在当前用户工作区内，禁止 ../ 越权读
         try:
-            path = confine_path(storage_key)
-        except PathSandboxViolation:
+            with open_local_path(
+                storage_key, workspace_id=workspace_id
+            ) as path:
+                if not path.is_file():
+                    raise HTTPException(status_code=404, detail="not found")
+                media = (
+                    mime_type
+                    or mimetypes.guess_type(filename)[0]
+                    or "application/octet-stream"
+                )
+                # Local backend: path is stable. S3 backend yields a temp file —
+                # FileResponse must own a durable path; copy to NamedTemporaryFile
+                # that outlives the context for the response lifecycle.
+                from platform_api.services.object_store import is_s3_storage_key
+
+                if is_s3_storage_key(storage_key):
+                    import tempfile
+
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix)
+                    tmp.write(path.read_bytes())
+                    tmp.close()
+                    return FileResponse(
+                        tmp.name,
+                        media_type=media,
+                        filename=filename,
+                        content_disposition_type="inline",
+                        background=None,
+                    )
+                return FileResponse(
+                    path,
+                    media_type=media,
+                    filename=filename,
+                    content_disposition_type="inline",
+                )
+        except PermissionError:
             raise HTTPException(status_code=404, detail="not found") from None
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="not found")
-        media = (
-            mime_type
-            or mimetypes.guess_type(filename)[0]
-            or "application/octet-stream"
-        )
-        return FileResponse(
-            path,
-            media_type=media,
-            filename=filename,
-            content_disposition_type="inline",
-        )
+        except Exception as exc:
+            if "escapes" in str(exc).lower() or "PathSandbox" in type(exc).__name__:
+                raise HTTPException(status_code=404, detail="not found") from None
+            raise
 
 
 @router.delete("/{workspace_id}/files/{file_id}")
@@ -337,8 +370,6 @@ def delete_file(
 
     affected_kb: list[str] = []
     with enter_user_context(user_id):
-        from gateway.web.sandbox import unlink_storage_key
-
         with session_scope(store._engine) as db:
             rec = db.get(FileRecord, file_id)
             if not rec or rec.workspace_id != workspace_id:
@@ -350,7 +381,7 @@ def delete_file(
                 ).scalars().all()
             ]
             # 越权 storage_key 只跳过 unlink，仍删除 DB 行（防毒化记录）
-            unlink_storage_key(rec.storage_key)
+            delete_object(rec.storage_key, workspace_id=workspace_id)
             db.execute(delete(FileTagLink).where(FileTagLink.file_id == file_id))
             db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_id))
             # Knowledge Center: drop chunks for this file; knowledge_files CASCADE
@@ -471,8 +502,6 @@ def delete_folder(
     from gateway.web.platform.database import session_scope
 
     with enter_user_context(user_id):
-        from gateway.web.sandbox import unlink_storage_key
-
         with session_scope(store._engine) as db:
             folder = db.get(FileFolder, folder_id)
             if not folder or folder.workspace_id != workspace_id:
@@ -506,7 +535,7 @@ def delete_folder(
                 )
 
             for rec in file_rows:
-                unlink_storage_key(rec.storage_key)
+                delete_object(rec.storage_key, workspace_id=workspace_id)
                 db.execute(delete(FileTagLink).where(FileTagLink.file_id == rec.id))
                 db.execute(
                     delete(DocumentChunk).where(DocumentChunk.file_id == rec.id)

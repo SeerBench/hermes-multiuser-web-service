@@ -1,4 +1,4 @@
-/** Chat transcript font size preference (local). */
+/** UI + chat font size preference (local). */
 
 export type FontScale = 'sm' | 'md' | 'lg'
 
@@ -28,11 +28,17 @@ export function storeFontScale(scale: FontScale): void {
   }
 }
 
-/** Apply ``--chat-font-scale`` on ``<html>`` for chat column rem sizing. */
+/**
+ * Apply scale on ``<html>``:
+ * - ``--ui-font-scale`` — nav / titles / menus / body
+ * - ``--chat-font-scale`` — chat column (kept for existing selectors)
+ */
 export function applyFontScale(scale: FontScale): void {
   const root = document.documentElement
+  const value = SCALES[scale]
   root.dataset.fontScale = scale
-  root.style.setProperty('--chat-font-scale', SCALES[scale])
+  root.style.setProperty('--ui-font-scale', value)
+  root.style.setProperty('--chat-font-scale', value)
 }
 
 export function initFontScale(): FontScale {

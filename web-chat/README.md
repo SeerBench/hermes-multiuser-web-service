@@ -29,8 +29,8 @@ There is **no** `QuotaBadge`. Two usage surfaces coexist:
 
 | Center | Hash | Notes |
 |--------|------|--------|
-| Files | `#/files` | Upload, folders, tags; DocumentChunk trial search |
-| Knowledge | `#/knowledge` | Build bases from files; delete base keeps files; agent retrieves `knowledge_chunks` |
+| Files | `#/files` | Upload, folders, tags; DocumentChunk trial search（控制面默认 SQLite；可选 MinIO / Redis ingest） |
+| Knowledge | `#/knowledge` | Build bases from files; cosine on `embedding_json`（**无 pgvector**）；delete base keeps files |
 | Skill | `#/skills` | Enable/disable, create, catalog install, config |
 | Memory | `#/memory` | Structured items + pending AI suggestions |
 | Usage | `#/usage` | Today/month summary, trend, by-model / by-skill, logs |

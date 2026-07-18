@@ -126,12 +126,13 @@ def test_manual_ingest_from_skipped(client, mock_upstream_key, monkeypatch):
     file_id = up.json()[0]["id"]
     assert up.json()[0]["status"] == "skipped"
 
-    # Avoid heavy embedding in unit test — stub ingest to flip status.
-    def _fake_ingest(file_id: str, user_id: str) -> None:
+    # Avoid heavy embedding — stub sync ingest (enqueue_ingest → ingest_file_record).
+    def _fake_ingest(file_id: str, user_id: str, *, raise_on_error: bool = False) -> None:
         from gateway.web.platform.database import session_scope
         from gateway.web.platform.models import FileRecord
         from platform_api.deps import get_store
 
+        del raise_on_error
         store = get_store()
         with session_scope(store._engine) as db:
             rec = db.get(FileRecord, file_id)
@@ -139,7 +140,9 @@ def test_manual_ingest_from_skipped(client, mock_upstream_key, monkeypatch):
                 rec.status = "ready"
                 db.add(rec)
 
-    monkeypatch.setattr("platform_api.routers.files.ingest_file_record", _fake_ingest)
+    monkeypatch.setattr(
+        "platform_api.services.ingest.ingest_file_record", _fake_ingest
+    )
 
     ing = client.post(
         f"/api/v1/workspaces/{ws_id}/files/{file_id}/ingest",

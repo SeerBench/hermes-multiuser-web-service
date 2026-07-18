@@ -1,17 +1,23 @@
-"""Embedding + vector-less fallback search for MVP."""
+"""Embedding + hybrid search (cosine on embedding_json, keyword fallback)."""
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
-from typing import Any, List
+from typing import Any, List, Optional
 
 from sqlalchemy import select
 
 from gateway.web.platform.models import DocumentChunk, FileRecord
 from platform_api.deps import get_store
+
+logger = logging.getLogger("hermes.platform.knowledge")
+
+# Cap in-process cosine scan per workspace (no pgvector index on SQLite).
+_MAX_COSINE_CHUNKS = int(os.environ.get("HERMES_COSINE_MAX_CHUNKS", "5000"))
 
 
 def _tokenize(text: str) -> set[str]:
@@ -44,6 +50,35 @@ def embed_text(text: str) -> list[float]:
     return [x / norm for x in vec]
 
 
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a)) or 1.0
+    nb = math.sqrt(sum(x * x for x in b)) or 1.0
+    return dot / (na * nb)
+
+
+def parse_embedding(raw: Optional[str]) -> Optional[list[float]]:
+    if not raw:
+        return None
+    try:
+        vec = json.loads(raw)
+        if isinstance(vec, list) and vec and all(isinstance(x, (int, float)) for x in vec):
+            return [float(x) for x in vec]
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def keyword_score(query: str, content: str) -> float:
+    q_tokens = _tokenize(query)
+    c_tokens = _tokenize(content)
+    if not q_tokens or not c_tokens:
+        return 0.0
+    return len(q_tokens & c_tokens) / max(len(q_tokens), 1)
+
+
 def search_knowledge(
     *,
     tenant_id: str,
@@ -52,7 +87,7 @@ def search_knowledge(
     top_k: int = 5,
 ) -> List[dict[str, Any]]:
     store = get_store()
-    q_tokens = _tokenize(query)
+    q_emb = embed_text(query)
     with store._session_factory() as db:
         rows = db.execute(
             select(DocumentChunk, FileRecord.filename)
@@ -61,20 +96,34 @@ def search_knowledge(
                 DocumentChunk.tenant_id == tenant_id,
                 DocumentChunk.workspace_id == workspace_id,
             )
+            .limit(_MAX_COSINE_CHUNKS)
         ).all()
 
+    if len(rows) >= _MAX_COSINE_CHUNKS:
+        logger.warning(
+            "cosine scan hit cap=%s workspace=%s",
+            _MAX_COSINE_CHUNKS,
+            workspace_id,
+        )
+
     scored: list[tuple[float, DocumentChunk, str]] = []
+    used_cosine = 0
     for chunk, filename in rows:
-        c_tokens = _tokenize(chunk.content)
-        if not c_tokens:
-            continue
-        score = len(q_tokens & c_tokens) / max(len(q_tokens), 1)
-        scored.append((score, chunk, filename))
+        emb = parse_embedding(chunk.embedding_json)
+        if emb and len(emb) == len(q_emb):
+            score = cosine_similarity(q_emb, emb)
+            used_cosine += 1
+        else:
+            score = keyword_score(query, chunk.content)
+        if score > 0:
+            scored.append((score, chunk, filename))
+
+    if used_cosine == 0 and scored:
+        logger.debug("search_knowledge workspace=%s keyword-only", workspace_id)
+
     scored.sort(key=lambda x: x[0], reverse=True)
     out: list[dict[str, Any]] = []
     for score, chunk, filename in scored[:top_k]:
-        if score <= 0:
-            continue
         out.append({
             "chunk_id": chunk.id,
             "file_id": chunk.file_id,

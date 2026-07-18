@@ -5,6 +5,10 @@
 # Starts the Sidecar pair from the AI SaaS Platform plan:
 #   • platform-api  (:8700) — register/login, RAG, Memory/Skill, Admin
 #   • web_chat      (:8643) — Agent Gateway SSE + sessions (foreground)
+#   • hermes-platform-worker — only when REDIS_URL is set (async file ingest)
+#
+# Default control plane: SQLite (no pgvector). Redis / MinIO are optional —
+# without REDIS_URL, file ingest runs synchronously inside the API process.
 #
 # What this does (in order):
 #   1. Activates .venv (or runs setup-hermes.sh if missing).
@@ -13,8 +17,8 @@
 #   4. Resolves PLATFORM_DATABASE_URL (SQLite default, or --postgres for Docker PG).
 #   5. Builds the React SPA if its bundle is missing.
 #   6. Patches ~/.hermes/config.yaml for web_chat (same as startweb.sh).
-#   7. Starts hermes-platform-api in the background; gateway in the foreground.
-#   8. On Ctrl+C, stops the platform-api child.
+#   7. Starts hermes-platform-api (+ optional worker); gateway in the foreground.
+#   8. On Ctrl+C, stops platform-api / worker children.
 #
 # For Legacy key-only chat (no platform-api), use ./startweb.sh instead.
 #
@@ -40,6 +44,7 @@ SPA_DIR="$SCRIPT_DIR/web-chat"
 SPA_BUNDLE="$SCRIPT_DIR/gateway/web/_static/index.html"
 COMPOSE_FILE="$SCRIPT_DIR/deploy/docker-compose.yml"
 PLATFORM_LOG="${PLATFORM_API_LOG:-$HERMES_HOME/logs/platform-api.log}"
+WORKER_LOG="${PLATFORM_WORKER_LOG:-$HERMES_HOME/logs/platform-worker.log}"
 GATEWAY_LOG="${WEB_GATEWAY_LOG:-$HERMES_HOME/web-gateway.log}"
 
 if [[ -t 1 ]]; then
@@ -60,8 +65,14 @@ PLATFORM_PORT_OVERRIDE=""
 SKIP_BUILD=0
 USE_POSTGRES=0
 PLATFORM_PID=""
+WORKER_PID=""
 
 cleanup() {
+    if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
+        log "stopping platform-worker (pid $WORKER_PID)"
+        kill -TERM "$WORKER_PID" 2>/dev/null || true
+        wait "$WORKER_PID" 2>/dev/null || true
+    fi
     if [[ -n "$PLATFORM_PID" ]] && kill -0 "$PLATFORM_PID" 2>/dev/null; then
         log "stopping platform-api (pid $PLATFORM_PID)"
         kill -TERM "$PLATFORM_PID" 2>/dev/null || true
@@ -309,6 +320,21 @@ wait_health "http://127.0.0.1:${PLATFORM_PORT}/api/v1/healthz" "platform-api" ||
     exit 1
 }
 
+# Async ingest worker (optional). Without REDIS_URL, enqueue_ingest runs sync in-API.
+if [[ -n "${REDIS_URL:-}" ]]; then
+    if command -v hermes-platform-worker >/dev/null 2>&1; then
+        mkdir -p "$(dirname "$WORKER_LOG")"
+        log "REDIS_URL set — starting ingest worker (logs → $WORKER_LOG)"
+        nohup hermes-platform-worker >>"$WORKER_LOG" 2>&1 &
+        WORKER_PID=$!
+        disown "$WORKER_PID" 2>/dev/null || true
+    else
+        warn "REDIS_URL set but hermes-platform-worker missing — reinstall .[platform]"
+    fi
+else
+    log "REDIS_URL unset — file ingest stays synchronous (no worker)"
+fi
+
 if [[ -f "$ENV_FILE" ]] && ! grep -qE '^(OPENROUTER_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|NOUS_API_KEY|GROQ_API_KEY|XAI_API_KEY)=.+' "$ENV_FILE"; then
     warn "no global LLM key in $ENV_FILE — users must bind-key before chat"
 fi
@@ -348,7 +374,10 @@ if [[ "$HOST" == "0.0.0.0" || "$HOST" == "::" ]]; then
     warn "ensure macOS Firewall / router allow inbound TCP $PORT (and same Wi‑Fi/VLAN)"
 fi
 printf '%s  platform log:%s   tail -f %s\n' "$C_DIM" "$C_RESET" "$PLATFORM_LOG"
-printf '%sCtrl+C stops gateway + platform-api.%s\n\n' "$C_DIM" "$C_RESET"
+if [[ -n "$WORKER_PID" ]]; then
+    printf '%s  worker log:%s     tail -f %s\n' "$C_DIM" "$C_RESET" "$WORKER_LOG"
+fi
+printf '%sCtrl+C stops gateway + platform-api (+ worker).%s\n\n' "$C_DIM" "$C_RESET"
 printf '%s%s%s\n' "$C_BOLD" "════════════════════════════════════════════════════════════════" "$C_RESET"
 
 if ! command -v hermes >/dev/null 2>&1; then

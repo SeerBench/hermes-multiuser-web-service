@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -23,20 +23,24 @@ from gateway.web.sandbox import enter_user_context
 from platform_api.deps import get_store
 from platform_api.services.chunking import chunk_text
 from platform_api.services.extract import extract_text
-from platform_api.services.knowledge import embed_text
+from platform_api.services.knowledge import (
+    cosine_similarity,
+    embed_text,
+    keyword_score,
+    parse_embedding,
+)
 
 logger = logging.getLogger("hermes.platform.knowledge_center")
 
 CATEGORIES = frozenset({"trading", "tech", "learning", "other"})
 STATUSES = frozenset({"processing", "ready", "failed"})
 
+# Same scan cap as DocumentChunk search (SQLite has no pgvector).
+_MAX_COSINE_CHUNKS = int(os.environ.get("HERMES_COSINE_MAX_CHUNKS", "5000"))
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _tokenize(text: str) -> set[str]:
-    return set(re.findall(r"[a-zA-Z0-9\u4e00-\u9fff]+", text.lower()))
 
 
 def assert_workspace(db: Session, workspace_id: str, user_id: str) -> Workspace:
@@ -203,13 +207,17 @@ def _ingest_file_into_knowledge(
         raise ValueError(f"file not found: {file_id}")
 
     with enter_user_context(user_id):
-        from gateway.web.sandbox import PathSandboxViolation, confine_path
+        from platform_api.services.object_store import open_local_path
 
         try:
-            path = confine_path(rec.storage_key)
-        except PathSandboxViolation as exc:
-            raise ValueError(f"storage_key escapes workspace: {rec.storage_key}") from exc
-        text = extract_text(path)
+            with open_local_path(
+                rec.storage_key, workspace_id=kb.workspace_id
+            ) as path:
+                text = extract_text(path)
+        except Exception as exc:
+            raise ValueError(
+                f"cannot read storage_key {rec.storage_key}: {exc}"
+            ) from exc
         pieces = chunk_text(text)
 
     for i, content in enumerate(pieces):
@@ -354,9 +362,9 @@ def search_knowledge_chunks(
     top_k: int = 5,
     knowledge_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Keyword overlap search over ready Knowledge Center chunks."""
+    """Cosine on embedding_json; keyword fallback. Only ready knowledge bases."""
     store = get_store()
-    q_tokens = _tokenize(query)
+    q_emb = embed_text(query)
     with store._session_factory() as db:
         stmt = (
             select(KnowledgeChunk, KnowledgeBase.name, FileRecord.filename)
@@ -371,20 +379,29 @@ def search_knowledge_chunks(
         )
         if knowledge_id:
             stmt = stmt.where(KnowledgeChunk.knowledge_id == knowledge_id)
+        stmt = stmt.limit(_MAX_COSINE_CHUNKS)
         rows = db.execute(stmt).all()
+
+    if len(rows) >= _MAX_COSINE_CHUNKS:
+        logger.warning(
+            "cosine scan hit cap=%s workspace=%s knowledge_id=%s",
+            _MAX_COSINE_CHUNKS,
+            workspace_id,
+            knowledge_id,
+        )
 
     scored: list[tuple[float, Any, str, Optional[str]]] = []
     for chunk, kb_name, filename in rows:
-        c_tokens = _tokenize(chunk.content)
-        if not c_tokens:
-            continue
-        score = len(q_tokens & c_tokens) / max(len(q_tokens), 1)
-        scored.append((score, chunk, kb_name, filename))
+        emb = parse_embedding(chunk.embedding_json)
+        if emb and len(emb) == len(q_emb):
+            score = cosine_similarity(q_emb, emb)
+        else:
+            score = keyword_score(query, chunk.content)
+        if score > 0:
+            scored.append((score, chunk, kb_name, filename))
     scored.sort(key=lambda x: x[0], reverse=True)
     out: list[dict[str, Any]] = []
     for score, chunk, kb_name, filename in scored[:top_k]:
-        if score <= 0:
-            continue
         out.append({
             "chunk_id": chunk.id,
             "knowledge_id": chunk.knowledge_id,
