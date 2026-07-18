@@ -25,6 +25,11 @@ type Props = {
   onOpenChange: (open: boolean) => void
   workspaceId: string | null | undefined
   file: PreviewableFile | null
+  /**
+   * When opened above another modal (e.g. chat file picker Dialog),
+   * raise z-index so the stack is: chat → picker → preview.
+   */
+  elevated?: boolean
 }
 
 /** 右侧 Drawer：预览工作区中的图片 / Markdown / PDF。 */
@@ -33,6 +38,7 @@ export function FilePreviewDrawer({
   onOpenChange,
   workspaceId,
   file,
+  elevated = false,
 }: Props) {
   const t = useT()
   const [mdText, setMdText] = useState<string | null>(null)
@@ -94,7 +100,16 @@ export function FilePreviewDrawer({
       direction="right"
       shouldScaleBackground={false}
     >
-      <DrawerContent className="file-preview-drawer">
+      <DrawerContent
+        className={
+          elevated
+            ? 'file-preview-drawer file-preview-drawer--elevated'
+            : 'file-preview-drawer'
+        }
+        overlayClassName={
+          elevated ? 'file-preview-drawer-overlay--elevated' : undefined
+        }
+      >
         <DrawerHeader className="border-b">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">

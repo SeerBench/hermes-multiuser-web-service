@@ -46,11 +46,15 @@ function DrawerOverlay({
 function DrawerContent({
   className,
   children,
+  overlayClassName,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Content>) {
+}: React.ComponentProps<typeof DrawerPrimitive.Content> & {
+  /** Stack above a host Dialog (chat → file picker → preview). */
+  overlayClassName?: string
+}) {
   return (
     <DrawerPortal>
-      <DrawerOverlay />
+      <DrawerOverlay className={overlayClassName} />
       <DrawerPrimitive.Content
         data-slot="drawer-content"
         className={cn(

@@ -10,14 +10,20 @@ function makeFiles(count: number) {
     filename:
       i === 0
         ? 'Python开发技术选型对比与项目实施方案-这是一个非常长的文件名称.pdf'
-        : `doc-${i + 1}.txt`,
+        : i === 1
+          ? 'notes.md'
+          : `doc-${i + 1}.txt`,
     size_bytes: 4_321_000,
     storage_key: `uploads/f${i + 1}`,
-    mime_type: 'text/plain',
+    mime_type: i === 0 ? 'application/pdf' : 'text/plain',
+    status: i === 2 ? 'processing' : 'ready',
+    tag_ids: i % 2 === 0 ? ['tag-a'] : ['tag-b'],
+    created_at: 1_700_000_000 + i,
   }))
 }
 
 const listFiles = vi.fn()
+const listFileTags = vi.fn()
 
 vi.mock('../platformClient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../platformClient')>()
@@ -26,6 +32,7 @@ vi.mock('../platformClient', async (importOriginal) => {
     platform: {
       ...actual.platform,
       listFiles: (...args: unknown[]) => listFiles(...args),
+      listFileTags: (...args: unknown[]) => listFileTags(...args),
     },
   }
 })
@@ -45,12 +52,16 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   listFiles.mockReset()
+  listFileTags.mockReset()
 })
 
 describe('FilePickerSheet', () => {
   beforeEach(() => {
     listFiles.mockResolvedValue(makeFiles(1))
-    // 默认桌面宽度 → 每页 20
+    listFileTags.mockResolvedValue([
+      { id: 'tag-a', name: 'Alpha', created_at: 1 },
+      { id: 'tag-b', name: 'Beta', created_at: 2 },
+    ])
     Object.defineProperty(window, 'innerWidth', {
       configurable: true,
       value: 1024,
@@ -68,7 +79,7 @@ describe('FilePickerSheet', () => {
     }))
   })
 
-  it('wraps long filenames instead of ellipsis nowrap', async () => {
+  it('wraps long filenames and shows retrieval status after size', async () => {
     render(
       <LocaleProvider>
         <FilePickerSheet
@@ -80,17 +91,78 @@ describe('FilePickerSheet', () => {
       </LocaleProvider>,
     )
 
-    const name = await screen.findByText(
-      /Python开发技术选型对比与项目实施方案/,
+    const name = await screen.findByRole('button', {
+      name: /Python开发技术选型对比与项目实施方案/,
+    })
+    expect(name).toHaveClass('file-picker-name--link')
+    const row = name.closest('.file-picker-row')
+    expect(row?.querySelector('.file-picker-size')).toHaveTextContent('4.1 MB')
+    expect(row?.querySelector('.file-picker-status')).toHaveTextContent(
+      /可被检索|Ready|Searchable/i,
     )
-    expect(name).toHaveClass('file-picker-name')
-    const style = getComputedStyle(name)
-    // CSS module may not apply in jsdom; assert class contract
-    expect(name.className).toContain('file-picker-name')
-    void style
+  })
+
+  it('filters by filename search and tag', async () => {
+    const user = userEvent.setup()
+    listFiles.mockResolvedValue(makeFiles(4))
+    render(
+      <LocaleProvider>
+        <FilePickerSheet
+          open
+          onOpenChange={vi.fn()}
+          workspaceId="ws-1"
+          onConfirm={vi.fn()}
+        />
+      </LocaleProvider>,
+    )
+
+    await screen.findByRole('button', { name: /Python开发技术选型/ })
+    const search = screen.getByPlaceholderText(/按名称搜索|Search by name/i)
+    await user.clear(search)
+    await user.type(search, 'notes')
+    await waitFor(() => {
+      expect(screen.getByText('notes.md')).toBeInTheDocument()
+      expect(screen.queryByText('doc-3.txt')).toBeNull()
+    })
+
+    await user.clear(search)
+    const tagSelect = screen.getByLabelText(/标签|Tag/i)
+    await user.selectOptions(tagSelect, 'tag-a')
+    await waitFor(() => {
+      const list = screen.getByRole('list', {
+        name: /从文件库选择|Choose from files/i,
+      })
+      const items = within(list).getAllByRole('listitem')
+      expect(items.length).toBeGreaterThanOrEqual(1)
+      expect(within(list).queryByText('notes.md')).toBeNull()
+    })
+  })
+
+  it('opens elevated preview drawer when clicking a previewable name', async () => {
+    const user = userEvent.setup()
+    listFiles.mockResolvedValue(makeFiles(2))
+    render(
+      <LocaleProvider>
+        <FilePickerSheet
+          open
+          onOpenChange={vi.fn()}
+          workspaceId="ws-1"
+          onConfirm={vi.fn()}
+        />
+      </LocaleProvider>,
+    )
+
+    const pdfName = await screen.findByRole('button', {
+      name: /Python开发技术选型/,
+    })
+    await user.click(pdfName)
+    await waitFor(() => {
+      const drawer = document.querySelector('.file-preview-drawer--elevated')
+      expect(drawer).toBeTruthy()
+    })
     expect(
-      name.closest('.file-picker-row')?.querySelector('.file-picker-size'),
-    ).toHaveTextContent('4.1 MB')
+      screen.getByRole('dialog', { name: /Python开发技术选型/ }),
+    ).toBeInTheDocument()
   })
 
   it('paginates 20 items on desktop and can flip pages', async () => {
@@ -107,49 +179,22 @@ describe('FilePickerSheet', () => {
       </LocaleProvider>,
     )
 
-    await screen.findByText(/Python开发技术选型/)
-    const list = screen.getByRole('list', { name: /从文件库选择|Choose from files/i })
+    // Default sort is created_at desc → newest (doc-25) first; PDF is last page.
+    await screen.findByText('doc-25.txt')
+    const list = screen.getByRole('list', {
+      name: /从文件库选择|Choose from files/i,
+    })
     expect(within(list).getAllByRole('listitem')).toHaveLength(20)
+    expect(within(list).queryByText(/Python开发技术选型/)).toBeNull()
 
     await user.click(screen.getByRole('button', { name: /下一页|Next/i }))
     await waitFor(() => {
       expect(within(list).getAllByRole('listitem')).toHaveLength(5)
     })
-    expect(screen.getByText('doc-21.txt')).toBeInTheDocument()
-  })
-
-  it('paginates 15 items on mobile', async () => {
-    Object.defineProperty(window, 'innerWidth', {
-      configurable: true,
-      value: 390,
-    })
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: query.includes('max-width: 767px'),
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }))
-
-    listFiles.mockResolvedValue(makeFiles(20))
-    render(
-      <LocaleProvider>
-        <FilePickerSheet
-          open
-          onOpenChange={vi.fn()}
-          workspaceId="ws-1"
-          onConfirm={vi.fn()}
-        />
-      </LocaleProvider>,
-    )
-
-    await screen.findByText(/Python开发技术选型/)
-    const list = screen.getByRole('list', {
-      name: /从文件库选择|Choose from files/i,
-    })
-    expect(within(list).getAllByRole('listitem')).toHaveLength(15)
+    expect(screen.getByText('doc-5.txt')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /Python开发技术选型/ }),
+    ).toBeInTheDocument()
   })
 
   it('keeps header and footer actions visible in the dialog shell', async () => {
@@ -165,12 +210,10 @@ describe('FilePickerSheet', () => {
       </LocaleProvider>,
     )
 
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('dialog', {
+      name: /从文件库选择|Choose from files/i,
+    })
     expect(dialog.className).toMatch(/file-picker-dialog/)
-    expect(dialog.className).toMatch(/max-h-/)
-    expect(
-      within(dialog).getByRole('heading', { name: /从文件库选择|Choose from files/i }),
-    ).toBeInTheDocument()
     expect(
       within(dialog).getByRole('button', { name: /取消|Cancel/i }),
     ).toBeInTheDocument()

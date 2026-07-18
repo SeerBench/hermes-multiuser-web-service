@@ -1705,6 +1705,15 @@ code {
   width: min(36rem, 92vw) !important;
 }
 
+/* 叠在文件选择 Dialog 之上：对话 → 选择器 → 预览 */
+.file-preview-drawer--elevated {
+  z-index: 80 !important;
+}
+
+.file-preview-drawer-overlay--elevated {
+  z-index: 75 !important;
+}
+
 .file-preview-drawer-body {
   height: calc(100vh - 5.5rem);
   min-height: 0;
@@ -2983,14 +2992,59 @@ code {
 
 /* 文件选择弹窗：标题/底栏固定，中间列表滚动；高度随内容自适应（上限 max-h） */
 .file-picker-dialog {
-  /* DialogContent 已带 flex + max-h；此处保证子项可压缩 */
   min-height: 0;
 }
 
 .file-picker-dialog-header,
 .file-picker-dialog-footer,
-.file-picker-pagination {
+.file-picker-pagination,
+.file-picker-toolbar {
   background: var(--bg-elev, var(--background));
+}
+
+.file-picker-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.file-picker-search {
+  position: relative;
+}
+
+.file-picker-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-dim);
+  pointer-events: none;
+}
+
+.file-picker-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-picker-filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.file-picker-filter-field select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  max-width: 11rem;
 }
 
 .file-picker-row {
@@ -3011,18 +3065,49 @@ code {
 .file-picker-name {
   flex: 1 1 auto;
   min-width: 0;
-  /* 长文件名自动换行，保证移动端整行可见 */
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.4;
+  text-align: left;
 }
 
-.file-picker-size {
+.file-picker-name--link {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.file-picker-name--link:hover {
+  color: var(--primary, var(--accent));
+}
+
+.file-picker-size,
+.file-picker-status {
   flex: 0 0 auto;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
   padding-top: 2px;
+  white-space: nowrap;
+}
+
+.file-picker-status--ready {
+  color: color-mix(in oklab, #22c55e 70%, var(--fg-dim));
+}
+
+.file-picker-status--failed {
+  color: var(--destructive, #ef4444);
+}
+
+.file-picker-status--processing,
+.file-picker-status--pending {
+  color: color-mix(in oklab, #3b82f6 65%, var(--fg-dim));
 }
 
 .file-picker-pagination {
@@ -3030,6 +3115,20 @@ code {
 }
 
 @media (max-width: 767px) {
+  .file-picker-toolbar {
+    align-items: center;
+    text-align: center;
+  }
+
+  .file-picker-search {
+    width: 100%;
+  }
+
+  .file-picker-filters {
+    width: 100%;
+    justify-content: center;
+  }
+
   .file-picker-row {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -3039,16 +3138,54 @@ code {
     flex: 1 1 calc(100% - 2.5rem);
   }
 
-  .file-picker-size {
-    width: 100%;
-    padding-left: 1.75rem; /* 与 checkbox 对齐 */
+  .file-picker-size,
+  .file-picker-status {
     padding-top: 0;
+  }
+
+  .file-picker-size {
+    margin-left: 1.75rem;
   }
 
   .file-picker-pagination [data-slot='pagination-content'] {
     flex-wrap: wrap;
     justify-content: center;
     row-gap: 4px;
+  }
+}
+
+/* Files 页：移动端 Breadcrumb 与筛选排序分两行并居中 */
+@media (max-width: 767px) {
+  .files-toolbar {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+  }
+
+  .files-toolbar > nav,
+  .files-toolbar [data-slot='breadcrumb'] {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .files-toolbar [data-slot='breadcrumb-list'] {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .files-breadcrumb {
+    justify-content: center;
+    flex: none;
+    width: 100%;
+  }
+
+  .files-toolbar-sort {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
   }
 }
 

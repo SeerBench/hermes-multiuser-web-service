@@ -89,6 +89,7 @@
   "composer.model.badge.new": "New",
   "composer.filePicker.title": "Choose from files",
   "composer.filePicker.empty": "No files yet.",
+  "composer.filePicker.noMatch": "No matching files.",
   "composer.filePicker.attach": "Attach ({count})",
 
   "attach.button": "Attach files",
