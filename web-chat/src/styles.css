@@ -2981,27 +2981,75 @@ code {
   color: #eff6ff;
 }
 
+/* 文件选择弹窗：标题/底栏固定，中间列表滚动；高度随内容自适应（上限 max-h） */
+.file-picker-dialog {
+  /* DialogContent 已带 flex + max-h；此处保证子项可压缩 */
+  min-height: 0;
+}
+
+.file-picker-dialog-header,
+.file-picker-dialog-footer,
+.file-picker-pagination {
+  background: var(--bg-elev, var(--background));
+}
+
 .file-picker-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  padding: 8px 4px;
+  padding: 10px 4px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.file-picker-row:last-child {
+  border-bottom: none;
 }
 
 .file-picker-name {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 长文件名自动换行，保证移动端整行可见 */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .file-picker-size {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+.file-picker-pagination {
+  overflow-x: auto;
+}
+
+@media (max-width: 767px) {
+  .file-picker-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .file-picker-name {
+    flex: 1 1 calc(100% - 2.5rem);
+  }
+
+  .file-picker-size {
+    width: 100%;
+    padding-left: 1.75rem; /* 与 checkbox 对齐 */
+    padding-top: 0;
+  }
+
+  .file-picker-pagination [data-slot='pagination-content'] {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 4px;
+  }
 }
 
 /* ── Files page layout ───────────────────────────────────────────── */
