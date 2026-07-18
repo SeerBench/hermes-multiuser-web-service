@@ -394,11 +394,9 @@ TOOLSETS = {
             "web_skills_list", "web_skill_view",
             "web_skill_install", "web_skill_delete",
             "web_skill_edit", "web_skill_patch",
-            # Planning + memory — both go through HERMES_HOME and are
-            # automatically scoped to the per-user workspace by the
-            # set_hermes_home_override contextvar set in
-            # gateway/web/sandbox.enter_user_context.
-            "todo", "memory",
+            # Planning + memory — todo is HERMES_HOME-scoped; web_memory
+            # queues pending Memory Center rows (user must approve).
+            "todo", "web_memory",
             # Cross-session recall, filtered by user_id end-to-end:
             # tool_executor.py injects ``agent._user_id`` into the
             # session_search call, which threads it through to

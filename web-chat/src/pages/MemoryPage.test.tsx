@@ -6,22 +6,7 @@ import { toast } from 'sonner'
 
 import { LocaleProvider } from '../i18n'
 import { MemoryPage } from './MemoryPage'
-
-vi.mock('../components/MarkdownEditor', () => ({
-  MarkdownEditor: ({
-    value,
-    onChange,
-  }: {
-    value: string
-    onChange: (v: string) => void
-  }) => (
-    <textarea
-      aria-label="memory-editor"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  ),
-}))
+import type { MemoryItem } from '../platformClient'
 
 vi.mock('../platformClient', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../platformClient')>()
@@ -30,27 +15,92 @@ vi.mock('../platformClient', async (importOriginal) => {
     getStoredWorkspaceId: () => 'ws-1',
     platform: {
       ...actual.platform,
-      getMemory: vi.fn(),
-      patchMemory: vi.fn(),
+      migrateMemoryFromFiles: vi.fn(),
+      getMemoryStats: vi.fn(),
+      listMemoryItems: vi.fn(),
+      createMemoryItem: vi.fn(),
+      updateMemoryItem: vi.fn(),
+      deleteMemoryItem: vi.fn(),
+      approveMemoryItem: vi.fn(),
+      rejectMemoryItem: vi.fn(),
     },
   }
 })
 
 import { platform } from '../platformClient'
 
-describe('MemoryPage toast feedback', () => {
+const pendingItem: MemoryItem = {
+  id: 'm-pending',
+  user_id: 'u1',
+  workspace_id: 'ws-1',
+  category: 'preference',
+  content: 'User wants all agent ops via UI',
+  source: 'agent_tool',
+  confidence: 0.9,
+  status: 'pending',
+  importance: 70,
+  source_ref: '2026-06-30 chat',
+  updated_at: '2026-06-30T12:00:00Z',
+}
+
+const profileItem: MemoryItem = {
+  id: 'm-profile',
+  user_id: 'u1',
+  workspace_id: 'ws-1',
+  category: 'profile',
+  content: 'Senior engineer',
+  source: 'manual',
+  confidence: 1,
+  status: 'active',
+  importance: 80,
+  updated_at: '2026-06-28T12:00:00Z',
+}
+
+describe('Memory Center', () => {
   beforeEach(() => {
     localStorage.setItem('hermes-locale', 'en')
-    vi.mocked(platform.getMemory).mockResolvedValue({
-      long_term: 'old memory',
-      profile: 'old profile',
+    vi.mocked(platform.migrateMemoryFromFiles).mockResolvedValue({ imported: 0 })
+    vi.mocked(platform.getMemoryStats).mockResolvedValue({
+      total: 1,
+      pending: 1,
+      last_updated_at: '2026-06-30T12:00:00Z',
     })
-    vi.mocked(platform.patchMemory).mockResolvedValue({
-      status: 'ok',
+    vi.mocked(platform.listMemoryItems).mockImplementation(
+      async (_wid, params) => {
+        if (params?.status === 'pending') {
+          return { items: [pendingItem] }
+        }
+        if (params?.category === 'profile') {
+          return { items: [profileItem] }
+        }
+        return { items: [profileItem, pendingItem] }
+      },
+    )
+    vi.mocked(platform.approveMemoryItem).mockResolvedValue({
+      ...pendingItem,
+      status: 'active',
+    })
+    vi.mocked(platform.rejectMemoryItem).mockResolvedValue({
+      ...pendingItem,
+      status: 'archived',
     })
   })
 
-  it('shows a success toast after saving memory', async () => {
+  it('shows stats and profile memories', async () => {
+    render(
+      <LocaleProvider>
+        <MemoryPage />
+      </LocaleProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Total/i)).toBeInTheDocument()
+      expect(screen.getByText('Senior engineer')).toBeInTheDocument()
+    })
+    expect(platform.migrateMemoryFromFiles).toHaveBeenCalledWith('ws-1')
+  })
+
+  it('approves a pending suggestion with toast', async () => {
     const user = userEvent.setup()
     const successSpy = vi.spyOn(toast, 'success')
 
@@ -60,14 +110,40 @@ describe('MemoryPage toast feedback', () => {
       </LocaleProvider>,
     )
 
-    const editors = await screen.findAllByLabelText('memory-editor')
-    await user.clear(editors[0])
-    await user.type(editors[0], 'new memory')
+    await user.click(screen.getByRole('tab', { name: /AI suggestions/i }))
+    await waitFor(() => {
+      expect(
+        screen.getByText('User wants all agent ops via UI'),
+      ).toBeInTheDocument()
+    })
+
     await user.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => {
+      expect(platform.approveMemoryItem).toHaveBeenCalledWith(
+        'ws-1',
+        'm-pending',
+      )
+      expect(successSpy).toHaveBeenCalledWith('Memory saved.')
+    })
+  })
+
+  it('filters all tab by search query', async () => {
+    const user = userEvent.setup()
+    render(
+      <LocaleProvider>
+        <MemoryPage />
+      </LocaleProvider>,
+    )
+
+    await user.click(screen.getByRole('tab', { name: /^all$/i }))
+    const search = await screen.findByLabelText(/search memories/i)
+    await user.type(search, 'risk')
 
     await waitFor(() => {
-      expect(platform.patchMemory).toHaveBeenCalled()
-      expect(successSpy).toHaveBeenCalledWith('Saved.')
+      expect(platform.listMemoryItems).toHaveBeenCalledWith(
+        'ws-1',
+        expect.objectContaining({ q: 'risk' }),
+      )
     })
   })
 })

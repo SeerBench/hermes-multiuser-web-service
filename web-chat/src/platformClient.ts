@@ -42,6 +42,30 @@ export type Workspace = {
   name: string
 }
 
+export type MemoryItem = {
+  id: string
+  user_id: string
+  workspace_id: string
+  category: string
+  content: string
+  source: string
+  confidence: number
+  status: string
+  importance: number
+  source_ref?: string | null
+  raw_excerpt?: string | null
+  ai_summary?: string | null
+  metadata?: Record<string, unknown>
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type MemoryStats = {
+  total: number
+  pending: number
+  last_updated_at?: string | null
+}
+
 export type AuthResponse = {
   user: PlatformUser
   workspace?: Workspace
@@ -303,6 +327,89 @@ export const platform = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+
+  listMemoryItems: (
+    workspaceId: string,
+    params?: {
+      q?: string
+      category?: string
+      status?: string
+      sort?: 'updated_at' | 'created_at' | 'importance'
+    },
+  ) => {
+    const qs = new URLSearchParams()
+    if (params?.q) qs.set('q', params.q)
+    if (params?.category) qs.set('category', params.category)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.sort) qs.set('sort', params.sort)
+    const suffix = qs.toString() ? `?${qs}` : ''
+    return platformRequest<{ items: MemoryItem[] }>(
+      `/workspaces/${workspaceId}/memory/items${suffix}`,
+    )
+  },
+
+  getMemoryStats: (workspaceId: string) =>
+    platformRequest<MemoryStats>(`/workspaces/${workspaceId}/memory/stats`),
+
+  createMemoryItem: (
+    workspaceId: string,
+    body: {
+      category: string
+      content: string
+      source?: string
+      status?: string
+      confidence?: number
+      importance?: number
+      source_ref?: string
+      metadata?: Record<string, unknown>
+    },
+  ) =>
+    platformRequest<MemoryItem>(`/workspaces/${workspaceId}/memory/items`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  updateMemoryItem: (
+    workspaceId: string,
+    itemId: string,
+    body: Partial<{
+      content: string
+      category: string
+      confidence: number
+      importance: number
+      source_ref: string
+      status: string
+      metadata: Record<string, unknown>
+    }>,
+  ) =>
+    platformRequest<MemoryItem>(
+      `/workspaces/${workspaceId}/memory/items/${itemId}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+
+  deleteMemoryItem: (workspaceId: string, itemId: string) =>
+    platformRequest<{ status: string }>(
+      `/workspaces/${workspaceId}/memory/items/${itemId}`,
+      { method: 'DELETE' },
+    ),
+
+  approveMemoryItem: (workspaceId: string, itemId: string) =>
+    platformRequest<MemoryItem>(
+      `/workspaces/${workspaceId}/memory/items/${itemId}/approve`,
+      { method: 'POST' },
+    ),
+
+  rejectMemoryItem: (workspaceId: string, itemId: string) =>
+    platformRequest<MemoryItem>(
+      `/workspaces/${workspaceId}/memory/items/${itemId}/reject`,
+      { method: 'POST' },
+    ),
+
+  migrateMemoryFromFiles: (workspaceId: string) =>
+    platformRequest<{ imported: number }>(
+      `/workspaces/${workspaceId}/memory/migrate-from-files`,
+      { method: 'POST' },
+    ),
 
   listSkills: (workspaceId: string) =>
     platformRequest<SkillRow[]>(`/workspaces/${workspaceId}/skills`),

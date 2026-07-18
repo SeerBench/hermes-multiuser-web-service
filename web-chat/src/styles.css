@@ -2610,6 +2610,102 @@ code {
   font-weight: 600;
 }
 
+.memory-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--muted-foreground, #64748b);
+}
+
+.memory-stats strong {
+  color: var(--foreground, inherit);
+  font-weight: 600;
+}
+
+.memory-center-tabs {
+  gap: 12px;
+}
+
+.memory-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.memory-select,
+.memory-textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-elev, transparent);
+  color: inherit;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.memory-textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.memory-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.memory-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  padding: 14px 16px;
+  background: var(--bg-elev, transparent);
+}
+
+.memory-item--pending {
+  border-color: color-mix(in oklab, var(--primary, #2563eb) 35%, var(--border));
+}
+
+.memory-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted-foreground, #64748b);
+  margin-bottom: 8px;
+}
+
+.memory-item-content {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.memory-item-excerpt {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted-foreground, #64748b);
+}
+
+.memory-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .markdown-editor-preview {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

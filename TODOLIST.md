@@ -335,9 +335,19 @@ flowchart TD
 ### 4.2 Memory UI
 
 - [x] `web-chat/src/pages/MemoryPage.tsx`
-- [x] 长期记忆 / 用户画像编辑区 + 保存
+- [x] 长期记忆 / 用户画像编辑区 + 保存（已升级为 Memory Center）
 - [~] 重置 / 字符计数（**未做**）
 - [x] 路由 `#/memory`
+
+### 4.2b Memory Center MVP
+
+- [x] `memory_items` 表 + Alembic `002_memory_items`
+- [x] `platform_api/services/memory_center.py` — CRUD / approve / reject / 投影 md
+- [x] API：`/memory/items`、`/memory/stats`、approve、reject、migrate-from-files
+- [x] Memory Center UI：Profile / Preferences / Projects / Pending / All
+- [x] `web_memory` 工具替换 hermes-web-chat 的 `memory`（仅 pending）
+- [x] Extractor stub + `PLATFORM_MEMORY_EXTRACTOR` feature flag（默认关）
+- [ ] 聊天后 LLM Memory Extractor（pending only）— Phase 2
 
 ### 4.3 Skill 配置 API
 

@@ -1478,6 +1478,28 @@ class WebChatAdapter(BasePlatformAdapter):
                             "usage": usage,
                         },
                     })
+                    # Memory Center: optional post-turn extraction (feature-flagged
+                    # stub — never writes permanent memory; see memory_extractor).
+                    try:
+                        from platform_api.services.memory_extractor import (
+                            maybe_enqueue_memory_extraction,
+                        )
+
+                        ws = None
+                        if hasattr(self.user_store, "get_default_workspace"):
+                            ws = self.user_store.get_default_workspace(user_id)
+                        if ws:
+                            maybe_enqueue_memory_extraction(
+                                user_id=user_id,
+                                workspace_id=ws["id"],
+                                session_id=str(effective_session_id),
+                            )
+                    except Exception:
+                        logger.debug(
+                            "[%s] memory extraction hook skipped",
+                            self.name,
+                            exc_info=True,
+                        )
                     # Auto-title first exchanges (background). Client refreshes
                     # the conversation list to pick up the new title.
                     try:
