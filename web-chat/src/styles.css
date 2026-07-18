@@ -87,8 +87,8 @@ code {
 
 .app-header {
   display: grid;
-  /* 左品牌 · 右导航/头像（对话/工作区不再居中） */
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* 左品牌 · 中导航 · 右操作/头像 */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 10px 18px;
@@ -148,10 +148,12 @@ code {
   text-overflow: ellipsis;
 }
 
-/* 桌面：pill Tabs；移动端：汉堡菜单（见下方 media） */
+/* 桌面：居中 pill Tabs；移动端隐藏，改用头像左侧汉堡（见下方 media） */
 .app-nav-tabs {
   display: flex;
   align-items: center;
+  justify-content: center;
+  justify-self: center;
   min-width: 0;
 }
 
@@ -2349,8 +2351,12 @@ code {
   }
 }
 
-/* 移动端：对话/工作区收进顶栏菜单；取消底部 tab 栏占位 */
+/* 移动端：隐藏居中 Tabs；汉堡在头像左侧；顶栏恢复两列 */
 @media (max-width: 767px) {
+  .app-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
   .app-nav-tabs {
     display: none;
   }

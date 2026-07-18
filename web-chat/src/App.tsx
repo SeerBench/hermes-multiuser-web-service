@@ -200,7 +200,13 @@ function AppShell() {
             </button>
           </div>
 
-          {/* 主导航靠右：桌面 pill；移动端菜单紧贴头像左侧 */}
+          {/* PC：对话/工作区居中；移动端：汉堡在头像左侧（CSS 显隐） */}
+          <MainNavMenu
+            slot="tabs"
+            activeTab={activeTab}
+            platformMode={platformMode}
+            onMainTab={onMainTab}
+          />
           <div className="app-nav-actions">
             {user.role === 'admin' && (
               <Button
@@ -214,6 +220,7 @@ function AppShell() {
               </Button>
             )}
             <MainNavMenu
+              slot="menu"
               activeTab={activeTab}
               platformMode={platformMode}
               onMainTab={onMainTab}

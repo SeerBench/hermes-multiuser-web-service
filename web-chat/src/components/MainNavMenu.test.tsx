@@ -21,12 +21,14 @@ afterEach(() => cleanup())
 
 function renderMenu(props: Partial<ComponentProps<typeof MainNavMenu>> = {}) {
   const onMainTab = vi.fn()
+  const slot = props.slot ?? 'tabs'
   render(
     <LocaleProvider>
       <MainNavMenu
         activeTab="chat"
         platformMode
         onMainTab={onMainTab}
+        slot={slot}
         {...props}
       />
     </LocaleProvider>,
@@ -35,16 +37,22 @@ function renderMenu(props: Partial<ComponentProps<typeof MainNavMenu>> = {}) {
 }
 
 describe('MainNavMenu', () => {
-  it('renders desktop chat/workspace tabs', () => {
-    renderMenu()
-    expect(screen.getByRole('tab', { name: /对话|Chat/i })).toBeInTheDocument()
+  it('tabs slot renders desktop chat/workspace tabs with center class', () => {
+    renderMenu({ slot: 'tabs' })
+    const tabs = screen.getByRole('tab', { name: /对话|Chat/i }).closest(
+      '.app-nav-tabs',
+    )
+    expect(tabs).toBeTruthy()
     expect(
       screen.getByRole('tab', { name: /工作区|Workspace/i }),
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /主导航|Main menu/i }),
+    ).toBeNull()
   })
 
   it('hides workspace tab when not in platform mode', () => {
-    renderMenu({ platformMode: false })
+    renderMenu({ slot: 'tabs', platformMode: false })
     expect(screen.getByRole('tab', { name: /对话|Chat/i })).toBeInTheDocument()
     expect(
       screen.queryByRole('tab', { name: /工作区|Workspace/i }),
@@ -53,14 +61,23 @@ describe('MainNavMenu', () => {
 
   it('desktop tab click switches to workspace', async () => {
     const user = userEvent.setup()
-    const { onMainTab } = renderMenu()
+    const { onMainTab } = renderMenu({ slot: 'tabs' })
     await user.click(screen.getByRole('tab', { name: /工作区|Workspace/i }))
     expect(onMainTab).toHaveBeenCalledWith('workspace')
   })
 
+  it('menu slot renders hamburger for mobile (left of avatar)', () => {
+    renderMenu({ slot: 'menu' })
+    const menu = screen
+      .getByRole('button', { name: /主导航|Main menu/i })
+      .closest('.app-nav-menu')
+    expect(menu).toBeTruthy()
+    expect(screen.queryByRole('tab')).toBeNull()
+  })
+
   it('mobile menu lists chat and workspace and navigates', async () => {
     const user = userEvent.setup()
-    const { onMainTab } = renderMenu({ activeTab: 'workspace' })
+    const { onMainTab } = renderMenu({ slot: 'menu', activeTab: 'workspace' })
     await user.click(screen.getByRole('button', { name: /主导航|Main menu/i }))
     await user.click(screen.getByRole('menuitem', { name: /对话|Chat/i }))
     expect(onMainTab).toHaveBeenCalledWith('chat')
@@ -68,7 +85,7 @@ describe('MainNavMenu', () => {
 
   it('mobile menu can open workspace', async () => {
     const user = userEvent.setup()
-    const { onMainTab } = renderMenu()
+    const { onMainTab } = renderMenu({ slot: 'menu' })
     await user.click(screen.getByRole('button', { name: /主导航|Main menu/i }))
     await user.click(screen.getByRole('menuitem', { name: /工作区|Workspace/i }))
     expect(onMainTab).toHaveBeenCalledWith('workspace')

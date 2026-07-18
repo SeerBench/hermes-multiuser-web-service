@@ -14,17 +14,25 @@ type Props = {
   activeTab: MainTab
   platformMode: boolean
   onMainTab: (tab: MainTab) => void
+  /**
+   * `tabs` — PC 顶栏居中；`menu` — 移动端汉堡，放在头像左侧（由 CSS 显隐）。
+   */
+  slot: 'tabs' | 'menu'
 }
 
 /**
- * Desktop: pill Tabs on the header right.
- * Mobile: hamburger menu to the left of the avatar (CSS toggles visibility).
+ * Desktop: centered pill Tabs. Mobile: hamburger to the left of the avatar.
  */
-export function MainNavMenu({ activeTab, platformMode, onMainTab }: Props) {
+export function MainNavMenu({
+  activeTab,
+  platformMode,
+  onMainTab,
+  slot,
+}: Props) {
   const t = useT()
 
-  return (
-    <>
+  if (slot === 'tabs') {
+    return (
       <div className="app-nav-tabs">
         <Tabs
           value={activeTab}
@@ -45,47 +53,49 @@ export function MainNavMenu({ activeTab, platformMode, onMainTab }: Props) {
           </TabsList>
         </Tabs>
       </div>
+    )
+  }
 
-      <div className="app-nav-menu">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 shrink-0"
-              title={t('nav.mainMenu')}
-              aria-label={t('nav.mainMenu')}
-            >
-              <Menu className="size-4" aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
+  return (
+    <div className="app-nav-menu">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="size-8 shrink-0"
+            title={t('nav.mainMenu')}
+            aria-label={t('nav.mainMenu')}
+          >
+            <Menu className="size-4" aria-hidden />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          <DropdownMenuItem
+            className="gap-2"
+            onSelect={() => onMainTab('chat')}
+          >
+            <MessageSquare className="size-4" aria-hidden />
+            <span className="flex-1">{t('nav.chat')}</span>
+            {activeTab === 'chat' ? (
+              <Check className="size-4 opacity-70" aria-hidden />
+            ) : null}
+          </DropdownMenuItem>
+          {platformMode && (
             <DropdownMenuItem
               className="gap-2"
-              onSelect={() => onMainTab('chat')}
+              onSelect={() => onMainTab('workspace')}
             >
-              <MessageSquare className="size-4" aria-hidden />
-              <span className="flex-1">{t('nav.chat')}</span>
-              {activeTab === 'chat' ? (
+              <LayoutGrid className="size-4" aria-hidden />
+              <span className="flex-1">{t('nav.workspace')}</span>
+              {activeTab === 'workspace' ? (
                 <Check className="size-4 opacity-70" aria-hidden />
               ) : null}
             </DropdownMenuItem>
-            {platformMode && (
-              <DropdownMenuItem
-                className="gap-2"
-                onSelect={() => onMainTab('workspace')}
-              >
-                <LayoutGrid className="size-4" aria-hidden />
-                <span className="flex-1">{t('nav.workspace')}</span>
-                {activeTab === 'workspace' ? (
-                  <Check className="size-4 opacity-70" aria-hidden />
-                ) : null}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   )
 }
