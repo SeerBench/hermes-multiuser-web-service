@@ -106,9 +106,39 @@ def test_enter_user_context_is_reentrant(hermes_home):
         with enter_user_context("u_bob") as bob_ws:
             assert get_user_workspace() == bob_ws
             assert get_hermes_home() == bob_ws
+            # Nested Bob must still land under process HERMES_HOME, not
+            # under Alice's overridden home (which would nest layouts).
+            assert bob_ws == hermes_home / "web_workspaces" / "u_bob"
+            assert alice_ws == hermes_home / "web_workspaces" / "u_alice"
         # Back to Alice
         assert get_user_workspace() == alice_ws
         assert get_hermes_home() == alice_ws
+
+
+def test_workspaces_root_ignores_user_home_override(hermes_home):
+    """workspaces_root must use process HERMES_HOME, never the per-user override."""
+    with enter_user_context("u_alice") as alice_ws:
+        assert get_hermes_home() == alice_ws
+        assert workspaces_root() == hermes_home / "web_workspaces"
+        assert workspaces_root() != alice_ws / "web_workspaces"
+
+
+def test_confine_path_rejects_symlink_escape(hermes_home):
+    """Symlink whose target is outside the workspace must be rejected."""
+    outside = hermes_home / "outside_secret.txt"
+    outside.write_text("leak", encoding="utf-8")
+    with enter_user_context("u_alice") as ws:
+        link = ws / "files" / "escape.txt"
+        link.symlink_to(outside)
+        with pytest.raises(PathSandboxViolation):
+            confine_path(link)
+
+
+def test_ensure_workspace_rejects_path_traversal_user_id(hermes_home):
+    with pytest.raises(ValueError, match="invalid user_id"):
+        ensure_workspace("../etc")
+    with pytest.raises(ValueError, match="invalid user_id"):
+        ensure_workspace("alice/bob")
 
 
 def test_enter_user_context_resets_on_exception(hermes_home):

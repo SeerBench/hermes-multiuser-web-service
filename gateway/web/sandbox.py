@@ -24,18 +24,24 @@ in the stage-1 fixes.
 Defensive posture: :func:`confine_path` raises if called outside a user
 context.  The sandboxed tools opt in by calling it; we never silently
 "fall back to no sandbox".
+
+Write rule: a user may only create/modify/delete files under their own
+``web_workspaces/<user_id>/`` (which is also their HERMES_HOME override).
+Paths outside that tree — including sibling users and the process
+``HERMES_HOME`` — are rejected.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Iterator, Optional
 
 from hermes_constants import (
-    get_hermes_home,
     reset_hermes_home_override,
     reset_terminal_cwd_override,
     set_hermes_home_override,
@@ -55,28 +61,52 @@ _USER_WORKSPACE: ContextVar[Optional[Path]] = ContextVar(
 # them.
 _USER_SUBDIRS = ("memories", "files", "cache", "skills", "uploads")
 
+# user_id used as a single path segment under web_workspaces/.
+_SAFE_USER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
 
 class PathSandboxViolation(PermissionError):
     """Raised when a path resolves outside the active user workspace."""
 
 
-def workspaces_root() -> Path:
-    """Default parent directory for all user workspaces.  Profile-aware
-    (resolves through ``get_hermes_home()``).
+def process_hermes_home() -> Path:
+    """Process-wide Hermes home, **ignoring** the per-user ContextVar override.
+
+    ``enter_user_context`` redirects ``get_hermes_home()`` to the user
+    workspace.  Workspace *layout* (``web_workspaces/<uid>/``) must stay
+    anchored at the operator-configured ``HERMES_HOME`` env (or
+    ``~/.hermes``), otherwise nested contexts nest directories incorrectly.
     """
-    return get_hermes_home() / "web_workspaces"
+    env_home = os.environ.get("HERMES_HOME", "").strip()
+    if env_home:
+        return Path(env_home)
+    return Path.home() / ".hermes"
+
+
+def workspaces_root() -> Path:
+    """Parent directory for all user workspaces (process HERMES_HOME)."""
+    return process_hermes_home() / "web_workspaces"
+
+
+def assert_safe_user_id(user_id: str) -> str:
+    """Reject path separators / traversal in ``user_id`` path segments."""
+    uid = (user_id or "").strip()
+    if not uid or not _SAFE_USER_ID.match(uid):
+        raise ValueError(f"invalid user_id: {user_id!r}")
+    return uid
 
 
 def workspace_for(user_id: str) -> Path:
     """Path the workspace *would* live at — no I/O, no mkdir."""
-    return workspaces_root() / user_id
+    return workspaces_root() / assert_safe_user_id(user_id)
 
 
 def ensure_workspace(user_id: str, *, base: Optional[Path] = None) -> Path:
     """Create the workspace + canonical subdirs if missing.  Idempotent."""
+    uid = assert_safe_user_id(user_id)
     if base is None:
         base = workspaces_root()
-    ws = base / user_id
+    ws = base / uid
     for sub in _USER_SUBDIRS:
         (ws / sub).mkdir(parents=True, exist_ok=True)
     return ws
@@ -128,6 +158,26 @@ def confine_path(path: "str | Path") -> Path:
             f"path {str(path)!r} escapes user workspace {ws_resolved}"
         ) from None
     return target
+
+
+def unlink_storage_key(storage_key: str) -> bool:
+    """Unlink a workspace-relative ``storage_key`` if it confines safely.
+
+    Returns True if a file was removed.  Escaping keys are ignored (no
+    unlink) so a poisoned DB row cannot delete sibling-user files.
+    Must be called inside :func:`enter_user_context`.
+    """
+    try:
+        path = confine_path(storage_key)
+    except PathSandboxViolation:
+        logger.warning(
+            "refusing to unlink escaping storage_key=%r", storage_key
+        )
+        return False
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
 
 
 @contextmanager

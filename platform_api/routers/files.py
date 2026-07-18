@@ -293,7 +293,7 @@ def download_file_content(
     _get_workspace(workspace_id, user_id)
     store = get_store()
     with enter_user_context(user_id):
-        from gateway.web.sandbox import get_user_workspace
+        from gateway.web.sandbox import PathSandboxViolation, confine_path
 
         with store._session_factory() as db:
             rec = db.get(FileRecord, file_id)
@@ -303,10 +303,12 @@ def download_file_content(
             filename = rec.filename
             mime_type = rec.mime_type
 
-        root = get_user_workspace().resolve()
-        path = (root / storage_key).resolve()
-        # 防止 storage_key 越权跳出用户沙箱
-        if not path.is_relative_to(root) or not path.is_file():
+        # storage_key 必须落在当前用户工作区内，禁止 ../ 越权读
+        try:
+            path = confine_path(storage_key)
+        except PathSandboxViolation:
+            raise HTTPException(status_code=404, detail="not found") from None
+        if not path.is_file():
             raise HTTPException(status_code=404, detail="not found")
         media = (
             mime_type
@@ -332,15 +334,14 @@ def delete_file(
     from gateway.web.platform.database import session_scope
 
     with enter_user_context(user_id):
-        from gateway.web.sandbox import get_user_workspace
+        from gateway.web.sandbox import unlink_storage_key
 
         with session_scope(store._engine) as db:
             rec = db.get(FileRecord, file_id)
             if not rec or rec.workspace_id != workspace_id:
                 raise HTTPException(status_code=404, detail="not found")
-            path = get_user_workspace() / rec.storage_key
-            if path.is_file():
-                path.unlink()
+            # 越权 storage_key 只跳过 unlink，仍删除 DB 行（防毒化记录）
+            unlink_storage_key(rec.storage_key)
             db.execute(delete(FileTagLink).where(FileTagLink.file_id == file_id))
             db.execute(delete(DocumentChunk).where(DocumentChunk.file_id == file_id))
             db.delete(rec)
@@ -450,7 +451,7 @@ def delete_folder(
     from gateway.web.platform.database import session_scope
 
     with enter_user_context(user_id):
-        from gateway.web.sandbox import get_user_workspace
+        from gateway.web.sandbox import unlink_storage_key
 
         with session_scope(store._engine) as db:
             folder = db.get(FileFolder, folder_id)
@@ -484,11 +485,8 @@ def delete_folder(
                     },
                 )
 
-            workspace_root = get_user_workspace()
             for rec in file_rows:
-                path = workspace_root / rec.storage_key
-                if path.is_file():
-                    path.unlink()
+                unlink_storage_key(rec.storage_key)
                 db.execute(delete(FileTagLink).where(FileTagLink.file_id == rec.id))
                 db.execute(
                     delete(DocumentChunk).where(DocumentChunk.file_id == rec.id)

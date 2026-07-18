@@ -24,9 +24,13 @@ def ingest_file_record(file_id: str, user_id: str) -> None:
         storage_key = rec.storage_key
     try:
         with enter_user_context(user_id):
-            from gateway.web.sandbox import get_user_workspace
+            from gateway.web.sandbox import PathSandboxViolation, confine_path
 
-            path = get_user_workspace() / storage_key
+            # 禁止毒化 storage_key 读出工作区外文件再写入知识库
+            try:
+                path = confine_path(storage_key)
+            except PathSandboxViolation as exc:
+                raise ValueError(f"storage_key escapes workspace: {storage_key}") from exc
             text = extract_text(path)
             pieces = chunk_text(text)
             store_chunks(

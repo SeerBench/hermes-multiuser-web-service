@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
@@ -103,20 +102,13 @@ def _real_global_skills_dir() -> Path:
     """Global skills dir at the **process-wide** ``HERMES_HOME``, ignoring
     the per-user ContextVar override.
 
-    ``enter_user_context`` sets ``_HERMES_HOME_OVERRIDE`` (a ContextVar)
-    to redirect ``get_hermes_home()`` to the user's workspace.  We want
-    the *un-overridden* value here so the global skill library can be
-    read alongside the user's private one — so we go straight to the
-    underlying env var (the same source ``get_hermes_home()`` reads from
-    before the override path).  The ContextVar override never mutates
-    ``os.environ``, so ``os.environ["HERMES_HOME"]`` is exactly the
-    operator-configured global path.  Falls back to ``~/.hermes`` to
-    match upstream's default.
+    See :func:`gateway.web.sandbox.process_hermes_home` — same anchor used
+    for ``web_workspaces/<uid>/`` layout so nested user contexts cannot
+    nest global/skill paths under another user's workspace.
     """
-    env_home = os.environ.get("HERMES_HOME", "").strip()
-    if env_home:
-        return Path(env_home) / "skills"
-    return Path.home() / ".hermes" / "skills"
+    from gateway.web.sandbox import process_hermes_home
+
+    return process_hermes_home() / "skills"
 
 
 def _user_skills_dir() -> Optional[Path]:
