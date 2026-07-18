@@ -217,6 +217,15 @@ export function ChatComposer({
     syncTextareaHeight()
   }, [input, syncTextareaHeight])
 
+  // Global hotkey `/` → focus the composer textarea.
+  useEffect(() => {
+    const onFocus = () => {
+      textareaRef.current?.focus()
+    }
+    window.addEventListener('hermes:focus-composer', onFocus)
+    return () => window.removeEventListener('hermes:focus-composer', onFocus)
+  }, [])
+
   useEffect(() => {
     if (modelOpen) {
       // 打开后聚焦搜索框，贴近截图交互

@@ -68,9 +68,11 @@ const mockUser = {
 
 function renderChat(
   props: {
+    platformMode?: boolean
     signedIn?: boolean
     needsBindKey?: boolean
     onGoBindSettings?: () => void
+    userAvatarUrl?: string | null
   } = {},
 ) {
   return render(

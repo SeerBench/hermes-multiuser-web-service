@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ from gateway.web.platform.models import (
     ConversationFlag,
     DocumentChunk,
     FileRecord,
+    PasswordResetToken,
     PlatformSession,
     SkillEntitlement,
     Tenant,
@@ -444,6 +445,73 @@ class PlatformStore:
             user.password_hash = hash_password(new_password)
             user.last_seen_at = datetime.now(timezone.utc)
 
+    def request_password_reset(
+        self,
+        email: str,
+        *,
+        ttl_seconds: int = 3600,
+    ) -> Optional[str]:
+        """Create a single-use reset token if the account exists and is active.
+
+        Returns plaintext token for the mailer, or ``None`` when no mail
+        should be sent (unknown / disabled). Prior unused tokens for the
+        user are invalidated.
+        """
+        email_norm = email.strip().lower()
+        ttl = max(60, int(ttl_seconds))
+        now = datetime.now(timezone.utc)
+        with session_scope(self._engine) as db:
+            user = db.execute(
+                select(User).where(User.email == email_norm)
+            ).scalar_one_or_none()
+            if not user or user.disabled or user.status == "disabled":
+                return None
+            db.execute(
+                delete(PasswordResetToken).where(
+                    PasswordResetToken.user_id == user.id,
+                    PasswordResetToken.used_at.is_(None),
+                )
+            )
+            plaintext = secrets.token_urlsafe(32)
+            db.add(
+                PasswordResetToken(
+                    token_hash=_sha256(plaintext),
+                    user_id=user.id,
+                    expires_at=now + timedelta(seconds=ttl),
+                    created_at=now,
+                )
+            )
+            return plaintext
+
+    def reset_password_with_token(self, token: str, new_password: str) -> None:
+        """Consume a reset token, set the new password, revoke all sessions."""
+        if len(new_password) < 8:
+            raise UserStoreError("password too short")
+        token = (token or "").strip()
+        if not token:
+            raise InvalidCredentialsError("invalid or expired token")
+        now = datetime.now(timezone.utc)
+        with session_scope(self._engine) as db:
+            row = db.execute(
+                select(PasswordResetToken).where(
+                    PasswordResetToken.token_hash == _sha256(token)
+                )
+            ).scalar_one_or_none()
+            if not row or row.used_at is not None:
+                raise InvalidCredentialsError("invalid or expired token")
+            expires = _ensure_utc(row.expires_at)
+            if expires <= now:
+                raise InvalidCredentialsError("invalid or expired token")
+            user = db.get(User, row.user_id)
+            if not user or user.disabled or user.status == "disabled":
+                raise InvalidCredentialsError("invalid or expired token")
+            user.password_hash = hash_password(new_password)
+            user.last_seen_at = now
+            row.used_at = now
+            db.execute(
+                delete(PlatformSession).where(PlatformSession.user_id == user.id)
+            )
+
     def get_user_upstream_key_enc(self, user_id: str) -> Optional[str]:
         with self._session_factory() as db:
             user = db.get(User, user_id)
@@ -535,12 +603,70 @@ class PlatformStore:
                     names.add(name)
         return sorted(names)
 
-    def list_users_admin(self, *, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    def list_users_admin(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Paginated admin user list; optional case-insensitive email substring."""
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
         with self._session_factory() as db:
+            stmt = select(User)
+            count_stmt = select(func.count()).select_from(User)
+            needle = (email or "").strip()
+            if needle:
+                pattern = f"%{needle}%"
+                stmt = stmt.where(User.email.ilike(pattern))
+                count_stmt = count_stmt.where(User.email.ilike(pattern))
+            total = int(db.execute(count_stmt).scalar_one())
             rows = db.execute(
-                select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
+                stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
             ).scalars()
-            return [self._user_to_dict(u) for u in rows]
+            return {
+                "users": [self._user_to_dict(u) for u in rows],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    def list_audit_logs(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Newest-first audit log page for the admin console."""
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        with self._session_factory() as db:
+            total = int(db.execute(select(func.count()).select_from(AuditLog)).scalar_one())
+            rows = db.execute(
+                select(AuditLog)
+                .order_by(AuditLog.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            ).scalars()
+            items = [
+                {
+                    "id": row.id,
+                    "actor_id": row.actor_id,
+                    "action": row.action,
+                    "target_type": row.target_type,
+                    "target_id": row.target_id,
+                    "metadata": row.metadata_json or {},
+                    "created_at": _dt_to_epoch(row.created_at),
+                }
+                for row in rows
+            ]
+            return {
+                "items": items,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
 
     def admin_stats(self) -> Dict[str, Any]:
         with self._session_factory() as db:

@@ -1,4 +1,4 @@
-"""Auth routes: register, login, logout, bind-key, me, profile."""
+"""Auth routes: register, login, logout, bind-key, me, profile, password reset."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from gateway.web.key_storage import KeyVaultError
 from gateway.web.platform.store import PlatformStore
 from gateway.web.users import InvalidCredentialsError, UserStoreError
 from platform_api.deps import get_settings, get_store, get_vault
+from platform_api.services.mail import get_mailer
 from platform_api.services.rate_limit import get_login_rate_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -28,6 +29,10 @@ def _client_ip(request: Request) -> str:
 
 def _login_rate_key(email: str, request: Request) -> str:
     return f"login:{email.strip().lower()}:{_client_ip(request)}"
+
+
+def _forgot_rate_key(email: str, request: Request) -> str:
+    return f"forgot:{email.strip().lower()}:{_client_ip(request)}"
 
 
 class RegisterBody(BaseModel):
@@ -53,6 +58,15 @@ class ProfilePatchBody(BaseModel):
 
 class ChangePasswordBody(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class ForgotPasswordBody(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordBody(BaseModel):
+    token: str = Field(min_length=8, max_length=256)
     new_password: str = Field(min_length=8, max_length=128)
 
 
@@ -233,4 +247,53 @@ def change_password(
         raise HTTPException(status_code=401, detail="invalid credentials") from exc
     except UserStoreError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok"}
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordBody, request: Request) -> dict[str, str]:
+    """Always returns ok (anti-enumeration). Sends mail only when account exists."""
+    store = get_store()
+    settings = get_settings()
+    limiter = get_login_rate_limiter()
+    rate_key = _forgot_rate_key(body.email, request)
+    if limiter.is_blocked(rate_key):
+        raise HTTPException(
+            status_code=429,
+            detail="too many reset requests; try again later",
+            headers={"Retry-After": "300"},
+        )
+    # Count every attempt (success path is always 200).
+    limiter.record_failure(rate_key)
+
+    email = str(body.email).strip().lower()
+    token = store.request_password_reset(
+        email,
+        ttl_seconds=settings.reset_token_ttl_seconds,
+    )
+    store.audit(None, "auth.forgot_password")
+    if token:
+        link = f"{settings.public_base_url}/#/reset-password?token={token}"
+        get_mailer().send(
+            to=email,
+            subject="Reset your Hermes password",
+            body=(
+                "You requested a password reset for your Hermes account.\n\n"
+                f"Open this link within one hour:\n{link}\n\n"
+                "If you did not request this, you can ignore this email.\n"
+            ),
+        )
+    return {"status": "ok"}
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetPasswordBody) -> dict[str, str]:
+    store = get_store()
+    try:
+        store.reset_password_with_token(body.token, body.new_password)
+    except InvalidCredentialsError as exc:
+        raise HTTPException(status_code=400, detail="invalid or expired token") from exc
+    except UserStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    store.audit(None, "auth.reset_password")
     return {"status": "ok"}

@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { LocaleProvider } from '../i18n'
 import { AuthPage } from './AuthPage'
@@ -9,6 +9,8 @@ vi.mock('../platformClient', () => ({
   platform: {
     login: vi.fn(),
     register: vi.fn(),
+    forgotPassword: vi.fn(),
+    resetPassword: vi.fn(),
   },
   storeWorkspaceId: vi.fn(),
   PlatformApiError: class extends Error {
@@ -36,18 +38,32 @@ vi.mock('../api', () => ({
 import { auth } from '../api'
 import { platform } from '../platformClient'
 
-function renderAuth() {
+function renderAuth(
+  props: {
+    initialMode?: 'login' | 'register' | 'forgot' | 'reset'
+    resetToken?: string | null
+  } = {},
+) {
   const onSuccess = vi.fn()
   const onLegacySuccess = vi.fn()
   render(
     <LocaleProvider>
-      <AuthPage onSuccess={onSuccess} onLegacySuccess={onLegacySuccess} />
+      <AuthPage
+        onSuccess={onSuccess}
+        onLegacySuccess={onLegacySuccess}
+        initialMode={props.initialMode}
+        resetToken={props.resetToken}
+      />
     </LocaleProvider>,
   )
   return { onSuccess, onLegacySuccess }
 }
 
 describe('AuthPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('renders login form and submits credentials', async () => {
     const user = userEvent.setup()
     vi.mocked(platform.login).mockResolvedValue({
@@ -85,5 +101,40 @@ describe('AuthPage', () => {
 
     await user.click(screen.getByRole('button', { name: /account sign-in/i }))
     expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+  })
+
+  it('submits forgot-password and shows confirmation', async () => {
+    const user = userEvent.setup()
+    vi.mocked(platform.forgotPassword).mockResolvedValue({ status: 'ok' })
+    renderAuth()
+
+    await user.click(screen.getByRole('button', { name: /forgot password/i }))
+    await user.type(screen.getByLabelText(/email/i), 'a@b.com')
+    await user.click(
+      screen.getByRole('button', { name: /send reset email/i }),
+    )
+
+    expect(platform.forgotPassword).toHaveBeenCalledWith('a@b.com')
+    await waitFor(() => {
+      expect(screen.getByText(/reset link has been sent/i)).toBeInTheDocument()
+    })
+  })
+
+  it('submits reset-password with token then returns to login', async () => {
+    const user = userEvent.setup()
+    vi.mocked(platform.resetPassword).mockResolvedValue({ status: 'ok' })
+    renderAuth({ initialMode: 'reset', resetToken: 'tok-xyz' })
+
+    await user.type(screen.getByLabelText(/new password/i), 'newpass99')
+    await user.click(
+      screen.getByRole('button', { name: /update password/i }),
+    )
+
+    expect(platform.resetPassword).toHaveBeenCalledWith('tok-xyz', 'newpass99')
+    await waitFor(() => {
+      expect(
+        screen.getByText(/password updated|sign in with your new/i),
+      ).toBeInTheDocument()
+    })
   })
 })

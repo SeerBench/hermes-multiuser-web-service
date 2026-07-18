@@ -182,6 +182,43 @@ def test_user_cannot_search_other_users_knowledge(client, mock_upstream_key):
     assert search.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_legacy_key_cannot_search_uuid_users_knowledge(
+    client, gateway, mock_upstream_key,
+):
+    """Gateway legacy key-login session cannot search a UUID owner's knowledge."""
+    reg_a, _ = register_user(client, email="uuid-rag@example.com")
+    owner_id = reg_a["user"]["user_id"]
+    ws_a = reg_a["workspace"]["id"]
+    assert "-" in owner_id  # platform UUID shape
+    bind_upstream_key(client, api_key="sk-uuid-owner-key-aaaaaaa")
+
+    up = client.post(
+        f"/api/v1/workspaces/{ws_a}/files",
+        files={"files": ("secret.txt", b"uuid owner confidential", "text/plain")},
+    )
+    assert up.status_code == 200
+
+    login = await gateway.client.post(
+        "/api/auth/login",
+        json={"api_key": "sk-legacy-intruder-bbbbbbb"},
+    )
+    assert login.status == 200, await login.text()
+    body = await login.json()
+    legacy_uid = body["user_id"]
+    assert legacy_uid.startswith("u_")
+    assert legacy_uid != owner_id
+    assert "hermes_session" in login.cookies
+    legacy_cookie = login.cookies["hermes_session"].value
+
+    search = client.post(
+        f"/api/v1/workspaces/{ws_a}/knowledge/search",
+        json={"query": "confidential", "top_k": 3},
+        cookies={"hermes_session": legacy_cookie},
+    )
+    assert search.status_code == 404
+
+
 def test_user_cannot_list_or_delete_other_users_files(client, mock_upstream_key):
     """文件列表 / 删除不能跨 workspace 访问。"""
     reg_a, _ = register_user(client, email="files-a@example.com")

@@ -14,11 +14,11 @@
 |-------|------|------|
 | 0 基础设施 | **~90%** | Compose/nginx/Alembic/ORM 已有；Redis Worker 空壳、pgvector 索引、深度 healthz 未做 |
 | 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；速率限制待补 |
-| 2 隔离加固 | **~90%** | UUID 贯穿 + 隔离 E2E（会话/记忆/知识库/禁用用户）；legacy 映射表与少量边界测试待补 |
+| 2 隔离加固 | **~95%** | UUID 贯穿 + 隔离 E2E；UUID 并发 ContextVar + Legacy→UUID 知识库越权已补测 |
 | 3 文件 RAG | **~85%** | 同步 ingestion、关键词检索、文件夹/分类/标签、内容预览与 `web_knowledge_search` 已有；MinIO/Redis Worker/pgvector 待补 |
 | 4 Memory/Skill | **~98%** | API + UI + catalog install/预览/CRUD + `web_skill_edit/patch`；`platform_settings` 运营配置待补 |
-| 5 Admin | **~85%** | API + UI + `create_admin.py` 已有；分页、审计 UI 待补 |
-| 6 硬化上线 | **~65%** | DEPLOY 文档、备份脚本、update-platform、登录限流已有；压测、正式安全 review、CI Compose job 待补 |
+| 5 Admin | **~95%** | 用户分页/email 过滤、审计只读 API+UI（`#/admin/audit`）；全局 Skill UI 仍待 |
+| 6 硬化上线 | **~70%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie 验收脚本已有；压测与正式安全 review 待补 |
 
 **最近验证（2026-07-16）**：Platform **57 cases**、Gateway/SessionDB **291 cases**、Web Chat **164 cases** 全部通过；TypeScript typecheck 与 production build 通过。
 
@@ -192,12 +192,14 @@ flowchart TD
 - [x] `POST /api/v1/auth/logout` — 吊销 session
 - [x] `GET  /api/v1/auth/me` — 返回 user + `upstream_status`
 - [x] `POST /api/v1/auth/bind-key` — `{api_key}` 绑定 upstream key
+- [x] `POST /api/v1/auth/forgot-password` / `reset-password` — 邮件重置（防枚举 + 单次 token）
 - [x] **保留** `POST /api/auth/login` — `{api_key}` Legacy 路径（`web_chat`）
   - [~] 若 key 未关联平台账号：legacy `upsert_user` 路径（**无「创建账号并绑定」向导**）
   - [x] 已关联 / 平台用户：共享 `platform_sessions` + UUID `user_id`
 - [x] 密码强度校验 + 邮箱格式校验（Pydantic `min_length=8`、`EmailStr`）
 - [x] 登录失败速率限制（进程内滑动窗口；`PLATFORM_LOGIN_MAX_FAILURES` / `PLATFORM_LOGIN_WINDOW_SECONDS`）
-- [ ] `[-]` MVP 不做：邮件验证、忘记密码自助
+- [x] 忘记密码自助（邮件流；见 Post-MVP Q2 / `test_auth_password_reset.py`）
+- [ ] `[-]` MVP 不做：注册邮件验证
 
 ### 1.3 统一 Session（双服务共用）
 
@@ -250,12 +252,12 @@ flowchart TD
 
 - [x] `tests/platform/test_isolation.py` — UUID 工作区路径隔离 + session cookie 共享
 - [x] `tests/platform/test_isolation_extended.py` — 跨用户会话（读/改/删/列表）、记忆（读/写）、知识库（搜索/列表/删除）、禁用用户
-- [ ] 扩展 `test_concurrent_requests_dont_swap_user_contexts`（UUID 身份）
+- [x] `test_concurrent_requests_dont_swap_user_contexts`（UUID 身份，`test_web_sandbox.py`）
 - [x] 用户 A 无法 `GET /api/conversations/{B_session_id}`
 - [x] 用户 A 无法读用户 B 的 memory（Platform API）
 - [x] 用户 A 无法检索用户 B 的 `document_chunks`
 - [x] 禁用用户无法登录和 chat
-- [ ] Legacy key 不能访问其他 UUID 用户知识库
+- [x] Legacy key 不能访问其他 UUID 用户知识库（`test_legacy_key_cannot_search_uuid_users_knowledge`）
 - [ ] bind-key 后会话统一
 
 ### 2.4 文档
@@ -373,19 +375,21 @@ flowchart TD
 
 ### 5.1 Admin API
 
-- [x] `GET  /api/v1/admin/users` — 列表（**无分页参数前端使用**）
+- [x] `GET  /api/v1/admin/users` — 分页 `{users,total,limit,offset}` + `email` 过滤
 - [x] `PATCH /api/v1/admin/users/{id}` — `{status: active|disabled}`
 - [x] `GET  /api/v1/admin/stats` — 用户数、文件数、chunk 数
 - [x] `GET  /api/v1/admin/skills` — 全局 skill 只读列表
+- [x] `GET  /api/v1/admin/audit` — 审计日志分页只读
 - [x] admin 操作写 `audit_logs`
 
 ### 5.2 Admin UI
 
 - [x] `web-chat/src/pages/AdminPage.tsx`（`role=admin` 导航门禁）
-- [x] 用户表格 + 禁用/启用
+- [x] 用户表格 + 禁用/启用 + email 搜索 + 分页
 - [x] 基础统计
+- [x] `#/admin/audit` 审计只读页（`AdminAuditPage`）
 - [~] 全局 Skill 浏览（API 有，**UI 未单独展示 skill 列表**）
-- [x] 路由 `#/admin`
+- [x] 路由 `#/admin` / `#/admin/audit`
 
 ### 5.3 种子数据
 
@@ -401,7 +405,7 @@ flowchart TD
 - [~] 安全 review — 基础实践已遵循（HttpOnly cookie、sandbox、KeyVault）；**无正式 checklist 签署**
 - [~] 密钥轮换文档 — `platform-saas.md` 提及 `HERMES_WEB_KEY_VAULT_SECRET`
 - [ ] 依赖审计（`uv lock` / supply-chain）
-- [ ] HTTPS + `PLATFORM_COOKIE_SECURE=true` 生产验证
+- [x] HTTPS + `PLATFORM_COOKIE_SECURE=true` 生产验证 — `scripts/verify-https-cookies.sh` + `test_cookie_secure.py` + DEPLOY §9
 - [ ] 非 loopback 绑定测试
 
 ### 6.2 可靠性
@@ -489,7 +493,7 @@ flowchart TD
 
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
-| ★★★ | **Markdown 代码块高亮 + 复制** | 已有安全 Markdown 渲染；尚未接入高亮与代码块复制 |
+| ★★★ | ~~**Markdown 代码块高亮 + 复制**~~ | `MarkdownContent` + hljs + 「复制代码」 |
 | ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
 | ★★☆ | ~~**用量 / 配额展示**~~ | Settings → API 密钥：new-api `usage` + logs（已完成） |
 | ★★☆ | ~~**Composer 拖拽/粘贴上传**~~ | Composer：`onDrop` / `onPaste` → 现有 `uploads.create` |
@@ -497,7 +501,7 @@ flowchart TD
 | ★★☆ | **修改密码** | Auth 仅注册/登录；需 platform API + Settings UI |
 | ★☆☆ | ~~**模型选择器**~~ | Composer 已提供可搜索模型下拉，并支持常用模型筛选 |
 
-- [ ] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
+- [x] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
 - [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
 - [x] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
@@ -512,8 +516,8 @@ flowchart TD
 | ★★☆ | ~~**用量 / 配额展示**~~ | 已迁至 P1「API 密钥」Tab（`/api/v1/billing/*`） |
 | ★★☆ | ~~**知识库试搜索**~~ | 文件页「试搜」对话框调用 `knowledge/search` |
 | ★★☆ | **Skill 详情预览** | 仅开关列表；无法浏览 SKILL 摘要/说明 |
-| ★★☆ | **Admin 分页 + 用户搜索** | 用户增多后表格不可用；API 未分页 |
-| ★☆☆ | **Admin 审计日志 UI** | `audit_logs` 已写库，前端无查看 |
+| ★★☆ | ~~**Admin 分页 + 用户搜索**~~ | `AdminPage` + `GET /admin/users?limit&offset&email` |
+| ★☆☆ | ~~**Admin 审计日志 UI**~~ | `#/admin/audit` + `GET /admin/audit` |
 | ★☆☆ | **Admin 全局 Skill 浏览** | API `GET /admin/skills` 已有；UI 未展示 |
 
 - [x] Settings：用量卡片（余额 / 日志，代理 new-api）
@@ -522,8 +526,8 @@ flowchart TD
 - [x] App：顶栏固定，主内容区独立滚动
 - [x] `SkillsPage`：技能库分区 + 安装到 workspace + 侧栏预览 SKILL.md
 - [ ] Admin：全局 Skill 浏览（可与 Skills catalog 共用扫描逻辑）
-- [ ] `AdminPage`：email 过滤、分页控件；后端补 `limit/offset` 若需要
-- [ ] `AdminPage`：`#/admin/audit` 只读表格（时间、操作、目标）
+- [x] `AdminPage`：email 过滤、分页控件；后端 `limit/offset/email`
+- [x] `AdminPage`：`#/admin/audit` 只读表格（时间、操作、目标）
 - [ ] `AdminPage`：全局 Skill 只读列表（调用 `platform.adminSkills()`）
 
 ### P3 — 体验抛光
@@ -531,10 +535,10 @@ flowchart TD
 - [x] 全局 Sonner Toast 基础设施与关键操作非阻塞提示
 - [ ] `MemoryPage`：Markdown 预览分栏（编辑 | 预览）
 - [~] `FilesPage`：已有上传百分比进度；拖拽上传区待补
-- [ ] 键盘快捷键面板（`?`）：发送、新建对话、聚焦输入框
+- [x] 键盘快捷键面板（`?`）：发送、新建对话、聚焦输入框
 - [ ] 账户：修改邮箱、注销账号（需 API + 合规文案）
-- [ ] 无障碍：焦点陷阱、跳过导航、`aria-live` 流式区域
-- [ ] 更新 `web-chat/README.md`（移除不存在的 `QuotaBadge` 描述，对齐实际页面树）
+- [x] 无障碍：焦点陷阱、跳过导航、`aria-live` 流式区域
+- [x] 更新 `web-chat/README.md`（移除不存在的 `QuotaBadge` 描述，对齐实际页面树）
 
 ### 已有能力（无需重复立项）
 
@@ -576,7 +580,7 @@ flowchart TD
 - [ ] 每用户多 Workspace / 团队空间
 - [ ] Hermes `state.db` 迁 PostgreSQL
 - [ ] 推送式多浏览器同步（per-user SSE event-bus）
-- [ ] 忘记密码邮件流
+- [x] 忘记密码邮件流（`POST /auth/forgot-password` + `/auth/reset-password` + AuthPage）
 
 ### Q3 — 平台化
 
@@ -614,6 +618,8 @@ flowchart TD
 | GET | `/auth/me` | 1 | [x] |
 | PATCH | `/auth/me` | 1 | [x] 资料 / 头像 |
 | POST | `/auth/change-password` | 1 | [x] |
+| POST | `/auth/forgot-password` | 1 | [x] |
+| POST | `/auth/reset-password` | 1 | [x] |
 | GET | `/billing/usage`、`/billing/logs` | 1 | [x] |
 | GET | `/workspaces` | 1 | [x] |
 | GET | `/workspaces/{id}` | 1 | [x] |

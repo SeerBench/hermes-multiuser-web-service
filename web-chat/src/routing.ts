@@ -8,6 +8,8 @@ export type Route =
   | 'memory'
   | 'skills'
   | 'admin'
+  | 'admin-audit'
+  | 'reset-password'
 
 /** Top-level chrome tabs (settings lives in AccountMenu). */
 export type MainTab = 'chat' | 'workspace'
@@ -20,7 +22,9 @@ const ROUTES: Route[] = [
   'file-tags',
   'memory',
   'skills',
+  'admin-audit',
   'admin',
+  'reset-password',
   'chat',
 ]
 
@@ -28,14 +32,38 @@ const ROUTES: Route[] = [
 const WORKSPACE_TABS: WorkspaceTab[] = ['files', 'skills', 'memory']
 const LAST_WS_KEY = 'hermes_last_workspace_tab'
 
+/** Strip query string from a hash path (`reset-password?token=…` → path). */
+function hashPath(hash: string): string {
+  const raw = hash.replace(/^#\/?/, '')
+  return raw.split('?')[0] ?? ''
+}
+
 /** Parse ``#/chat``-style hash into a canonical route name. */
 export function parseRoute(hash: string): Route {
+  const path = hashPath(hash)
+  // Nested admin audit uses slash form in the URL (`#/admin/audit`).
+  if (path === 'admin/audit') return 'admin-audit'
+  return ROUTES.find((r) => path === r) ?? 'chat'
+}
+
+/** Read ``token`` from ``#/reset-password?token=…``. */
+export function parseResetToken(hash: string): string | null {
   const raw = hash.replace(/^#\/?/, '')
-  return ROUTES.find((r) => raw === r) ?? 'chat'
+  const path = raw.split('?')[0] ?? ''
+  if (path !== 'reset-password') return null
+  const q = raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''
+  const token = new URLSearchParams(q).get('token')
+  return token?.trim() || null
 }
 
 export function routeHref(route: Route): string {
+  if (route === 'admin-audit') return '#/admin/audit'
   return `#/${route}`
+}
+
+/** Admin console routes (users list + audit log). */
+export function isAdminRoute(route: Route): boolean {
+  return route === 'admin' || route === 'admin-audit'
 }
 
 export function isWorkspaceRoute(route: Route): boolean {

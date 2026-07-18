@@ -12,6 +12,30 @@ export type PlatformUser = {
   last_seen_at?: number
 }
 
+export type AdminUsersPage = {
+  users: PlatformUser[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type AdminAuditEntry = {
+  id: string
+  actor_id?: string | null
+  action: string
+  target_type?: string | null
+  target_id?: string | null
+  metadata?: Record<string, unknown>
+  created_at: number
+}
+
+export type AdminAuditPage = {
+  items: AdminAuditEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export type Workspace = {
   id: string
   tenant_id: string
@@ -236,6 +260,18 @@ export const platform = {
     platformRequest<{ status: string }>('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({ current_password, new_password }),
+    }),
+
+  forgotPassword: (email: string) =>
+    platformRequest<{ status: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, new_password: string) =>
+    platformRequest<{ status: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password }),
     }),
 
   bindKey: (api_key: string) =>
@@ -498,7 +534,32 @@ export const platform = {
     return res
   },
 
-  adminUsers: () => platformRequest<PlatformUser[]>('/admin/users'),
+  adminUsers: (opts: { limit?: number; offset?: number; email?: string } = {}) => {
+    const params = new URLSearchParams()
+    if (opts.limit != null) params.set('limit', String(opts.limit))
+    if (opts.offset != null) params.set('offset', String(opts.offset))
+    if (opts.email) params.set('email', opts.email)
+    const q = params.toString()
+    return platformRequest<AdminUsersPage>(
+      `/admin/users${q ? `?${q}` : ''}`,
+    )
+  },
+
+  adminPatchUser: (userId: string, status: 'active' | 'disabled') =>
+    platformRequest<PlatformUser>(`/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+
+  adminAuditLogs: (opts: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (opts.limit != null) params.set('limit', String(opts.limit))
+    if (opts.offset != null) params.set('offset', String(opts.offset))
+    const q = params.toString()
+    return platformRequest<AdminAuditPage>(
+      `/admin/audit${q ? `?${q}` : ''}`,
+    )
+  },
 
   adminStats: () =>
     platformRequest<{ users: number; files: number; chunks: number }>(

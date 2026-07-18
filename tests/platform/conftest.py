@@ -33,11 +33,15 @@ def platform_env(tmp_path, monkeypatch):
     from platform_api.services.rate_limit import reset_login_rate_limiter_for_tests
 
     reset_login_rate_limiter_for_tests()
+    from platform_api.services.mail import reset_mailer_for_tests
+
+    reset_mailer_for_tests()
     yield db_path
     deps.get_settings.cache_clear()
     deps.get_store.cache_clear()
     deps.get_vault.cache_clear()
     reset_login_rate_limiter_for_tests()
+    reset_mailer_for_tests()
 
 
 @pytest.fixture()

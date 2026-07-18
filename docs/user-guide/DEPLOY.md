@@ -243,6 +243,16 @@ UPSTREAM_PROVISIONER=manual
 PLATFORM_COOKIE_TTL_SECONDS=604800
 PLATFORM_COOKIE_SECURE=true
 
+# 忘记密码邮件：公网 SPA 根地址（重置链接用）
+PLATFORM_PUBLIC_BASE_URL=https://hermes.example.com
+# 未配置 SMTP 时，重置链接会打到 platform-api WARNING 日志（仅适合演练）
+# PLATFORM_SMTP_HOST=smtp.example.com
+# PLATFORM_SMTP_PORT=587
+# PLATFORM_SMTP_USER=noreply@example.com
+# PLATFORM_SMTP_PASSWORD=replace-me
+# PLATFORM_MAIL_FROM=Hermes <noreply@example.com>
+# PLATFORM_RESET_TOKEN_TTL_SECONDS=3600
+
 # 可选：RAG embedding；留空时退化为离线关键词检索
 # EMBEDDING_API_BASE_URL=https://api.openai.com/v1
 # EMBEDDING_API_KEY=replace-me
@@ -260,6 +270,8 @@ sudo chown hermes:hermes /home/hermes/.hermes/.env
 - `NEW_API_BASE_URL` 可带或不带末尾 `/v1`，代码会规范化；推荐填写根地址。
 - `manual`：注册后用户在设置页绑定自己的 key。
 - `auto`：平台通过 `NEW_API_ADMIN_TOKEN` 为新用户自动创建 new-api key。
+- 忘记密码：配置 `PLATFORM_PUBLIC_BASE_URL` + `PLATFORM_SMTP_*` 后，用户可在登录页
+  自助重置；邮件内链接为 `{PUBLIC_BASE_URL}/#/reset-password?token=…`。
 - 不要把 `.env`、Admin Token 或 `web_users_master.key` 提交到 Git 或发到日志。
 
 ### 5.2 配置 web_chat gateway
@@ -514,6 +526,16 @@ curl -fsS https://hermes.example.com/api/v1/healthz
 浏览器登录后，在开发者工具中确认 `hermes_session` Cookie 带有 `Secure` 和
 `HttpOnly`。若仍通过纯 HTTP 访问，`PLATFORM_COOKIE_SECURE=true` 的 Cookie
 不会发送，这是正确的安全行为。
+
+生产验收脚本（会注册一个临时探针账号，可在 Admin 中禁用）：
+
+```bash
+./scripts/verify-https-cookies.sh https://hermes.example.com
+```
+
+脚本断言：`https://`、双端 `healthz`、注册响应的 `Set-Cookie` 含
+`hermes_session` + `Secure` + `HttpOnly`。本地单测见
+`tests/platform/test_cookie_secure.py`。
 
 ## 10. 上线验收
 
@@ -797,6 +819,7 @@ sudo systemctl reload nginx
 - [ ] platform-api 和 gateway 只绑定 loopback。
 - [ ] nginx 已启用 TLS，Certbot 自动续期正常。
 - [ ] `PLATFORM_COOKIE_SECURE=true` 且 gateway `cookie_secure: true`。
+- [ ] 跑通 `./scripts/verify-https-cookies.sh https://你的域名`。
 - [ ] `allow_insecure_bind: false`。
 - [ ] `.env`、`config.yaml`、infra `.env` 权限为 600。
 - [ ] new-api Admin Token 和 `web_users_master.key` 未进入 Git/日志。

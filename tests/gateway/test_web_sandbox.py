@@ -214,3 +214,31 @@ async def test_concurrent_asyncio_tasks_have_independent_contexts(hermes_home):
     assert seen["u_bob"].name == "u_bob"
     # Parent task sees neither workspace.
     assert get_user_workspace() is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_dont_swap_user_contexts(hermes_home):
+    """UUID-style user ids must not swap ContextVars under concurrent load.
+
+    Named to match the TODOLIST / test-first checklist contract. Same
+    ContextVar semantics as the ``u_*`` case above, but with platform
+    register-shaped identifiers.
+    """
+    del hermes_home  # fixture only redirects HERMES_HOME
+    alice = "550e8400-e29b-41d4-a716-446655440000"
+    bob = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    barrier = asyncio.Barrier(2)
+    seen: dict[str, Path] = {}
+
+    async def user_task(user_id: str) -> None:
+        with enter_user_context(user_id) as ws:
+            seen[user_id] = ws
+            await barrier.wait()
+            # Peer has entered its own context; ours must be unchanged.
+            assert get_user_workspace() == ws
+            assert get_hermes_home() == ws
+            assert ws.name == user_id
+
+    await asyncio.gather(user_task(alice), user_task(bob))
+    assert seen[alice] != seen[bob]
+    assert get_user_workspace() is None

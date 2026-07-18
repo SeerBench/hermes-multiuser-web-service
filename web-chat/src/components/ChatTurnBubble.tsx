@@ -53,6 +53,14 @@ export function ChatTurnBubble({
         className={
           isUser ? 'max-w-[min(100%,42rem)]' : 'turn-assistant-content'
         }
+        {...(!isUser
+          ? {
+              // Streamed assistant tokens are announced politely for AT users.
+              'aria-live': 'polite' as const,
+              'aria-busy': turn.status === 'streaming',
+              'aria-relevant': 'additions text' as const,
+            }
+          : {})}
       >
         <MessageHeader>
           {isUser ? t('chat.role.user') : t('chat.role.assistant')}

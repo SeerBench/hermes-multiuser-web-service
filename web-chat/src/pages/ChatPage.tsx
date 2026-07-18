@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   ApiError,
   auth,
@@ -63,6 +63,8 @@ import {
 } from '../layoutWidthStorage'
 import { consumeFilesForChat } from '../attachBridge'
 import { ChatEmptyGuide } from '../components/ChatEmptyGuide'
+import { ShortcutsHelpDialog } from '../components/ShortcutsHelpDialog'
+import { handleGlobalChatHotkey } from '../chatHotkeys'
 import {
   filterModelsByFavorites,
   PREFERENCES_UPDATED_EVENT,
@@ -917,7 +919,7 @@ export function ChatPage({
     [input, streaming, uploading, pending, runMessage, dispatchSlash, revokePreview],
   )
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showPopover && (e.key === 'ArrowDown' || e.key === 'ArrowUp' ||
         e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape')) {
       // Popover's own window listener handles these — don't compete.
@@ -1003,8 +1005,32 @@ export function ChatPage({
     closeSidebar()
   }
 
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+
+  // `?` / `n` / `/` when focus is outside editable fields.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      handleGlobalChatHotkey(e, { openHelp: () => setShortcutsOpen(true) })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    const onNew = () => {
+      startNewConversation()
+      setSideOpen(false)
+    }
+    window.addEventListener('hermes:new-chat', onNew)
+    return () => window.removeEventListener('hermes:new-chat', onNew)
+  }, [startNewConversation])
+
   return (
     <div className="chat-page">
+      <ShortcutsHelpDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
       {sideOpen && (
         <button
           type="button"

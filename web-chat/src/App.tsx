@@ -9,6 +9,7 @@ import { FileTagsPage } from './pages/FileTagsPage'
 import { MemoryPage } from './pages/MemoryPage'
 import { SkillsPage } from './pages/SkillsPage'
 import { AdminPage } from './pages/AdminPage'
+import { AdminAuditPage } from './pages/AdminAuditPage'
 import { AccountMenu } from './components/AccountMenu'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PendingBindBanner } from './components/PendingBindBanner'
@@ -23,8 +24,10 @@ import {
   type PlatformUser,
 } from './platformClient'
 import {
+  isAdminRoute,
   isWorkspaceRoute,
   mainTabFromRoute,
+  parseResetToken,
   parseRoute,
   routeHref,
   workspaceEntryRoute,
@@ -181,6 +184,9 @@ function AppShell() {
 
   return (
     <div className={cn('app', route === 'settings' && 'app--settings-open')}>
+      <a className="skip-nav" href="#main-content">
+        {t('a11y.skipNav')}
+      </a>
       {showChrome && user && (
         <header className="app-header">
           <div className="app-brand">
@@ -221,7 +227,7 @@ function AppShell() {
             {user.role === 'admin' && (
               <Button
                 type="button"
-                variant={route === 'admin' ? 'secondary' : 'ghost'}
+                variant={isAdminRoute(route) ? 'secondary' : 'ghost'}
                 size="sm"
                 onClick={() => goto('admin')}
               >
@@ -240,11 +246,19 @@ function AppShell() {
       {needsBindKey && (
         <PendingBindBanner onGoSettings={() => goto('settings')} />
       )}
-      <main className="app-main">
+      <main id="main-content" className="app-main" tabIndex={-1}>
         {authLoading ? (
           <p className="page-hint">{t('common.loading')}</p>
         ) : showAuthGate ? (
           <AuthPage
+            initialMode={
+              route === 'reset-password' ? 'reset' : 'login'
+            }
+            resetToken={
+              route === 'reset-password'
+                ? parseResetToken(window.location.hash)
+                : null
+            }
             onSuccess={(u, opts) => {
               if (opts?.registered) resetOnboarding(u.user_id)
               enterApp(u)
@@ -285,6 +299,9 @@ function AppShell() {
                 </WorkspaceShell>
               )}
               {pageRoute === 'admin' && <AdminPage key={`admin-${pageKey}`} />}
+              {pageRoute === 'admin-audit' && (
+                <AdminAuditPage key={`admin-audit-${pageKey}`} />
+              )}
             </div>
             <SettingsPage
               key={`settings-${pageKey}`}
