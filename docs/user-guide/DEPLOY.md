@@ -404,9 +404,14 @@ sudo journalctl -u hermes-gateway -f
 本机健康检查：
 
 ```bash
-curl -fsS http://127.0.0.1:8700/api/v1/healthz
+curl -fsS http://127.0.0.1:8700/api/v1/healthz | jq .
 curl -fsS http://127.0.0.1:8643/api/healthz
 ```
+
+Platform `/api/v1/healthz` 会探测 **database**（必选）、**redis**（仅当设置了
+`REDIS_URL`）、**object_store**（未配置 MinIO 时为 `local`；已配置则 `head_bucket`）。
+任一项失败时 HTTP **503** 且 `status: "degraded"`；全部正常为 **200** /
+`status: "ok"`。Gateway `/api/healthz` 仍为轻量存活探针。
 
 如果 gateway 日志反复出现：
 
@@ -826,7 +831,28 @@ sudo systemctl reload nginx
 - 检查 platform-api ingestion 日志；
 - 确认两个应用连接同一个 PostgreSQL。
 
-## 16. 安全检查清单
+## 16. 压测（10 VU 基线）
+
+上线前用 k6 跑一轮 **10 虚拟用户** 基线（注册/登录、healthz、workspaces/files、
+gateway `/me`；**不含**真实 LLM 聊天）。说明与阈值见：
+
+[`deploy/loadtest/README.md`](../../deploy/loadtest/README.md)
+
+```bash
+k6 run \
+  -e BASE_URL=https://你的域名 \
+  -e GATEWAY_URL=https://你的域名 \
+  -e EMAIL=load@example.com \
+  -e PASSWORD='...' \
+  -e SKIP_REGISTER=1 \
+  deploy/loadtest/k6-platform.js
+```
+
+50 并发正式压测（含聊天 SSE）仍属后续项，见 `TODOLIST.md` Phase 6.3。
+
+## 17. 安全检查清单
+
+正式签署版 checklist 见 **[SECURITY_REVIEW.md](SECURITY_REVIEW.md)**（Cookie、越权、密钥、依赖审计）。运维速查：
 
 - [ ] 公网只开放 22、80、443。
 - [ ] PostgreSQL 只绑定 `127.0.0.1:5432`。
@@ -842,11 +868,14 @@ sudo systemctl reload nginx
 - [ ] 数据库、工作区、`web_users_master.key` 有异机加密备份。
 - [ ] 健康检查、磁盘和进程资源有告警。
 - [ ] 定期更新系统、Docker 镜像和应用依赖。
+- [ ] 已按 [SECURITY_REVIEW.md](SECURITY_REVIEW.md) 完成签署或明确 Waived 项。
 
-## 17. 相关文档
+## 18. 相关文档
 
 - [平台架构与认证](platform-saas.md)
+- [安全 Review Checklist](SECURITY_REVIEW.md)
 - [Web Chat 运维与更新](web-chat.md)
 - [平台人工验收](platform-manual-testing.zh-CN.md)
 - [部署目录说明](../../deploy/README.md)
+- [k6 压测基线](../../deploy/loadtest/README.md)
 

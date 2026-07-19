@@ -59,11 +59,14 @@ cd web-chat && npm run build
 
 ## 生产清单
 
+正式签署版见 **[SECURITY_REVIEW.md](SECURITY_REVIEW.md)**（Cookie、越权、密钥、依赖审计）。
+
 - [ ] TLS 终止（nginx）+ `PLATFORM_COOKIE_SECURE=true`
-- [ ] PostgreSQL 定期 `pg_dump` 备份
+- [ ] PostgreSQL 定期 `pg_dump` 备份（若使用 PG；SQLite 见 `scripts/backup-platform.sh`）
 - [ ] 归档 `web_workspaces/` 与 `state.db`
-- [ ] 监控 `/api/healthz` 与 `/api/v1/healthz`
-- [ ] 50 用户规模：单 gateway + 单 platform-api 进程通常足够
+- [ ] 监控 `/api/healthz` 与深度 `/api/v1/healthz`（`checks.database` / redis / object_store）
+- [ ] 10 VU k6 基线已跑通（[deploy/loadtest](../../deploy/loadtest/README.md)）；50 用户正式压测按需
+- [ ] 已完成或明确 Waived [SECURITY_REVIEW.md](SECURITY_REVIEW.md) 签署
 
 ## 测试
 

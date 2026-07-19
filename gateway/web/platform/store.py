@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -72,6 +72,11 @@ class PlatformStore:
 
     def close(self) -> None:
         self._engine.dispose()
+
+    def ping(self) -> None:
+        """Lightweight connectivity check for /healthz (raises on failure)."""
+        with self._session_factory() as db:
+            db.execute(text("SELECT 1"))
 
     # ── UserStore-compatible surface ───────────────────────────────────
 

@@ -8,19 +8,19 @@
 >
 > **规模目标**：50 用户；控制面默认 **SQLite**（可选 PostgreSQL）；**无 pgvector**（进程内 cosine）；Redis / MinIO 可选。
 
-**执行状态（2026-07-18）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 仍以文档和基础验证为主，压测、正式安全 review 与生产自动化待补。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
+**执行状态（2026-07-19）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 已补 **深度 healthz**、**k6 10 VU 基线**、**SECURITY_REVIEW checklist**；50 并发正式压测与 Compose CI 仍待。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
-| 0 基础设施 | **~95%** | Compose/nginx/Alembic/ORM；**Redis Worker + MinIO 抽象已接**；无 pgvector；深度 healthz 未做 |
+| 0 基础设施 | **~98%** | Compose/nginx/Alembic/ORM；**Redis Worker + MinIO 抽象已接**；无 pgvector；**深度 healthz 已做** |
 | 1 身份鉴权 | **~95%** | 注册/登录/bind-key/资料编辑/改密/双路径认证与 chat E2E 已有；进程内登录限流已做 |
 | 2 隔离加固 | **~95%** | UUID 贯穿 + 隔离 E2E；UUID 并发 ContextVar + Legacy→UUID 知识库越权已补测 |
 | 3 文件 RAG | **~98%** | Storage 抽象（local/MinIO）；Redis ingest + sync fallback；**进程内 cosine**（DocumentChunk + KnowledgeChunk） |
 | 4 Memory/Skill/Usage | **~98%** | Memory / Skill / **Usage Center** 已落地；`platform_settings` 运营配置、全量工具埋点待补 |
 | 5 Admin | **~95%** | 用户分页/email 过滤、审计只读 API+UI（`#/admin/audit`）；全局 Skill UI 仍待 |
-| 6 硬化上线 | **~70%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie 验收脚本已有；压测与正式安全 review 待补 |
+| 6 硬化上线 | **~85%** | DEPLOY、备份、update-platform、登录限流、HTTPS Cookie、**深度 healthz**、**k6 10 VU**、**SECURITY_REVIEW.md**；50 VU 正式压测 / 人工签署仍待 |
 
-**最近交付（2026-07-18）**：Knowledge Center（`#/knowledge` + `knowledge_*` 表 + Agent 检索切库）与 Usage Center（`#/usage` + `usage_records` + Gateway Tracker；与 new-api `/billing/*` 并存）。
+**最近交付（2026-07-19）**：`GET /api/v1/healthz` 探测 DB/Redis/MinIO；[`deploy/loadtest`](deploy/loadtest/README.md) k6 10 VU；[`SECURITY_REVIEW.md`](docs/user-guide/SECURITY_REVIEW.md)。（2026-07-18：Knowledge / Usage Center MVP。）
 
 **关键产物**
 
@@ -32,7 +32,7 @@
 | 前端 | `web-chat`：`FilesPage`、`KnowledgePage`、`SkillsPage`、`MemoryPage`、`UsagePage`、`AdminPage` |
 | Agent 工具 | `gateway/web/tools/sandboxed_*.py`；用量入口 `gateway/web/usage_tracker.py` |
 | 测试 | `tests/platform/`（含 `test_knowledge_center`、`test_usage_center`） |
-| 文档 | `docs/user-guide/platform-saas.md`、`docs/user-guide/DEPLOY.md`、`web-chat/README.md` |
+| 文档 | `docs/user-guide/platform-saas.md`、`DEPLOY.md`、`SECURITY_REVIEW.md`、`deploy/loadtest/`、`web-chat/README.md` |
 | 运维脚本 | `scripts/create_admin.py`、`scripts/backup-platform.sh`、`deploy/update-platform.sh` |
 
 **下一步优先（未做项）**
@@ -40,11 +40,13 @@
 1. ~~登录速率限制（Redis 计数器）~~ → **已做**：进程内滑动窗口（`platform_api/services/rate_limit.py`）；多机再接 Redis  
 2. ~~Redis 异步 Ingestion Worker + MinIO 对象存储接入~~ → **已做**（SQLite 路径；见 §3.1 / `object_store` / `queue` / `hermes-platform-worker`）  
 3. ~~pgvector cosine~~ → **改为不做 pgvector**；**已做**进程内 cosine + 关键词 fallback（见 §3.4）  
-4. ~~备份脚本、`update-web.sh` 扩展 platform-api~~ → `scripts/backup-platform.sh` + `deploy/update-platform.sh`；**50 用户压测仍待做**  
-5. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx` + CI `web-chat-verify.yml`
-6. ~~Memory / Skill / Knowledge / Usage Center MVP~~ → **已做**（见 §3.5b、§4.2b、§4.4b、§4.4c）
-7. Usage：全量工具自动埋点 / 硬配额（明确不做于 MVP）
-8. Knowledge Center 建库异步化（follow-up；当前仍同步）
+4. ~~备份脚本、`update-web.sh` 扩展 platform-api~~ → `scripts/backup-platform.sh` + `deploy/update-platform.sh`  
+5. ~~深度 healthz + 10 VU k6 + SECURITY_REVIEW checklist~~ → **已做**（§0.4 / §6.1–6.3）；**人工签署**与 **50 并发正式压测**仍待  
+6. ~~`web-chat` ChatPage 集成测试（mock API）~~ → `ChatPage.test.tsx` + CI `web-chat-verify.yml`
+7. ~~Memory / Skill / Knowledge / Usage Center MVP~~ → **已做**（见 §3.5b、§4.2b、§4.4b、§4.4c）
+8. Usage：全量工具自动埋点 / 硬配额（明确不做于 MVP）
+9. Knowledge Center 建库异步化（follow-up；当前仍同步）
+10. Admin 全局 Skill 浏览 UI（API 已有）
 
 **图例**：`[ ]` 待做 · `[~]` 进行中 / 部分完成 · `[x]` 完成 · `[-]` 明确不做（MVP 外）
 
@@ -153,7 +155,7 @@ flowchart TD
 
 ### 0.4 Platform API 健康检查
 
-- [~] `GET /api/v1/healthz` — 基础存活（**未探测** DB / Redis / MinIO）
+- [x] `GET /api/v1/healthz` — 深度探测 DB（必选）+ Redis（`REDIS_URL`）+ MinIO（`MINIO_*`）；失败 503 / `degraded`（`platform_api/services/health_checks.py` + `tests/platform/test_healthz.py`）
 - [x] OpenAPI 文档可访问（FastAPI 默认 `/docs`）
 - [ ] 结构化日志（request_id、user_id）
 
@@ -449,30 +451,31 @@ flowchart TD
 
 ### 6.1 安全
 
-- [~] 安全 review — 基础实践已遵循（HttpOnly cookie、sandbox、KeyVault）；**无正式 checklist 签署**
-- [~] 密钥轮换文档 — `platform-saas.md` 提及 `HERMES_WEB_KEY_VAULT_SECRET`
-- [ ] 依赖审计（`uv lock` / supply-chain）
-- [x] HTTPS + `PLATFORM_COOKIE_SECURE=true` 生产验证 — `scripts/verify-https-cookies.sh` + `test_cookie_secure.py` + DEPLOY §9
+- [x] 安全 review checklist — [`docs/user-guide/SECURITY_REVIEW.md`](docs/user-guide/SECURITY_REVIEW.md)（Cookie / 越权 / 密钥 / 依赖 / 网络）；**人工签署仍靠运维**
+- [~] 密钥轮换文档 — `platform-saas.md` + SECURITY_REVIEW §3 提及 `HERMES_WEB_KEY_VAULT_SECRET`
+- [~] 依赖审计（`uv lock` / supply-chain）— checklist 要求定期 `uv pip audit` / `npm audit`；**非自动 CI**
+- [x] HTTPS + `PLATFORM_COOKIE_SECURE=true` 生产验证 — `scripts/verify-https-cookies.sh` + `test_cookie_secure.py` + DEPLOY
 - [ ] 非 loopback 绑定测试
 
 ### 6.2 可靠性
 
 - [x] PostgreSQL / `web_workspaces` / `state.db` / key vault 备份 — `scripts/backup-platform.sh` + DEPLOY §12
-- [~] 健康检查 — 双服务 `/healthz` 存活探测（**无聚合面板**）
+- [x] 健康检查 — Gateway 存活 + Platform **深度** `/api/v1/healthz`（DB/Redis/MinIO）
 - [ ] 优雅停机（gateway drain）
 
 ### 6.3 性能
 
-- [ ] 压测：50 并发用户（locust / k6）
+- [x] 压测基线：10 VU k6（[`deploy/loadtest`](deploy/loadtest/README.md)；不含 LLM chat）
+- [ ] 压测：50 并发用户正式报告（含聊天 SSE）
 - [ ] 监控 SQLite WAL 延迟
-- [ ] pgvector 检索基准（1 万 chunk）
+- [ ] `[-]` pgvector 检索基准（不上 PG 扩展）
 
 ### 6.4 文档与部署
 
 - [x] `docs/user-guide/platform-saas.md`
 - [x] `deploy/update-platform.sh`（双服务更新；legacy 仍用 `update-web.sh`）
-- [x] `docs/user-guide/DEPLOY.md` 生产部署 / 更新 / 备份
-- [~] 生产 checklist — 见 `deploy/README.md` + `platform-saas.md` + `DEPLOY.md`
+- [x] `docs/user-guide/DEPLOY.md` 生产部署 / 更新 / 备份 / 压测节
+- [x] 生产 checklist — `SECURITY_REVIEW.md` + `deploy/README.md` + `platform-saas.md` + `DEPLOY.md`
 - [x] 更新 `README.zh-CN.md`
 
 ### 6.5 CI
@@ -658,7 +661,7 @@ flowchart TD
 
 | 方法 | 路径 | Phase | 状态 |
 |------|------|-------|------|
-| GET | `/healthz` | 0 | [~] 存活 only |
+| GET | `/healthz` | 0 | [x] 深度：DB + 可选 Redis/MinIO；失败 503 |
 | POST | `/auth/register` | 1 | [x] |
 | POST | `/auth/login` | 1 | [x] |
 | POST | `/auth/logout` | 1 | [x] |
@@ -743,7 +746,7 @@ flowchart TD
 | R3 | user_id UUID 迁移 | 新部署无负担 | [x] |
 | R4 | RAG 质量参差 | 关键词 MVP + 引用来源 | [~] |
 | R5 | Embedding 成本 | 可选 API + 离线回退 | [~] |
-| R6 | SQLite 并发瓶颈 | 未压测 | [ ] |
+| R6 | SQLite 并发瓶颈 | 10 VU k6 基线脚本已交付；50 VU 正式报告未做 | [~] |
 | R7 | ContextVar 跨租户泄漏 | 并发测试保留 + **隔离 E2E** | [~] 已缓解 |
 | R8 | 双 API 前端路由混乱 | nginx + `platformClient.ts` + Vite 双代理 | [x] |
 
@@ -776,3 +779,4 @@ flowchart TD
 | 2026-07-16 | 完整验证：Platform 57 + Gateway/SessionDB 291 + Web Chat 164 cases 全绿，typecheck/build 通过；README 中文版改为 Platform SaaS 主路径 |
 | 2026-07-18 | **Knowledge Center MVP**：`knowledge_*` 表、`/knowledge-bases*`、`#/knowledge`；Agent `web_knowledge_search` 改搜 `knowledge_chunks` |
 | 2026-07-18 | **Usage Center MVP**：`usage_records`、`/usage/*`、`usage_tracker`、`#/usage`；chat/skill/knowledge 埋点；与 new-api billing 并存 |
+| 2026-07-19 | **Phase 6 硬化切片**：深度 `/api/v1/healthz`；`deploy/loadtest` k6 10 VU；`SECURITY_REVIEW.md` 可签署 checklist |

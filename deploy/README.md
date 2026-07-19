@@ -50,6 +50,7 @@ cd web-chat && npm ci && npm run build
 
 ## 监控建议
 
-- `/api/healthz`（gateway）与 `/api/v1/healthz`（platform）做存活探测
+- `/api/healthz`（gateway，轻量存活）与 `/api/v1/healthz`（platform，**深度**：DB / 可选 Redis / 可选 MinIO；失败 503）
 - 关注 gateway 日志 `hermes.gateway.web_chat` 与 `hermes.web.platform.store`
-- 50 用户规模：单进程 gateway + 单 platform-api 足够；压测后再水平扩展
+- 10 VU 基线：[`deploy/loadtest/README.md`](loadtest/README.md)；上线签署：[`docs/user-guide/SECURITY_REVIEW.md`](../docs/user-guide/SECURITY_REVIEW.md)
+- 50 用户规模：单进程 gateway + 单 platform-api 通常足够；正式压测后再水平扩展
