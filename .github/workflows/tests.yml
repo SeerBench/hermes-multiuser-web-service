@@ -63,7 +63,10 @@ jobs:
         run: |
           uv venv .venv --python 3.11
           source .venv/bin/activate
-          uv pip install -e ".[all,dev]"
+          # Fork: `,platform` added so tests/platform/* (SaaS control plane,
+          # sqlalchemy et al.) import in CI.  The extra is fork-only, so this
+          # line is a named Strategy-2 patch — see CLAUDE.md.
+          uv pip install -e ".[all,dev,platform]"
 
       - name: Run tests (slice ${{ matrix.slice }}/6)
         # Per-file isolation via scripts/run_tests_parallel.py: discovers

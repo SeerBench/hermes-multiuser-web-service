@@ -95,6 +95,13 @@ backward-compatible — these are the named patches the rebase loop has to resol
   `http-fetch` provider from the registry snapshot.  The upstream expected
   list (`brave-free`…`xai`) is left byte-identical, so upstream edits to that
   list never conflict with this filter on rebase.
+- `.github/workflows/tests.yml` — the test job's install line adds the
+  fork-only `platform` extra (`.[all,dev]` → `.[all,dev,platform]`) so
+  `tests/platform/*` (SaaS control plane; sqlalchemy et al.) import in CI.
+  The extra deliberately stays out of pyproject's `[all]` — it contains
+  opt-in backends (redis, boto3) that `[all]`'s lazy-install policy
+  excludes.  The e2e job's install line is untouched (no platform_api
+  imports there).
 
 **Upstream sync workflow**: `git fetch upstream && git rebase upstream/main`.
 If a conflict lands in one of the named patches above, resolve it by hand
