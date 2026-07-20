@@ -59,7 +59,10 @@ backward-compatible — these are the named patches the rebase loop has to resol
 - `gateway/config.py` — `Platform.WEB_CHAT = "web_chat"` in the enum plus
   one validator entry.
 - `hermes_cli/platforms.py` — one `PlatformInfo` registration line.
-- `toolsets.py` — `hermes-web-chat` toolset definition.
+- `toolsets.py` — `hermes-web-chat` toolset definition, plus its name
+  appended to the upstream `hermes-gateway` union toolset's `includes`
+  (required by upstream's platform↔toolset consistency test once the
+  `web_chat` platform is registered in `hermes_cli/platforms.py`).
 - `hermes_state.py` — `user_id` parameter added to `list_sessions_rich` and
   `search_messages` (purely additive — default `None` preserves old behavior).
 - `pyproject.toml` — `[web-chat]` extra (cryptography + ddgs).
