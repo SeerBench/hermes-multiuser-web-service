@@ -1,0 +1,140 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* shadcn/ui theme tokens — mapped to Hermes web-chat palette */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  /* Responsive breakpoints (shared with JS via matchMedia) */
+  --bp-mobile: 768px;
+  --bp-desktop: 1024px;
+  /* Align with legacy styles.css dark defaults */
+  --radius: 0.625rem;
+  --background: #0f1014;
+  --foreground: #e6e9f0;
+  --card: #161922;
+  --card-foreground: #e6e9f0;
+  --popover: #161922;
+  --popover-foreground: #e6e9f0;
+  --primary: #7c9eff;
+  --primary-foreground: #0f1014;
+  --secondary: #1d2130;
+  --secondary-foreground: #e6e9f0;
+  --muted: #1d2130;
+  --muted-foreground: #9097a6;
+  --accent: #1d2130;
+  --accent-foreground: #e6e9f0;
+  --destructive: #ff7a82;
+  --border: #2a2f3e;
+  --input: #2a2f3e;
+  --ring: #7c9eff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    --background: #fbfbfd;
+    --foreground: #1a1c22;
+    --card: #ffffff;
+    --card-foreground: #1a1c22;
+    --popover: #ffffff;
+    --popover-foreground: #1a1c22;
+    --primary: #3858d3;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f3f7;
+    --secondary-foreground: #1a1c22;
+    --muted: #f1f3f7;
+    --muted-foreground: #5a6071;
+    --accent: #f1f3f7;
+    --accent-foreground: #1a1c22;
+    --destructive: #c43b46;
+    --border: #d6d9e0;
+    --input: #d6d9e0;
+    --ring: #3858d3;
+  }
+}
+
+/* Forced dark (Settings → Dark), overrides system light */
+.dark {
+  --background: #0f1014;
+  --foreground: #e6e9f0;
+  --card: #161922;
+  --card-foreground: #e6e9f0;
+  --popover: #161922;
+  --popover-foreground: #e6e9f0;
+  --primary: #7c9eff;
+  --primary-foreground: #0f1014;
+  --secondary: #1d2130;
+  --secondary-foreground: #e6e9f0;
+  --muted: #1d2130;
+  --muted-foreground: #9097a6;
+  --accent: #1d2130;
+  --accent-foreground: #e6e9f0;
+  --destructive: #ff7a82;
+  --border: #2a2f3e;
+  --input: #2a2f3e;
+  --ring: #7c9eff;
+}
+
+/* Forced light (Settings → Light), overrides system dark */
+.light {
+  --background: #fbfbfd;
+  --foreground: #1a1c22;
+  --card: #ffffff;
+  --card-foreground: #1a1c22;
+  --popover: #ffffff;
+  --popover-foreground: #1a1c22;
+  --primary: #3858d3;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f3f7;
+  --secondary-foreground: #1a1c22;
+  --muted: #f1f3f7;
+  --muted-foreground: #5a6071;
+  --accent: #f1f3f7;
+  --accent-foreground: #1a1c22;
+  --destructive: #c43b46;
+  --border: #d6d9e0;
+  --input: #d6d9e0;
+  --ring: #3858d3;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    @apply h-full m-0 p-0 bg-background text-foreground antialiased;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}

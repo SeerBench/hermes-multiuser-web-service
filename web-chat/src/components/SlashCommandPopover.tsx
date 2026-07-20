@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CommandSpec } from '../api'
 import { useLocale, useT } from '../i18n'
+import { filterSlashCommands } from '../slashCommands'
 
 type Props = {
   query: string
@@ -22,16 +23,10 @@ export function SlashCommandPopover({ query, commands, onSelect, onClose }: Prop
   const { locale } = useLocale()
   const [activeIndex, setActiveIndex] = useState(0)
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return commands
-    return commands.filter((c) => {
-      if (c.name.toLowerCase().includes(q)) return true
-      if (c.aliases.some((a) => a.toLowerCase().includes(q))) return true
-      const desc = c.description_i18n?.[locale] ?? c.description
-      return desc.toLowerCase().includes(q)
-    })
-  }, [commands, query, locale])
+  const matches = useMemo(
+    () => filterSlashCommands(query, commands, locale),
+    [commands, query, locale],
+  )
 
   // Reset active selection when matches change.
   useEffect(() => {

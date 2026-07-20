@@ -1,0 +1,20 @@
+# Hermes Multi-User AI SaaS Platform
+
+Cursor rules are split into `.cursor/rules/*.mdc` for scoped application.
+
+| File | Scope |
+|------|-------|
+| `00-project-overview.mdc` | Always — docs map, commands, submit checklist |
+| `01-test-first.mdc` | Always — **tests first; failing tests block acceptance** |
+| `02-architecture-sidecar.mdc` | Always — Platform API + Agent Gateway + Hermes |
+| `03-strategy2-hermes-boundaries.mdc` | Always — upstream no-touch zones, code placement |
+| `04-multi-tenant-isolation.mdc` | `gateway/web/**`, `web_chat.py` |
+| `05-auth-dual-path.mdc` | `platform-api/**`, auth UI |
+| `06-agent-toolset.mdc` | `gateway/web/tools/**`, `toolsets.py` |
+| `07-platform-api.mdc` | `platform-api/**`, `deploy/**` |
+| `08-web-chat-spa.mdc` | `web-chat/**` |
+
+Implementation checklist: `TODOLIST.md`  
+Architecture plan: `.cursor/plans/ai_saas_platform_plan_d3c7e048.plan.md`
+
+**TEST-FIRST (summary):** All new features MUST start from tests. Code that does not pass tests is NOT accepted. Use `scripts/run_tests.sh`.

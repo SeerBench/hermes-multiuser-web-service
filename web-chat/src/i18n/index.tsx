@@ -38,7 +38,7 @@ type LocaleContextValue = {
 
 const LocaleContext = createContext<LocaleContextValue | null>(null)
 
-function interpolate(template: string, vars?: Vars): string {
+export function interpolate(template: string, vars?: Vars): string {
   if (!vars) return template
   return template.replace(/\{(\w+)\}/g, (_, name: string) => {
     const v = vars[name]
@@ -46,7 +46,7 @@ function interpolate(template: string, vars?: Vars): string {
   })
 }
 
-function translate(locale: Locale, key: string, vars?: Vars): string {
+export function translate(locale: Locale, key: string, vars?: Vars): string {
   const dict = DICTIONARIES[locale]
   const fallback = DICTIONARIES.en
   const raw = dict[key] ?? fallback[key] ?? key

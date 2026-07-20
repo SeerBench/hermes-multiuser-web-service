@@ -1,0 +1,36 @@
+---
+description: Auth dual path — platform register primary, legacy API key + bind-key fallback
+globs: platform-api/**,gateway/web/auth.py,gateway/web/users.py,gateway/web/upstream_key.py,web-chat/src/**/*Auth*,web-chat/src/**/*Key*
+alwaysApply: false
+---
+
+# AUTH — DUAL PATH + HYBRID FALLBACK
+
+Do **not** remove legacy key login when adding platform register.
+
+| Path | Entry | Use case |
+|------|-------|----------|
+| **Primary** | `POST /api/v1/auth/register`, `AuthPage` | Normal end users |
+| **Legacy** | `POST /api/auth/login {api_key}`, `KeyPromptModal` (collapsed) | Ops, staging, Admin API down |
+| **Hybrid** | `POST /api/v1/auth/bind-key` | `upstream_status=pending_bind` after register |
+
+## Shared session
+
+PostgreSQL `platform_sessions` — **both** Platform API and Agent Gateway read the same table/cookie.
+
+## UpstreamProvisioner
+
+- `AutoProvisioner` — new-api Admin API (primary)
+- `ManualProvisioner` — register succeeds, key bound later (fallback)
+- Env: `UPSTREAM_PROVISIONER=auto|manual`
+
+## User states
+
+- `upstream_status=ready` — auto key provisioned; chat allowed
+- `upstream_status=pending_bind` — block chat until `bind-key`; show Settings/BindKey UI
+
+## Rules
+
+- Platform UUID is identity; upstream key is rotatable LLM credential only.
+- Legacy `derive_user_id(api_key)` — internal/staging only; not primary path.
+- Encrypt keys at rest (`KeyVault` / Fernet); never log decrypted keys.

@@ -1,0 +1,29 @@
+---
+description: hermes-web-chat toolset whitelist — sandboxed tools only for web users
+globs: gateway/web/tools/**,toolsets.py
+alwaysApply: false
+---
+
+# AGENT TOOLSET (`hermes-web-chat`)
+
+## Expose to web users
+
+`web_search`, `web_extract`, `web_file_*`, `web_skill_*`, `memory`, `todo`, `session_search`, `vision_analyze`, `image_generate`, `web_knowledge_search` (when implemented).
+
+## NEVER expose
+
+`terminal`, `process`, `code_execution`, `browser_*`, `delegate_task`, upstream `skill_manage`, upstream `read_file`/`write_file`/`patch`/`search_files`.
+
+Use `web_file_*` wrappers instead.
+
+## Adding a new sandboxed tool
+
+1. Implement handler in `gateway/web/tools/` — call upstream public function after `confine_path`.
+2. Register schema in same file's `_REGISTRATIONS`.
+3. Import side-effect in `gateway/web/tools/__init__.py`.
+4. Add tool name to `hermes-web-chat` in `toolsets.py`.
+5. **Tests first** in `tests/gateway/test_web_sandboxed_*.py`.
+
+## Skill isolation note
+
+Do not expose upstream `skill_manage` — `SKILLS_DIR` is frozen at import time. Use `web_skill_*` only.

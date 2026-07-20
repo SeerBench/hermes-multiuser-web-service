@@ -1,0 +1,33 @@
+---
+description: Sidecar architecture — Platform API + Agent Gateway + Hermes runtime
+alwaysApply: true
+---
+
+# TARGET ARCHITECTURE (Sidecar)
+
+```
+Browser SPA (web-chat/)
+    → nginx
+        /api/v1/*     → Platform API (FastAPI) — auth, workspaces, files, RAG, admin
+        /api/chat*    → Agent Gateway (web_chat :8643) — SSE + Hermes runner
+        /             → SPA static assets
+```
+
+| Layer | Path | Responsibility |
+|-------|------|----------------|
+| **Platform Control Plane** | `platform-api/` | Register/login, workspaces, files, RAG, memory/skill APIs, admin |
+| **Agent Gateway** | `gateway/platforms/web_chat.py`, `gateway/web/` | SSE chat, conversations, uploads, `WebChatAgentRunner` |
+| **Hermes Runtime** | upstream (`run_agent.py`, tools) | Agent loop — **black box; no business coupling** |
+| **Data** | PG + pgvector, Redis, MinIO, `web_workspaces/<user_id>/` | Control-plane DB + per-user sandbox FS |
+
+**Scale:** ~50 users — simple operable stack over distributed complexity.
+
+**LLM billing:** Delegated to **new-api**. `UpstreamProvisioner` auto-provisions per-user keys on register.
+
+## MVP scope
+
+**In:** register/login, workspace, chat, file upload + RAG, memory/skill UI, admin basics, web search.
+
+**Out (unless explicitly approved):** OAuth/SSO, Stripe, multi-workspace, real-time push sync, OS sandbox, `delegate_task`, OCR, separate vector DB, Hermes core edits.
+
+Track progress in `TODOLIST.md`.

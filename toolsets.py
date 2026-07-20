@@ -370,9 +370,12 @@ TOOLSETS = {
             "``web_skills_list`` / ``web_skill_view`` expose a merged "
             "view of global operator-curated skills + the user's private "
             "skills (user version overlays global on name collision); "
-            "``web_skill_install`` / ``web_skill_delete`` only ever "
-            "touch the per-user ``<workspace>/skills/`` directory.  We "
-            "do **not** expose upstream ``skill_manage`` because "
+            "``web_skill_install`` / ``web_skill_delete`` / "
+            "``web_skill_edit`` / ``web_skill_patch`` only ever "
+            "touch the per-user ``<workspace>/skills/`` directory.  "
+            "Edit/patch of a global-only skill forks a private copy "
+            "first.  We do **not** expose upstream ``skill_manage`` "
+            "because "
             "``tools/skills_tool.py`` caches ``SKILLS_DIR`` at import "
             "time and would bleed across tenants — see "
             "docs/plans/2026-05-26-per-user-skill-isolation.md for the "
@@ -390,11 +393,10 @@ TOOLSETS = {
             # discovers them at runtime via ``web_skills_list``.
             "web_skills_list", "web_skill_view",
             "web_skill_install", "web_skill_delete",
-            # Planning + memory — both go through HERMES_HOME and are
-            # automatically scoped to the per-user workspace by the
-            # set_hermes_home_override contextvar set in
-            # gateway/web/sandbox.enter_user_context.
-            "todo", "memory",
+            "web_skill_edit", "web_skill_patch",
+            # Planning + memory — todo is HERMES_HOME-scoped; web_memory
+            # queues pending Memory Center rows (user must approve).
+            "todo", "web_memory",
             # Cross-session recall, filtered by user_id end-to-end:
             # tool_executor.py injects ``agent._user_id`` into the
             # session_search call, which threads it through to
@@ -406,6 +408,8 @@ TOOLSETS = {
             # workspace via gateway.web.sandbox.confine_path.
             "web_file_read", "web_file_write", "web_file_patch",
             "web_file_search",
+            # Knowledge base search (requires PLATFORM_DATABASE_URL).
+            "web_knowledge_search",
         ],
         "includes": []
     },

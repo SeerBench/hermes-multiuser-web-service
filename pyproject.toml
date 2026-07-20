@@ -192,6 +192,25 @@ web = ["fastapi==0.133.1", "uvicorn[standard]==0.41.0"]
 # zero-key search companion to be useful.  Pinned to keep the no-ranges
 # policy honest.
 web-chat = ["cryptography==46.0.7", "ddgs==9.14.4"]
+# Multi-user SaaS control plane (platform_api/ + gateway/web/platform/).
+platform = [
+  "fastapi==0.133.1",
+  "uvicorn[standard]==0.41.0",
+  "sqlalchemy>=2.0.36,<3",
+  "argon2-cffi==25.1.0",
+  "httpx>=0.28.1,<1",
+  "python-multipart>=0.0.9,<1",
+  "pydantic[email]>=2.10,<3",
+  "pypdf>=5.1,<6",
+  "python-docx>=1.1.2,<2",
+  "openpyxl>=3.1.5,<4",
+  "python-pptx>=1.0.2,<2",
+  "pyyaml>=6.0.2,<7",
+  "alembic>=1.14,<2",
+  # Optional async ingest (REDIS_URL) + MinIO/S3 object store (MINIO_*)
+  "redis>=5.2,<6",
+  "boto3>=1.35,<2",
+]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be lazy-installed via `tools/lazy_deps.py` — i.e. things every
@@ -231,6 +250,8 @@ all = [
 hermes = "hermes_cli.main:main"
 hermes-agent = "run_agent:main"
 hermes-acp = "acp_adapter.entry:main"
+hermes-platform-api = "platform_api.main:main"
+hermes-platform-worker = "platform_api.worker.main:main"
 
 [tool.setuptools]
 py-modules = ["run_agent", "model_tools", "toolsets", "batch_runner", "trajectory_compressor", "toolset_distributions", "cli", "hermes_bootstrap", "hermes_constants", "hermes_state", "hermes_time", "hermes_logging", "utils"]
@@ -245,7 +266,7 @@ plugins = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
+include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "gateway", "gateway.*", "platform_api", "platform_api.*", "tui_gateway", "tui_gateway.*", "cron", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

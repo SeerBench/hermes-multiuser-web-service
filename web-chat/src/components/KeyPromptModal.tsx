@@ -3,6 +3,18 @@ import type { FormEvent } from 'react'
 import { ApiError, auth } from '../api'
 import { useT } from '../i18n'
 import type { Translator } from '../i18n'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 type Props = {
   // Why the modal opened.  Drives the heading copy so the user knows
@@ -10,19 +22,20 @@ type Props = {
   reason: 'first-message' | 'session-expired'
   onSuccess: (userId: string) => void
   onCancel: () => void
+  /** When set, show a link back to email/account login. */
+  onSwitchToAccount?: () => void
 }
 
 /**
- * Modal that asks the user to paste their new-api key.  Shown on the
- * first message attempt (no cookie yet) or when the server returns 401
- * mid-session (cookie expired, master key rotated, etc.).
- *
- * On submit, calls POST /api/auth/login {api_key}.  The server probes
- * the upstream new-api gateway once with the key; only a 2xx upstream
- * response results in a session cookie.  Errors are mapped from the
- * server's `code` field into user-facing messages.
+ * Modal that asks the user to paste their new-api key.
+ * Shown on first message (no cookie) or when the server returns 401.
  */
-export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
+export function KeyPromptModal({
+  reason,
+  onSuccess,
+  onCancel,
+  onSwitchToAccount,
+}: Props) {
   const t = useT()
   const [apiKey, setApiKey] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -30,17 +43,10 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    inputRef.current?.focus()
+    // Dialog mount focus — small delay for portal paint.
+    const id = window.setTimeout(() => inputRef.current?.focus(), 0)
+    return () => window.clearTimeout(id)
   }, [])
-
-  // Esc to dismiss.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onCancel()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onCancel, submitting])
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -74,49 +80,75 @@ export function KeyPromptModal({ reason, onSuccess, onCancel }: Props) {
       : t('keymodal.sub.first')
 
   return (
-    <div className="keymodal-backdrop" role="dialog" aria-modal="true">
-      <form className="keymodal-card" onSubmit={onSubmit}>
-        <h1>{heading}</h1>
-        <p className="keymodal-sub">{subline}</p>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !submitting) onCancel()
+      }}
+    >
+      <DialogContent showCloseButton={!submitting} className="sm:max-w-md">
+        <form onSubmit={onSubmit} className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{heading}</DialogTitle>
+            <DialogDescription>{subline}</DialogDescription>
+          </DialogHeader>
 
-        <label>
-          <span>{t('keymodal.label.apikey')}</span>
-          <input
-            ref={inputRef}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            required
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            disabled={submitting}
-            placeholder="sk-…"
-          />
-        </label>
+          <div className="space-y-2">
+            <Label htmlFor="keymodal-apikey">{t('keymodal.label.apikey')}</Label>
+            <Input
+              id="keymodal-apikey"
+              ref={inputRef}
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              required
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              disabled={submitting}
+              placeholder="sk-…"
+            />
+          </div>
 
-        {error && <p className="keymodal-error">{error}</p>}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-        <div className="keymodal-actions">
-          <button
-            type="button"
-            className="keymodal-secondary"
-            onClick={onCancel}
-            disabled={submitting}
-          >
-            {t('common.cancel')}
-          </button>
-          <button
-            type="submit"
-            className="keymodal-primary"
-            disabled={submitting || !apiKey.trim()}
-          >
-            {submitting ? t('keymodal.submitting') : t('keymodal.submit')}
-          </button>
-        </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button type="submit" disabled={submitting || !apiKey.trim()}>
+              {submitting ? t('keymodal.submitting') : t('keymodal.submit')}
+            </Button>
+          </DialogFooter>
 
-        <p className="keymodal-help">{t('keymodal.help')}</p>
-      </form>
-    </div>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            {t('keymodal.help')}
+          </p>
+
+          {onSwitchToAccount && (
+            <div className="flex justify-center">
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto p-0"
+                disabled={submitting}
+                onClick={onSwitchToAccount}
+              >
+                {t('keymodal.switchAccount')}
+              </Button>
+            </div>
+          )}
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

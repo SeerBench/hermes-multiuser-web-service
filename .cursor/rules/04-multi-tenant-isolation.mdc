@@ -1,0 +1,45 @@
+---
+description: P0 multi-tenant isolation — ContextVar, user_id, sandbox, SSE invariants
+globs: gateway/web/**,gateway/platforms/web_chat.py,tests/gateway/test_web_*.py
+alwaysApply: false
+---
+
+# P0 — MULTI-TENANT ISOLATION (MANDATORY)
+
+Every per-user operation MUST run inside `enter_user_context(user_id)` (`gateway/web/sandbox.py`).
+
+| Asset | Isolation |
+|-------|-----------|
+| Files / memory | `HERMES_HOME` override → `web_workspaces/<user_id>/` |
+| Conversations | `sessions.user_id` + query filters |
+| Upstream API key | `enter_upstream_key()` per request |
+| Knowledge vectors | `tenant_id` + `workspace_id` on every PG query |
+| Skills | `web_skill_*` + `confine_path`; global skills read-only |
+
+## Identity (MVP)
+
+- Primary `user_id` = **platform UUID** (not `sha256(api_key)`).
+- `tenant_id` on all control-plane rows.
+- Cross-tenant access → **404**, never leak existence.
+
+## Load-bearing invariants
+
+```python
+# Executor threads — ContextVar does NOT propagate by default
+ctx = contextvars.copy_context()
+await loop.run_in_executor(None, ctx.run, _run)
+
+# SSE — terminal done on main loop, NOT call_soon_threadsafe
+event_queue.put_nowait({"event": "done", ...})
+```
+
+## Sandboxed tools pattern
+
+```python
+# GOOD — wrap upstream public API + confine_path
+def _handle_web_file_read(args, **kw):
+    path = _confine_or_error(args["path"])
+    return read_file_tool(path=path, ...)
+```
+
+`confine_path()` outside user context → `RuntimeError` (intentional — no silent unsandboxed fallback).

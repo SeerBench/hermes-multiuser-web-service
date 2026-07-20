@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ConversationSummary } from '../api'
+import { filterConversations } from '../conversationFilter'
 import { useT } from '../i18n'
 import { ConversationItem } from './ConversationItem'
 
@@ -26,6 +27,17 @@ export function ConversationList({
 }: Props) {
   const t = useT()
   const [showArchived, setShowArchived] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const filtered = useMemo(
+    () => filterConversations(conversations, query),
+    [conversations, query],
+  )
+  const filteredArchived = useMemo(
+    () => filterConversations(archived, query),
+    [archived, query],
+  )
+  const hasQuery = query.trim().length > 0
 
   const toggleArchived = () => {
     const next = !showArchived
@@ -35,11 +47,25 @@ export function ConversationList({
 
   return (
     <div className="convo-wrap">
-      {conversations.length === 0 ? (
-        <p className="convo-empty">{t('convo.empty')}</p>
+      <label className="convo-search">
+        <span className="visually-hidden">{t('convo.search.label')}</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('convo.search.placeholder')}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </label>
+
+      {filtered.length === 0 ? (
+        <p className="convo-empty">
+          {hasQuery ? t('convo.search.empty') : t('convo.empty')}
+        </p>
       ) : (
         <ul className="convo-list">
-          {conversations.map((c) => (
+          {filtered.map((c) => (
             <ConversationItem
               key={c.id}
               convo={c}
@@ -65,11 +91,13 @@ export function ConversationList({
         </span>
       </button>
       {showArchived &&
-        (archived.length === 0 ? (
-          <p className="convo-empty">{t('convo.archived.empty')}</p>
+        (filteredArchived.length === 0 ? (
+          <p className="convo-empty">
+            {hasQuery ? t('convo.search.empty') : t('convo.archived.empty')}
+          </p>
         ) : (
           <ul className="convo-list">
-            {archived.map((c) => (
+            {filteredArchived.map((c) => (
               <ConversationItem
                 key={c.id}
                 convo={c}

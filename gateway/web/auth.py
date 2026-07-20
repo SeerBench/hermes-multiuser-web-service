@@ -65,12 +65,20 @@ _DEFAULT_PUBLIC_PATHS: frozenset[str] = frozenset({
     "/api/auth/logout",
     "/api/healthz",
     "/healthz",
+    "/logo.svg",
+    "/logo.png",
+    "/favicon.png",
+    "/favicon.ico",
 })
 
-# Path prefixes that bypass auth (SPA assets).
+# Path prefixes that bypass auth (SPA assets + platform control plane).
+# ``/api/v1/`` is authenticated by platform-api itself (or nginx/gateway
+# reverse-proxy); the gateway must not 401 those probes or the SPA falls
+# back to Legacy API-key login.
 _DEFAULT_PUBLIC_PREFIXES: tuple[str, ...] = (
     "/static/",
     "/assets/",
+    "/api/v1/",
 )
 
 

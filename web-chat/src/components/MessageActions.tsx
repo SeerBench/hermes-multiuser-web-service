@@ -1,33 +1,62 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
+import { Copy, Pencil, RotateCcw, Share2 } from 'lucide-react'
 import { useT } from '../i18n'
+import { shareOrCopyText } from '../conversationShare'
+import { cn } from '@/lib/utils'
 
 type Props = {
-  // The plaintext representation of the turn — what gets copied to
-  // clipboard. Callers stitch text + tool segments into a single
-  // string so the copy is actually useful (no [object Object]).
   copyText: string
-  // Optional actions: assistant turns expose Retry, user turns expose
-  // Edit. The caller decides which to show by passing handlers.
   onRetry?: () => void
   onEdit?: () => void
+  /** Assistant: share this reply. User turns omit. */
+  shareable?: boolean
+}
+
+type ActionBtnProps = {
+  label: string
+  onClick: () => void
+  active?: boolean
+  children: ReactNode
+}
+
+/** Icon + hover-expanded label action button. */
+function ActionBtn({ label, onClick, active, children }: ActionBtnProps) {
+  return (
+    <button
+      type="button"
+      className={cn('msg-action', active && 'msg-action--active')}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+    >
+      {children}
+      <span className="msg-action-label">{label}</span>
+    </button>
+  )
 }
 
 /**
- * Hover-revealed action strip rendered in a message's top-right
- * corner. Designed to be quiet when the user isn't looking at it
- * and obvious when they are.
+ * Message footer actions: icon by default, label expands on hover.
+ * Assistant: Copy / Share (/ Retry). User: Copy / Edit.
  */
-export function MessageActions({ copyText, onRetry, onEdit }: Props) {
+export function MessageActions({
+  copyText,
+  onRetry,
+  onEdit,
+  shareable = false,
+}: Props) {
   const t = useT()
   const [copied, setCopied] = useState(false)
+  const [shareState, setShareState] = useState<'idle' | 'shared' | 'copied'>(
+    'idle',
+  )
 
   const copy = async () => {
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(copyText)
       } else {
-        // Old browsers / non-secure contexts — fall back to a
-        // throwaway textarea trick. Best-effort.
         const ta = document.createElement('textarea')
         ta.value = copyText
         ta.style.position = 'fixed'
@@ -40,29 +69,58 @@ export function MessageActions({ copyText, onRetry, onEdit }: Props) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      // ignore — copy is best-effort
+      // ignore
+    }
+  }
+
+  const share = async () => {
+    try {
+      const mode = await shareOrCopyText(copyText, {
+        title: t('actions.share.title'),
+      })
+      setShareState(mode)
+      window.setTimeout(() => setShareState('idle'), 1500)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
     }
   }
 
   return (
     <div className="msg-actions" role="group">
-      <button
-        type="button"
-        onClick={copy}
-        className={copied ? 'msg-action-copied' : ''}
-        title={t(copied ? 'actions.copied' : 'actions.copy')}
+      <ActionBtn
+        label={t(copied ? 'actions.copied' : 'actions.copy')}
+        onClick={() => void copy()}
+        active={copied}
       >
-        {copied ? t('actions.copied') : t('actions.copy')}
-      </button>
-      {onRetry && (
-        <button type="button" onClick={onRetry} title={t('actions.retry')}>
-          {t('actions.retry')}
-        </button>
+        <Copy className="size-3.5" aria-hidden />
+      </ActionBtn>
+
+      {shareable && (
+        <ActionBtn
+          label={
+            shareState === 'shared'
+              ? t('actions.shared')
+              : shareState === 'copied'
+                ? t('actions.copied')
+                : t('actions.share')
+          }
+          onClick={() => void share()}
+          active={shareState !== 'idle'}
+        >
+          <Share2 className="size-3.5" aria-hidden />
+        </ActionBtn>
       )}
+
+      {onRetry && (
+        <ActionBtn label={t('actions.retry')} onClick={onRetry}>
+          <RotateCcw className="size-3.5" aria-hidden />
+        </ActionBtn>
+      )}
+
       {onEdit && (
-        <button type="button" onClick={onEdit} title={t('actions.edit')}>
-          {t('actions.edit')}
-        </button>
+        <ActionBtn label={t('actions.edit')} onClick={onEdit}>
+          <Pencil className="size-3.5" aria-hidden />
+        </ActionBtn>
       )}
     </div>
   )

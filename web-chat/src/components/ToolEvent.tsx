@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useT } from '../i18n'
+import { extractImageUrl, prettyJson } from '../toolEventUtils'
 
 type Props = {
   tool: string
@@ -82,36 +83,4 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
       )}
     </div>
   )
-}
-
-function prettyJson(input: string): string {
-  // Best-effort: if the args round-trip as JSON, pretty-print them;
-  // otherwise show as-is. We never throw — the user just sees what
-  // the agent supplied.
-  try {
-    const parsed = JSON.parse(input)
-    return JSON.stringify(parsed, null, 2)
-  } catch {
-    return input
-  }
-}
-
-// Pull a renderable image URL out of an image_generate tool result.
-// Scoped to that tool so we never turn an arbitrary URL from some other
-// tool's output into an <img>. Only http(s) URLs are accepted (no data:/
-// javascript:), and we fall back to a regex when the preview was truncated
-// past the closing brace so the JSON no longer parses.
-function extractImageUrl(tool: string, result?: string): string | null {
-  if (tool !== 'image_generate' || !result) return null
-  let url: unknown = null
-  try {
-    const parsed = JSON.parse(result)
-    if (parsed && typeof parsed === 'object' && (parsed as any).success) {
-      url = (parsed as any).image
-    }
-  } catch {
-    const m = result.match(/"image"\s*:\s*"(https?:\/\/[^"\\]+)"/)
-    if (m) url = m[1]
-  }
-  return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null
 }

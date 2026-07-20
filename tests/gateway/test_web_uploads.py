@@ -169,6 +169,38 @@ def test_sanitize_collapses_unsafe_chars_keeps_extension():
     assert out.endswith(".txt")
 
 
+def test_sanitize_preserves_unicode_display_names():
+    from gateway.platforms.web_chat import _sanitize_upload_name
+
+    assert _sanitize_upload_name("测试文档.pdf") == "测试文档.pdf"
+    assert _sanitize_upload_name("报告/说明.md") == "说明.md"
+    assert _sanitize_upload_name("图片 01.png") == "图片 01.png"
+
+
+def test_sanitize_decodes_percent_encoded_multipart_names():
+    from gateway.platforms.web_chat import _sanitize_upload_name
+
+    # aiohttp delivers non-ASCII multipart filenames percent-encoded.
+    assert (
+        _sanitize_upload_name("%E6%B5%8B%E8%AF%95%E9%99%84%E4%BB%B6.txt")
+        == "测试附件.txt"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_preserves_chinese_filename(ctx, monkeypatch):
+    user_id = await _login(ctx, monkeypatch)
+    name = "测试附件.txt"
+    resp = await ctx.client.post("/api/uploads", data=_form(name, b"hello"))
+    assert resp.status == 200
+    files = (await resp.json())["files"]
+    assert files[0]["name"] == name
+    assert files[0]["path"] == f"uploads/{name}"
+    on_disk = _uploads_dir(ctx, user_id) / name
+    assert on_disk.is_file()
+    assert on_disk.read_bytes() == b"hello"
+
+
 @pytest.mark.asyncio
 async def test_upload_dedupes_same_name(ctx, monkeypatch):
     user_id = await _login(ctx, monkeypatch)

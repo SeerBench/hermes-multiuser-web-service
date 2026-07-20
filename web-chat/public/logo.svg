@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hermes Workspace">
+  <!-- Charcoal rounded tile + soft-blue stylized H (portal / workspace mark) -->
+  <rect width="64" height="64" rx="14" fill="#0f1014"/>
+  <path
+    fill="#7c9eff"
+    d="
+      M14 10 L28 18 L28 28 L36 28 L36 18 L50 10
+      L50 54 L36 46 L36 36 L28 36 L28 46 L14 54 Z
+    "
+  />
+</svg>

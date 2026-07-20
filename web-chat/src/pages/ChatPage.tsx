@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, KeyboardEvent } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   ApiError,
   auth,
@@ -12,68 +12,73 @@ import type {
   ChatMessage,
   CommandSpec,
   ConversationSummary,
-  ServerMessage,
   UploadedFile,
 } from '../api'
-import { ActivityLog } from '../components/ActivityLog'
-import type { ActivityItem } from '../components/ActivityLog'
-import {
-  AttachmentList,
-  PendingAttachments,
-} from '../components/AttachmentChips'
+import { ChatComposer } from '../components/ChatComposer'
 import type { PendingAttachment } from '../components/AttachmentChips'
+import { FilePreviewDrawer } from '../components/FilePreviewDrawer'
+import type { PreviewableFile } from '../components/FilePreviewDrawer'
+import {
+  fetchWorkspaceImagePreviewUrl,
+  isImageAttachment,
+  shouldFetchWorkspaceImagePreview,
+} from '../attachmentPreview'
+import { ChatTurnBubble } from '../components/ChatTurnBubble'
+import { ConversationHeader } from '../components/ConversationHeader'
 import { ConversationList } from '../components/ConversationList'
 import { KeyPromptModal } from '../components/KeyPromptModal'
-import { MarkdownContent } from '../components/MarkdownContent'
-import { MessageActions } from '../components/MessageActions'
-import { ReasoningPanel } from '../components/ReasoningPanel'
-import { SlashCommandPopover } from '../components/SlashCommandPopover'
-import { ToolEvent } from '../components/ToolEvent'
-import { formatBytes } from '../format'
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from '@/components/ui/message-scroller'
+import {
+  getStoredWorkspaceId,
+  platform,
+} from '../platformClient'
+import {
+  appendToken,
+  pushActivity,
+  turnHasText,
+  updateAssistant,
+} from '../chatStreamHelpers'
+import {
+  attachmentNote,
+  messagesToTurns,
+  newTurnId,
+  turnToCopyText,
+  type ToolSegment,
+  type Turn,
+} from '../chatTurns'
+import { provisionalTitleFromMessage } from '../conversationTitle'
+import {
+  getChatWidth,
+  setChatWidth,
+  toggleExpanded,
+  widthClass,
+  type LayoutWidth,
+} from '../layoutWidthStorage'
+import { consumeFilesForChat } from '../attachBridge'
+import { ChatEmptyGuide } from '../components/ChatEmptyGuide'
+import { ShortcutsHelpDialog } from '../components/ShortcutsHelpDialog'
+import { handleGlobalChatHotkey } from '../chatHotkeys'
+import {
+  filterModelsByFavorites,
+  PREFERENCES_UPDATED_EVENT,
+} from '../modelFavorites'
+import {
+  conversationToMarkdown,
+  downloadMarkdown,
+  shareOrCopyText,
+} from '../conversationShare'
+import { toast } from 'sonner'
+import { routeHref } from '../routing'
 import { useLocale, useT } from '../i18n'
-import type { Locale, Translator } from '../i18n'
-
-// ── Domain types ──────────────────────────────────────────────────────────
-
-type ToolSegment = {
-  kind: 'tool'
-  // SSE tool_call id when available — lets us match tool_end back to the
-  // tool_start that opened the segment even when tools interleave.
-  id: string | null
-  tool: string
-  preview: string
-  args: string
-  result_preview?: string
-  duration?: number
-  error?: boolean
-}
-
-type Segment =
-  | { kind: 'text'; text: string }
-  | ToolSegment
-  | { kind: 'system'; text: string; tone?: 'ok' | 'error' }
-
-type Turn = {
-  id: string
-  role: 'user' | 'assistant'
-  segments: Segment[]
-  reasoning?: string
-  status: 'streaming' | 'done' | 'error'
-  errorMessage?: string
-  usage?: Record<string, number>
-  // Behind-the-scenes activity feed (assistant turns): lifecycle status,
-  // loop-iteration steps, pre-tool "thinking" hints.
-  activity: ActivityItem[]
-  // Files attached to a user turn (workspace-relative paths the agent reads).
-  attachments?: UploadedFile[]
-}
-
-// Build the reference block appended to a message when files are attached,
-// so the agent knows to read them with web_file_read.
-function attachmentNote(t: Translator, files: UploadedFile[]): string {
-  const lines = files.map((f) => `- ${f.path} (${formatBytes(f.size)})`)
-  return `\n\n${t('attach.inject.header')}\n${lines.join('\n')}`
-}
+import type { Locale } from '../i18n'
+import { cn } from '@/lib/utils'
 
 type KeyModalState =
   | { open: false }
@@ -83,110 +88,20 @@ type KeyModalState =
       pendingMessage: string
     }
 
-// `crypto.randomUUID` only exists in secure contexts (HTTPS or
-// localhost).  This gateway is commonly accessed over plain HTTP on a
-// Tailscale / LAN IP, where the API is undefined and calling it throws
-// TypeError.  We only need a key that's unique within this React tree's
-// lifetime, not a real UUID, so a timestamp + random suffix is fine.
-function newTurnId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-// ── messagesToTurns: server history → renderable Turn[] ───────────────────
-
-function messagesToTurns(messages: ServerMessage[]): Turn[] {
-  const turns: Turn[] = []
-  let assistantTurn: Turn | null = null
-
-  // Pre-index tool results by tool_call_id so we can attach them to the
-  // assistant turn's tool segments without a second pass.
-  const toolResults = new Map<string, string>()
-  for (const m of messages) {
-    if (m.role === 'tool' && m.tool_call_id) {
-      toolResults.set(m.tool_call_id, m.content ?? '')
-    }
-  }
-
-  const flushAssistant = () => {
-    if (assistantTurn) {
-      turns.push(assistantTurn)
-      assistantTurn = null
-    }
-  }
-
-  for (const m of messages) {
-    if (m.role === 'user') {
-      flushAssistant()
-      turns.push({
-        id: newTurnId(),
-        role: 'user',
-        segments: [{ kind: 'text', text: m.content ?? '' }],
-        status: 'done',
-        activity: [],
-      })
-      continue
-    }
-    if (m.role !== 'assistant') {
-      // tool messages are merged via toolResults above; system messages
-      // are skipped (we'd surface them as system segments only when the
-      // SPA itself emits them, e.g. /command results).
-      continue
-    }
-    if (!assistantTurn) {
-      assistantTurn = {
-        id: newTurnId(),
-        role: 'assistant',
-        segments: [],
-        status: 'done',
-        activity: [],
-      }
-    }
-    if (m.reasoning) {
-      assistantTurn.reasoning = (assistantTurn.reasoning ?? '') + m.reasoning
-    }
-    if (m.content) {
-      assistantTurn.segments.push({ kind: 'text', text: m.content })
-    }
-    for (const tc of m.tool_calls ?? []) {
-      const id = tc.id ? String(tc.id) : null
-      const fnName = tc.function?.name ?? tc.name ?? '(tool)'
-      const rawArgs = tc.function?.arguments ?? tc.arguments
-      let argsStr = ''
-      if (rawArgs != null) {
-        argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
-      }
-      const result = id ? toolResults.get(id) : undefined
-      assistantTurn.segments.push({
-        kind: 'tool',
-        id,
-        tool: fnName,
-        preview: argsStr.slice(0, 280),
-        args: argsStr,
-        result_preview: result,
-        duration: 0,
-        error: false,
-      })
-    }
-  }
-  flushAssistant()
-  return turns
-}
-
-// Stitch a turn's text into a single string for clipboard copy.
-function turnToCopyText(turn: Turn): string {
-  return turn.segments
-    .filter((s): s is Exclude<Segment, ToolSegment> => s.kind !== 'tool')
-    .map((s) => s.text)
-    .join('\n')
-    .trim()
-}
-
-// ── ChatPage ──────────────────────────────────────────────────────────────
-
-export function ChatPage() {
+export function ChatPage({
+  platformMode = false,
+  signedIn = false,
+  needsBindKey = false,
+  onGoBindSettings,
+  userAvatarUrl = null,
+}: {
+  platformMode?: boolean
+  signedIn?: boolean
+  needsBindKey?: boolean
+  onGoBindSettings?: () => void
+  /** Profile avatar from Settings; shown beside user bubbles when set. */
+  userAvatarUrl?: string | null
+} = {}) {
   const t = useT()
   const { setLocale } = useLocale()
   const [convos, setConvos] = useState<ConversationSummary[]>([])
@@ -199,16 +114,73 @@ export function ChatPage() {
   const [historyBanner, setHistoryBanner] = useState<string | null>(null)
   const [archived, setArchived] = useState<ConversationSummary[]>([])
   const [pending, setPending] = useState<PendingAttachment[]>([])
+  const [sideOpen, setSideOpen] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('')
+  const [models, setModels] = useState<{ id: string; owned_by?: string }[]>([])
+  const [favoriteModels, setFavoriteModels] = useState<string[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [enabledSkillsCount, setEnabledSkillsCount] = useState(0)
+  const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
+  const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
-  const transcriptRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  /** 工作区图片：fetch + blob URL，避免 <img src> 直连 API 鉴权失败。 */
+  const queueWorkspaceImagePreviews = useCallback(
+    (entries: PendingAttachment[]) => {
+      const ws = getStoredWorkspaceId()
+      if (!ws) return
+      for (const entry of entries) {
+        if (!entry.fileId) continue
+        if (
+          !shouldFetchWorkspaceImagePreview(entry.name, {
+            mimeType: entry.mimeType,
+            path: entry.path,
+          })
+        ) {
+          continue
+        }
+        void fetchWorkspaceImagePreviewUrl(ws, entry.fileId)
+          .then((previewUrl) => {
+            setPending((prev) =>
+              prev.map((p) =>
+                p.id === entry.id
+                  ? {
+                      ...p,
+                      previewUrl,
+                      // The byte probe confirmed an image even if metadata did not.
+                      mimeType: p.mimeType?.startsWith('image/')
+                        ? p.mimeType
+                        : 'image/*',
+                    }
+                  : p,
+              ),
+            )
+          })
+          .catch(() => {
+            // 预览失败时仍保留附件，只是无缩略图
+          })
+      }
+    },
+    [],
+  )
 
   // Probe auth + initial data.
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        await auth.me()
+        if (!signedIn) {
+          await auth.me()
+        } else {
+          // Platform session — cookie already issued; load conversations.
+          try {
+            await auth.me()
+          } catch {
+            // Gateway may still accept the shared platform session cookie.
+          }
+        }
         if (cancelled) return
         try {
           setConvos(await convosApi.list())
@@ -222,6 +194,7 @@ export function ChatPage() {
         }
       } catch (err) {
         if (cancelled) return
+        if (signedIn) return
         if (err instanceof ApiError && err.status === 401) {
           setKeyModal({ open: true, reason: 'first-message', pendingMessage: '' })
         }
@@ -230,14 +203,86 @@ export function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [signedIn])
 
-  // Auto-scroll on new content.
+  const reloadModels = useCallback(() => {
+    if (!platformMode || !workspaceId) return
+    setModelsLoading(true)
+    void platform
+      .listModels(workspaceId)
+      .then((res) => {
+        const catalog = res.models ?? []
+        const favorites = res.favorite_models ?? []
+        setModels(catalog)
+        setFavoriteModels(favorites)
+        const picker = filterModelsByFavorites(catalog, favorites)
+        const pref =
+          res.preferred_model?.trim() ||
+          res.default_model?.trim() ||
+          picker[0]?.id ||
+          catalog[0]?.id ||
+          ''
+        setSelectedModel(pref)
+      })
+      .catch(() => undefined)
+      .finally(() => setModelsLoading(false))
+  }, [platformMode, workspaceId])
+
+  // Platform: load models + skill count for composer chrome.
   useEffect(() => {
-    const el = transcriptRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-  }, [turns])
+    if (!platformMode || !workspaceId) return
+    reloadModels()
+    void platform
+      .listSkills(workspaceId)
+      .then((rows) =>
+        setEnabledSkillsCount(rows.filter((s) => s.enabled !== false).length),
+      )
+      .catch(() => undefined)
+  }, [platformMode, workspaceId, reloadModels])
+
+  // Settings dialog may update favorite_models while chat stays mounted.
+  useEffect(() => {
+    const onPrefs = () => reloadModels()
+    window.addEventListener(PREFERENCES_UPDATED_EVENT, onPrefs)
+    return () => window.removeEventListener(PREFERENCES_UPDATED_EVENT, onPrefs)
+  }, [reloadModels])
+
+  const pickerModels = useMemo(
+    () => filterModelsByFavorites(models, favoriteModels, selectedModel),
+    [models, favoriteModels, selectedModel],
+  )
+
+  // Files page → chat bridge (sessionStorage, consumed once on mount).
+  useEffect(() => {
+    const bridged = consumeFilesForChat()
+    if (bridged.length === 0) return
+    const entries: PendingAttachment[] = bridged.map((f) => ({
+      id: newTurnId(),
+      name: f.name,
+      size: f.size,
+      path: f.path,
+      status: 'done' as const,
+      fileId: f.fileId,
+      mimeType: f.mimeType,
+    }))
+    setPending((prev) => [...prev, ...entries])
+    queueWorkspaceImagePreviews(entries)
+  }, [queueWorkspaceImagePreviews])
+
+  const handleModelChange = useCallback(
+    async (model: string) => {
+      setSelectedModel(model)
+      if (!workspaceId) return
+      try {
+        await platform.patchPreferences(workspaceId, { preferred_model: model })
+      } catch {
+        // keep local selection even if persist fails
+      }
+    },
+    [workspaceId],
+  )
+
+  // Scroll follows the live edge via MessageScrollerProvider `autoScroll`.
 
   // Cancel any in-flight stream on unmount.
   useEffect(() => {
@@ -301,15 +346,71 @@ export function ChatPage() {
 
   const handleRename = useCallback(
     async (id: string, title: string) => {
+      setConvos((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c)),
+      )
       try {
         await convosApi.rename(id, title)
       } catch {
-        // Non-fatal — leave the old title in place.
+        // Non-fatal — leave the optimistic title; refresh may correct.
       }
       refreshConvos()
       loadArchived()
     },
     [refreshConvos, loadArchived],
+  )
+
+  const activeConvo = useMemo(
+    () =>
+      convos.find((c) => c.id === sessionId) ??
+      archived.find((c) => c.id === sessionId) ??
+      null,
+    [convos, archived, sessionId],
+  )
+
+  const toggleChatWidth = useCallback(() => {
+    setChatWidthState((prev) => {
+      const next = toggleExpanded('reading', prev)
+      setChatWidth(next)
+      return next
+    })
+  }, [])
+
+  const convoTitle =
+    activeConvo?.title?.trim() || t('convo.untitled')
+
+  const handleShareConversation = useCallback(async () => {
+    const md = conversationToMarkdown(turns, { title: convoTitle })
+    if (!md.trim()) return
+    try {
+      const mode = await shareOrCopyText(md, { title: convoTitle })
+      toast.success(
+        mode === 'shared' ? t('chat.share.shared') : t('chat.share.ok'),
+      )
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+    }
+  }, [turns, convoTitle, t])
+
+  const handleExportConversation = useCallback(() => {
+    const md = conversationToMarkdown(turns, { title: convoTitle })
+    if (!md.trim()) return
+    const safe = convoTitle.replace(/[^\w\u4e00-\u9fff-]+/g, '_').slice(0, 40)
+    downloadMarkdown(safe || 'hermes-chat', md)
+    toast.success(t('chat.export.ok'))
+  }, [turns, convoTitle, t])
+
+  const ensureProvisionalTitle = useCallback(
+    async (sid: string, message: string) => {
+      const existing =
+        convos.find((c) => c.id === sid)?.title ??
+        archived.find((c) => c.id === sid)?.title
+      if (existing) return
+      const provisional = provisionalTitleFromMessage(message)
+      if (!provisional) return
+      await handleRename(sid, provisional)
+    },
+    [convos, archived, handleRename],
   )
 
   const handleDelete = useCallback(
@@ -346,41 +447,66 @@ export function ChatPage() {
 
   // ── Attachments ────────────────────────────────────────────────────────
 
-  const removePending = useCallback((id: string) => {
-    setPending((prev) => prev.filter((p) => p.id !== id))
+  const revokePreview = useCallback((url?: string) => {
+    if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
   }, [])
 
-  const onPickFiles = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const picked = Array.from(files)
-    const entries: PendingAttachment[] = picked.map((f) => ({
-      id: newTurnId(),
-      name: f.name,
-      size: f.size,
-      status: 'uploading',
-    }))
-    setPending((prev) => [...prev, ...entries])
-    try {
-      const saved = await uploadsApi.create(picked)
-      // Match returned files back to the pending entries by position.
-      setPending((prev) =>
-        prev.map((p) => {
-          const idx = entries.findIndex((e) => e.id === p.id)
-          if (idx < 0 || idx >= saved.length) return p
-          const s = saved[idx]
-          return { ...p, status: 'done', path: s.path, name: s.name, size: s.size }
-        }),
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      const ids = new Set(entries.map((e) => e.id))
-      setPending((prev) =>
-        prev.map((p) =>
-          ids.has(p.id) ? { ...p, status: 'error', error: msg } : p,
-        ),
-      )
-    }
-  }, [])
+  const removePending = useCallback(
+    (id: string) => {
+      setPending((prev) => {
+        const target = prev.find((p) => p.id === id)
+        revokePreview(target?.previewUrl)
+        return prev.filter((p) => p.id !== id)
+      })
+    },
+    [revokePreview],
+  )
+
+  const onPickFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return
+      const picked = Array.from(files)
+      const entries: PendingAttachment[] = picked.map((f) => {
+        const isImage = isImageAttachment(f.name, { mimeType: f.type })
+        return {
+          id: newTurnId(),
+          name: f.name,
+          size: f.size,
+          status: 'uploading' as const,
+          // 本地图片用 blob URL 做悬停预览；移除时 revoke
+          previewUrl: isImage ? URL.createObjectURL(f) : undefined,
+        }
+      })
+      setPending((prev) => [...prev, ...entries])
+      try {
+        const saved = await uploadsApi.create(picked)
+        // Match returned files back to the pending entries by position.
+        setPending((prev) =>
+          prev.map((p) => {
+            const idx = entries.findIndex((e) => e.id === p.id)
+            if (idx < 0 || idx >= saved.length) return p
+            const s = saved[idx]
+            return {
+              ...p,
+              status: 'done',
+              path: s.path,
+              name: s.name,
+              size: s.size,
+            }
+          }),
+        )
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        const ids = new Set(entries.map((e) => e.id))
+        setPending((prev) =>
+          prev.map((p) =>
+            ids.has(p.id) ? { ...p, status: 'error', error: msg } : p,
+          ),
+        )
+      }
+    },
+    [],
+  )
 
   const runMessage = useCallback(
     async (
@@ -388,6 +514,10 @@ export function ChatPage() {
       historyOverride?: ChatMessage[],
       attachments?: UploadedFile[],
     ) => {
+      if (needsBindKey) {
+        onGoBindSettings?.()
+        return
+      }
       const userTurn: Turn = {
         id: newTurnId(),
         role: 'user',
@@ -433,6 +563,7 @@ export function ChatPage() {
             message: wireMessage,
             session_id: sessionId ?? undefined,
             conversation_history: history,
+            model: selectedModel || undefined,
           },
           controller.signal,
         )) {
@@ -500,6 +631,13 @@ export function ChatPage() {
                 }),
               })),
             )
+          } else if (ev.type === 'title') {
+            setSessionId(ev.session_id)
+            setConvos((prev) =>
+              prev.map((c) =>
+                c.id === ev.session_id ? { ...c, title: ev.title } : c,
+              ),
+            )
           } else if (ev.type === 'done') {
             setSessionId(ev.session_id)
             setTurns((prev) =>
@@ -509,12 +647,23 @@ export function ChatPage() {
                 usage: ev.usage,
               })),
             )
+            void ensureProvisionalTitle(ev.session_id, message)
             void convosApi
               .list()
               .then(setConvos)
               .catch(() => undefined)
+            // LLM auto-title may land a few seconds later — refresh again.
+            window.setTimeout(() => {
+              void convosApi
+                .list()
+                .then(setConvos)
+                .catch(() => undefined)
+            }, 4000)
           } else if (ev.type === 'error') {
-            if (ev.code === 'unauthorized' || ev.code === 'session_expired') {
+            if (
+              ev.code === 'unauthorized' ||
+              ev.code === 'session_expired'
+            ) {
               setTurns((prev) => prev.slice(0, -2))
               setKeyModal({
                 open: true,
@@ -522,6 +671,11 @@ export function ChatPage() {
                   ev.code === 'session_expired' ? 'session-expired' : 'first-message',
                 pendingMessage: message,
               })
+              return
+            }
+            if (ev.code === 'upstream_key_required') {
+              setTurns((prev) => prev.slice(0, -2))
+              onGoBindSettings?.()
               return
             }
             setTurns((prev) =>
@@ -556,7 +710,7 @@ export function ChatPage() {
         abortRef.current = null
       }
     },
-    [sessionId, turns, t],
+    [sessionId, turns, t, needsBindKey, onGoBindSettings, selectedModel, ensureProvisionalTitle],
   )
 
   // ── Slash command handling ────────────────────────────────────────────
@@ -708,6 +862,35 @@ export function ChatPage() {
     [commandCatalog, t, runClientCommand, runServerCommand, appendSystemSegment],
   )
 
+  const onAttachWorkspaceFiles = useCallback(
+    (files: {
+      name: string
+      path: string
+      size: number
+      fileId?: string
+      mimeType?: string
+    }[]) => {
+      const entries: PendingAttachment[] = files.map((f) => ({
+        id: newTurnId(),
+        name: f.name,
+        size: f.size,
+        status: 'done',
+        path: f.path,
+        fileId: f.fileId,
+        mimeType: f.mimeType,
+      }))
+      setPending((prev) => [...prev, ...entries])
+      queueWorkspaceImagePreviews(entries)
+    },
+    [queueWorkspaceImagePreviews],
+  )
+
+  const onPreviewDoc = useCallback((item: PendingAttachment) => {
+    if (!item.fileId) return
+    setPreviewFile({ fileId: item.fileId, name: item.name })
+    setPreviewOpen(true)
+  }, [])
+
   const uploading = pending.some((p) => p.status === 'uploading')
 
   const submit = useCallback(
@@ -727,13 +910,16 @@ export function ChatPage() {
         return
       }
       setInput('')
-      setPending([])
+      setPending((prev) => {
+        for (const p of prev) revokePreview(p.previewUrl)
+        return []
+      })
       await runMessage(message, undefined, ready.length ? ready : undefined)
     },
-    [input, streaming, uploading, pending, runMessage, dispatchSlash],
+    [input, streaming, uploading, pending, runMessage, dispatchSlash, revokePreview],
   )
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showPopover && (e.key === 'ArrowDown' || e.key === 'ArrowUp' ||
         e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape')) {
       // Popover's own window listener handles these — don't compete.
@@ -807,17 +993,61 @@ export function ChatPage() {
     ? t('composer.placeholder.slash')
     : t('composer.placeholder')
 
+  const closeSidebar = () => setSideOpen(false)
+
+  const selectConversation = (id: string) => {
+    void switchConversation(id)
+    closeSidebar()
+  }
+
+  const handleNewChat = () => {
+    startNewConversation()
+    closeSidebar()
+  }
+
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+
+  // `?` / `n` / `/` when focus is outside editable fields.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      handleGlobalChatHotkey(e, { openHelp: () => setShortcutsOpen(true) })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    const onNew = () => {
+      startNewConversation()
+      setSideOpen(false)
+    }
+    window.addEventListener('hermes:new-chat', onNew)
+    return () => window.removeEventListener('hermes:new-chat', onNew)
+  }, [startNewConversation])
+
   return (
     <div className="chat-page">
-      <aside className="chat-side">
-        <button type="button" className="chat-new" onClick={startNewConversation}>
+      <ShortcutsHelpDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
+      {sideOpen && (
+        <button
+          type="button"
+          className="chat-side-backdrop"
+          aria-label={t('chat.closeSidebar')}
+          onClick={closeSidebar}
+        />
+      )}
+      <aside className={`chat-side${sideOpen ? ' chat-side-open' : ''}`}>
+        <button type="button" className="chat-new" onClick={handleNewChat}>
           {t('chat.new')}
         </button>
         <ConversationList
           conversations={convos}
           archived={archived}
           activeId={sessionId}
-          onSelect={(id) => void switchConversation(id)}
+          onSelect={selectConversation}
           onRename={(id, title) => void handleRename(id, title)}
           onDelete={(id) => void handleDelete(id)}
           onSetFlags={(id, flags) => void handleSetFlags(id, flags)}
@@ -826,174 +1056,172 @@ export function ChatPage() {
       </aside>
 
       <section className="chat-main">
+        {needsBindKey && (
+          <div className="chat-banner chat-banner-warn" role="status">
+            <span>{t('bindBanner.chatHint')}</span>
+            {onGoBindSettings && (
+              <button type="button" className="link-btn" onClick={onGoBindSettings}>
+                {t('bindBanner.action')}
+              </button>
+            )}
+          </div>
+        )}
         {historyBanner && (
           <div className="chat-banner chat-banner-error" role="alert">
             {historyBanner}
           </div>
         )}
-        <div className="chat-transcript" ref={transcriptRef}>
-          {turns.length === 0 ? (
-            <div className="chat-empty">
-              <h2>{t('chat.empty.title')}</h2>
-              <p>{t('chat.empty.subtitle')}</p>
-            </div>
-          ) : (
-            turns.map((turn) => (
-              <article key={turn.id} className={`turn turn-${turn.role}`}>
-                <header className="turn-role">
-                  {turn.role === 'user' ? t('chat.role.user') : t('chat.role.assistant')}
-                  {turn.usage && turn.role === 'assistant' && (
-                    <span className="turn-usage" aria-label="token usage">
-                      ↑{turn.usage.input_tokens ?? 0} ↓{turn.usage.output_tokens ?? 0}
-                    </span>
-                  )}
-                </header>
-                {turn.role === 'assistant' && (
-                  <ActivityLog
-                    items={turn.activity}
-                    streaming={turn.status === 'streaming'}
-                  />
-                )}
-                {turn.reasoning && (
-                  <ReasoningPanel
-                    text={turn.reasoning}
-                    streaming={turn.status === 'streaming'}
-                  />
-                )}
-                {turn.segments.map((seg, i) => {
-                  if (seg.kind === 'tool') {
-                    return (
-                      <ToolEvent
-                        key={`${turn.id}-seg-${i}`}
-                        tool={seg.tool}
-                        preview={seg.preview}
-                        args={seg.args}
-                        result_preview={seg.result_preview}
-                        duration={seg.duration}
-                        error={seg.error}
-                      />
-                    )
-                  }
-                  if (seg.kind === 'system') {
-                    return (
-                      <div
-                        key={`${turn.id}-seg-${i}`}
-                        className={`turn-system${
-                          seg.tone === 'error' ? ' turn-system-error' : ''
-                        }`}
-                      >
-                        <span className="turn-system-prefix">
-                          {t('command.system.prefix')}
-                        </span>
-                        <pre>{seg.text}</pre>
-                      </div>
-                    )
-                  }
-                  // text segment
-                  return (
-                    <div key={`${turn.id}-seg-${i}`} className="turn-text">
-                      {turn.role === 'assistant' ? (
-                        <MarkdownContent text={seg.text || '…'} />
-                      ) : (
-                        <div className="turn-content">{seg.text}</div>
-                      )}
-                    </div>
-                  )
-                })}
-                {turn.attachments && turn.attachments.length > 0 && (
-                  <AttachmentList items={turn.attachments} />
-                )}
-                {turn.status === 'streaming' && turn.segments.length === 0 && (
-                  <div className="turn-text">
-                    <em>…</em>
-                  </div>
-                )}
-                {turn.status === 'error' && (
-                  <div className="turn-error">{turn.errorMessage}</div>
-                )}
-                {turn.status === 'done' && (
-                  <MessageActions
-                    copyText={turnToCopyText(turn)}
-                    onRetry={
-                      turn.role === 'assistant' ? () => handleRetry(turn) : undefined
-                    }
-                    onEdit={
-                      turn.role === 'user' ? () => handleEdit(turn) : undefined
-                    }
-                  />
-                )}
-              </article>
-            ))
-          )}
-        </div>
+        {/* Header + transcript + composer share one centered reading/full column */}
+        <ConversationHeader
+              title={
+                activeConvo?.title?.trim() ||
+                t('convo.untitled')
+              }
+              pinned={Boolean(activeConvo?.pinned)}
+              chatWidth={chatWidth}
+              skillsCount={enabledSkillsCount}
+              isNewConversation={!sessionId || turns.length === 0}
+              onOpenSidebar={() => setSideOpen(true)}
+              onRename={
+                sessionId && turns.length > 0
+                  ? (title) => void handleRename(sessionId, title)
+                  : undefined
+              }
+              onTogglePin={
+                sessionId && turns.length > 0
+                  ? () =>
+                      void handleSetFlags(sessionId, {
+                        pinned: !activeConvo?.pinned,
+                      })
+                  : undefined
+              }
+              onToggleChatWidth={toggleChatWidth}
+              onShareConversation={
+                sessionId && turns.length > 0
+                  ? () => void handleShareConversation()
+                  : undefined
+              }
+              onExportConversation={
+                sessionId && turns.length > 0
+                  ? handleExportConversation
+                  : undefined
+              }
+            />
+        <div className={cn('chat-column', widthClass(chatWidth))}>
 
-        <form className="composer" onSubmit={submit}>
-          <div className="composer-input-wrap">
-            {showPopover && (
-              <SlashCommandPopover
-                query={slashQuery ?? ''}
-                commands={commandCatalog}
-                onSelect={(cmd) => {
-                  const hint = cmd.args_hint && cmd.args_hint.startsWith('<')
-                  // For required args, leave the trailing space so the
-                  // user starts typing the argument immediately.
-                  setInput(`/${cmd.name}${hint ? ' ' : ''}`)
-                }}
-                onClose={() => setInput('')}
+          <MessageScrollerProvider
+            key={sessionId ?? 'new-chat'}
+            autoScroll
+            defaultScrollPosition="last-anchor"
+            scrollPreviousItemPeek={48}
+          >
+            <MessageScroller className="chat-transcript-scroller min-h-0 flex-1">
+              <MessageScrollerViewport className="chat-transcript">
+                <MessageScrollerContent
+                  className={cn(
+                    'gap-5 px-1 py-5',
+                    turns.length === 0 && 'chat-transcript-content--empty',
+                  )}
+                >
+                  {turns.length === 0 ? (
+                    <MessageScrollerItem
+                      messageId="empty-guide"
+                      className="chat-empty-guide-item"
+                    >
+                      <ChatEmptyGuide
+                        platformMode={platformMode}
+                        needsBindKey={needsBindKey}
+                        hasModel={Boolean(selectedModel)}
+                        enabledSkillsCount={enabledSkillsCount}
+                        onPickSuggestion={setInput}
+                        onGoFiles={() => {
+                          window.location.hash = routeHref('files')
+                        }}
+                        onGoSkills={() => {
+                          window.location.hash = routeHref('skills')
+                        }}
+                        onGoSettings={onGoBindSettings}
+                      />
+                    </MessageScrollerItem>
+                  ) : (
+                    turns.map((turn) => (
+                      <MessageScrollerItem
+                        key={turn.id}
+                        messageId={turn.id}
+                        scrollAnchor={turn.role === 'user'}
+                      >
+                        <ChatTurnBubble
+                          turn={turn}
+                          userAvatarUrl={userAvatarUrl}
+                          onRetry={
+                            turn.role === 'assistant'
+                              ? () => handleRetry(turn)
+                              : undefined
+                          }
+                          onEdit={
+                            turn.role === 'user'
+                              ? () => handleEdit(turn)
+                              : undefined
+                          }
+                        />
+                      </MessageScrollerItem>
+                    ))
+                  )}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton
+                direction="end"
+                aria-label={t('chat.scrollLatest')}
               />
-            )}
-            <PendingAttachments items={pending} onRemove={removePending} />
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={composerPlaceholder}
-              rows={3}
-              disabled={streaming}
-            />
-          </div>
-          <div className="composer-actions">
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                void onPickFiles(e.target.files)
-                // Reset so picking the same file again re-triggers onChange.
-                e.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              className="composer-attach"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming}
-              title={t('attach.button')}
-              aria-label={t('attach.button')}
-            >
-              📎
-            </button>
-            {streaming ? (
-              <button type="button" onClick={stop} className="composer-stop">
-                {t('composer.stop')}
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={
-                  (!input.trim() &&
-                    !pending.some((p) => p.status === 'done')) ||
-                  uploading
-                }
-                className="composer-send"
-              >
-                {t('composer.send')}
-              </button>
-            )}
-          </div>
-        </form>
+            </MessageScroller>
+          </MessageScrollerProvider>
+
+          <ChatComposer
+            input={input}
+            onInputChange={setInput}
+            onSubmit={submit}
+            onKeyDown={onKeyDown}
+            streaming={streaming}
+            uploading={uploading}
+            pending={pending}
+            onRemovePending={removePending}
+            onPickFiles={onPickFiles}
+            onAttachWorkspaceFiles={onAttachWorkspaceFiles}
+            onStop={stop}
+            placeholder={composerPlaceholder}
+            showSlashPopover={showPopover}
+            slashQuery={slashQuery}
+            commandCatalog={commandCatalog}
+            onSlashSelect={(cmd) => {
+              const hint = cmd.args_hint && cmd.args_hint.startsWith('<')
+              setInput(`/${cmd.name}${hint ? ' ' : ''}`)
+            }}
+            onSlashClose={() => setInput('')}
+            platformMode={platformMode}
+            workspaceId={workspaceId}
+            models={pickerModels}
+            selectedModel={selectedModel}
+            onModelChange={handleModelChange}
+            modelsLoading={modelsLoading}
+            usingFavorites={favoriteModels.length > 0}
+            enabledSkillsCount={enabledSkillsCount}
+            onNavigate={(route) => {
+              window.location.hash = `#/${route}`
+            }}
+            onPreviewDoc={onPreviewDoc}
+          />
+        </div>
       </section>
+
+      <FilePreviewDrawer
+        open={previewOpen}
+        onOpenChange={(open) => {
+          setPreviewOpen(open)
+          if (!open) setPreviewFile(null)
+        }}
+        workspaceId={workspaceId}
+        file={previewFile}
+      />
 
       {keyModal.open && (
         <KeyPromptModal
@@ -1004,34 +1232,4 @@ export function ChatPage() {
       )}
     </div>
   )
-}
-
-function updateAssistant(prev: Turn[], fn: (t: Turn) => Turn): Turn[] {
-  if (prev.length === 0) return prev
-  const last = prev[prev.length - 1]
-  if (last.role !== 'assistant') return prev
-  return [...prev.slice(0, -1), fn(last)]
-}
-
-function pushActivity(prev: Turn[], item: ActivityItem): Turn[] {
-  return updateAssistant(prev, (turn) => ({
-    ...turn,
-    activity: [...turn.activity, item],
-  }))
-}
-
-function appendToken(turn: Turn, text: string): Turn {
-  if (!text) return turn
-  const segments = [...turn.segments]
-  const last = segments[segments.length - 1]
-  if (last && last.kind === 'text') {
-    segments[segments.length - 1] = { kind: 'text', text: last.text + text }
-  } else {
-    segments.push({ kind: 'text', text })
-  }
-  return { ...turn, segments }
-}
-
-function turnHasText(turn: Turn): boolean {
-  return turn.segments.some((s) => (s.kind === 'text' || s.kind === 'system') && s.text)
 }
