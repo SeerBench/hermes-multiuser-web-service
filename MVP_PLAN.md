@@ -1,20 +1,34 @@
-# MVP Plan — Workspace file read fix
+# MVP Plan — Multi-user web_search default ddgs
 
 ## Goal
 
-Users can attach or upload files in their workspace and Hermes can read them during chat via `web_file_read`.
+After installing `[web-chat]`, every authenticated web user can use `web_search` via the global zero-key **ddgs** backend without per-user search API keys.
 
 ## Deliverables
 
-1. **Tool exposure:** Default `web_chat` agent receives `web_file_read`, `web_file_search`, and other fork sandbox tools from `hermes-web-chat`.
-2. **Document formats:** Local TXT/Markdown/PDF/DOCX/XLSX/PPTX readable after sandbox confinement.
-3. **Tests:** Gateway runner toolset regression + sandboxed file tool coverage + tenant isolation preserved.
+1. **Recommended config:** Operator `config.yaml` documents `web.search_backend: ddgs` (+ `http-fetch` extract fallback).
+2. **Startup probe:** Gateway logs search/extract backend availability at connect time with actionable fix steps when unavailable.
+3. **Tests:** Gateway web-research status helper + ddgs happy/edge paths; existing capability gating tests stay green.
+4. **Deploy docs:** `DEPLOY-no-docker.md` covers install, config, self-check, and restart.
 
 ## Acceptance
 
-- `scripts/run_tests.sh tests/gateway/test_web_chat_runner.py tests/gateway/test_web_sandboxed_file_tools.py tests/gateway/test_web_uploads.py` green.
-- Manual: attach `uploads/foo.txt` or platform file path → agent calls `web_file_read` → answer uses file content.
+```bash
+uv pip install -e ".[web-chat,platform]"
+scripts/run_tests.sh tests/gateway/test_web_chat_web_research.py tests/tools/test_web_capability_gating.py
+```
+
+Runtime self-check (venv):
+
+```python
+import tools.web_tools as w
+assert w._ddgs_package_importable()
+assert w._get_search_backend() == "ddgs"  # with recommended config
+assert w.check_web_search_available()
+```
+
+Manual: gateway startup log shows `web_search=ddgs available=True`; chat turn exposes `web_search` to the model and returns DuckDuckGo results (VPS outbound to DuckDuckGo required).
 
 ## Not in this slice
 
-MinIO paths, Knowledge Center RAG merge, multi-turn attachment persistence.
+Per-user search rate limits, Brave/Firecrawl global keys, upstream `DEFAULT_CONFIG` changes.

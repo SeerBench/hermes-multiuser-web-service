@@ -17,7 +17,15 @@ Browser SPA (web-chat/)
 - **Control plane DB:** SQLite (default) or PostgreSQL via `PLATFORM_DATABASE_URL`.
 - **Upstream LLM key:** per-user, encrypted; bound per request with `enter_upstream_key`.
 
-## Web chat tools (this change)
+## Web research (this change)
+
+- **Search (`web_search`):** global zero-key **`ddgs`** (DuckDuckGo via `ddgs` package shipped in `[web-chat]` extra). Operator configures `web.search_backend: ddgs` in `config.yaml`; no per-user search API keys.
+- **Extract (`web_extract`):** global zero-key **`http-fetch`** fallback when no paid extract backend is configured.
+- **Tool exposure:** `hermes-web-chat` lists both tools; registry `check_fn` gates on resolved backend availability (`check_web_search_available` / `check_web_extract_available`).
+- **Startup probe:** `gateway/web/web_research_status.py` logs INFO/WARNING at gateway connect time so operators see misconfiguration before users report missing tools.
+- **LLM billing:** remains per-user via new-api; web search cost is operator-side (ddgs is free; VPS must reach DuckDuckGo).
+
+## Web chat tools (prior slice)
 
 - Composite toolset `hermes-web-chat` lists sandboxed fork tools (`web_file_*`, `web_skill_*`, …).
 - Dynamic registry toolsets (`web_file`, `web_skill`, `web_memory`, `web_knowledge`) are registered at import time in `gateway/web/tools/`.
@@ -26,6 +34,9 @@ Browser SPA (web-chat/)
 
 ## Out of scope (this MVP slice)
 
+- Per-user search rate limits / QPS.
+- Brave / Firecrawl / Tavily global key provisioning and billing.
+- Changing upstream `DEFAULT_CONFIG["web"]` defaults in `hermes_cli/config.py`.
 - MinIO `s3://` object reads in `web_file_read`.
 - Unifying Files `DocumentChunk` ingest with Agent `web_knowledge_search`.
 - Cross-turn attachment reference persistence in SPA history.

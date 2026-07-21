@@ -1,6 +1,6 @@
-# Database Design — fork control plane (unchanged by file-read fix)
+# Database Design — fork control plane (unchanged by ddgs web_search slice)
 
-This fix does **not** add migrations or schema changes.
+This slice does **not** add migrations, schema changes, or per-user search key storage.
 
 ## Default (SQLite)
 
@@ -9,6 +9,11 @@ This fix does **not** add migrations or schema changes.
 | Platform control plane | `$HERMES_HOME/platform.db` | users, workspaces, files metadata, sessions, RAG rows |
 | Gateway legacy | `$HERMES_HOME/web_users.db` | API-key sessions (when not on platform DB) |
 | Agent sessions | `$HERMES_HOME/state.db` | conversation history (per profile) |
+
+## Web research keys
+
+- **Not stored in DB.** `web_search` / `web_extract` use process-global config (`config.yaml` + `.env`) and the `ddgs` Python package.
+- **LLM keys** remain per-user (`User.upstream_api_key_enc` / session rows) — separate from search providers.
 
 ## File content
 

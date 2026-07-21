@@ -341,6 +341,7 @@ class WebChatAdapter(BasePlatformAdapter):
             self._agent_semaphore = asyncio.Semaphore(self._max_concurrent_agents)
 
             self._log_global_skills_visibility()
+            self._log_web_research_status()
         except Exception as exc:
             logger.error("[%s] failed to initialise subsystems: %s", self.name, exc)
             return False
@@ -586,6 +587,22 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.info(
                 "[%s] global skills: %d found under %s (%s)",
                 self.name, skill_count, skills_dir, source,
+            )
+
+    def _log_web_research_status(self) -> None:
+        """One-shot startup probe for web_search / web_extract backend gates."""
+        try:
+            from gateway.web.web_research_status import (
+                log_web_research_status,
+                probe_web_research_status,
+            )
+
+            log_web_research_status(probe_web_research_status())
+        except Exception as exc:
+            logger.warning(
+                "[%s] web research startup probe failed: %s",
+                self.name,
+                exc,
             )
 
     @staticmethod
