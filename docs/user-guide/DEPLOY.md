@@ -124,8 +124,8 @@ sudo chown hermes:hermes /opt/hermes
 ```bash
 sudo -u hermes -H bash
 cd /opt/hermes
-git clone <YOUR_REPOSITORY_URL> app
-cd app
+git clone <YOUR_REPOSITORY_URL> hermes-multiuser-web-service
+cd hermes-multiuser-web-service
 git checkout main
 ```
 
@@ -135,7 +135,7 @@ git checkout main
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
-cd /opt/hermes/app
+cd /opt/hermes/hermes-multiuser-web-service
 uv python install 3.11
 uv venv --python 3.11 .venv
 source .venv/bin/activate
@@ -157,7 +157,7 @@ uv pip install "psycopg[binary]"
 所以每次发布前都必须重新构建：
 
 ```bash
-cd /opt/hermes/app/web-chat
+cd /opt/hermes/hermes-multiuser-web-service/web-chat
 npm ci
 npm run build
 test -f ../gateway/web/_static/index.html
@@ -330,11 +330,11 @@ Requires=docker.service
 Type=simple
 User=hermes
 Group=hermes
-WorkingDirectory=/opt/hermes/app
+WorkingDirectory=/opt/hermes/hermes-multiuser-web-service
 Environment=HERMES_HOME=/home/hermes/.hermes
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/home/hermes/.hermes/.env
-ExecStart=/opt/hermes/app/.venv/bin/uvicorn platform_api.main:app --host 127.0.0.1 --port 8700
+ExecStart=/opt/hermes/hermes-multiuser-web-service/.venv/bin/uvicorn platform_api.main:app --host 127.0.0.1 --port 8700
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -363,12 +363,12 @@ Requires=docker.service hermes-platform-api.service
 Type=simple
 User=hermes
 Group=hermes
-WorkingDirectory=/opt/hermes/app
+WorkingDirectory=/opt/hermes/hermes-multiuser-web-service
 Environment=HOME=/home/hermes
 Environment=HERMES_HOME=/home/hermes/.hermes
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/home/hermes/.hermes/.env
-ExecStart=/opt/hermes/app/.venv/bin/hermes gateway run --replace
+ExecStart=/opt/hermes/hermes-multiuser-web-service/.venv/bin/hermes gateway run --replace
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60
@@ -436,7 +436,7 @@ sudo -u hermes -H bash -lc '
   set -a
   source /home/hermes/.hermes/.env
   set +a
-  cd /opt/hermes/app
+  cd /opt/hermes/hermes-multiuser-web-service
   .venv/bin/python scripts/create_admin.py \
     --email admin@example.com \
     --password "replace-with-a-long-random-password"
@@ -458,7 +458,7 @@ server {
 
     client_max_body_size 25m;
 
-    root /opt/hermes/app/gateway/web/_static;
+    root /opt/hermes/hermes-multiuser-web-service/gateway/web/_static;
     index index.html;
 
     location /api/v1/ {
@@ -507,9 +507,9 @@ server {
 确保 nginx 可以读取构建产物：
 
 ```bash
-sudo chmod o+x /opt /opt/hermes /opt/hermes/app
-sudo find /opt/hermes/app/gateway/web/_static -type d -exec chmod 755 {} \;
-sudo find /opt/hermes/app/gateway/web/_static -type f -exec chmod 644 {} \;
+sudo chmod o+x /opt /opt/hermes /opt/hermes/hermes-multiuser-web-service
+sudo find /opt/hermes/hermes-multiuser-web-service/gateway/web/_static -type d -exec chmod 755 {} \;
+sudo find /opt/hermes/hermes-multiuser-web-service/gateway/web/_static -type f -exec chmod 644 {} \;
 
 sudo ln -s /etc/nginx/sites-available/hermes /etc/nginx/sites-enabled/hermes
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -588,7 +588,7 @@ sudo journalctl -u hermes-platform-api -u hermes-gateway \
 sudo -u hermes -H bash -lc '
   set -e
   export PATH="$HOME/.local/bin:$PATH"
-  cd /opt/hermes/app
+  cd /opt/hermes/hermes-multiuser-web-service
   ./deploy/update-platform.sh --systemd hermes-platform-api,hermes-gateway
 '
 ```
@@ -612,7 +612,7 @@ sudo -u hermes -H bash -lc '
 sudo -u hermes -H bash -lc '
   set -e
   export PATH="$HOME/.local/bin:$PATH"
-  cd /opt/hermes/app
+  cd /opt/hermes/hermes-multiuser-web-service
   git pull --ff-only
 
   source .venv/bin/activate
@@ -635,7 +635,7 @@ sudo nginx -t
 更新后：
 
 ```bash
-cd /opt/hermes/app
+cd /opt/hermes/hermes-multiuser-web-service
 git log --oneline -1
 stat gateway/web/_static/index.html
 curl -fsS https://hermes.example.com/api/healthz
@@ -664,7 +664,7 @@ key。
 
 ```bash
 sudo -u hermes -H bash -lc '
-  cd /opt/hermes/app
+  cd /opt/hermes/hermes-multiuser-web-service
   BACKUP_ROOT=/var/backups/hermes \
   HERMES_HOME=$HOME/.hermes \
   COMPOSE_DIR=/opt/hermes/infra \
@@ -736,7 +736,7 @@ sudo systemctl start hermes-gateway
 ```bash
 sudo -u hermes -H bash -lc '
   set -e
-  cd /opt/hermes/app
+  cd /opt/hermes/hermes-multiuser-web-service
   git log --oneline -10
   git checkout <KNOWN_GOOD_COMMIT>
   export PATH="$HOME/.local/bin:$PATH"
@@ -817,7 +817,7 @@ sudo journalctl -u hermes-gateway -n 150 --no-pager
 
 ```bash
 sudo -u hermes -H bash -lc \
-  'cd /opt/hermes/app/web-chat && npm ci && npm run build'
+  'cd /opt/hermes/hermes-multiuser-web-service/web-chat && npm ci && npm run build'
 sudo systemctl reload nginx
 ```
 

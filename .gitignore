@@ -79,3 +79,6 @@ hermes_cli/tui_dist/*
 hermes_cli/scripts/
 docs/superpowers/*
 .gstack/
+
+# Local deploy notes (site-specific; keep out of git)
+docs/user-guide/DEPLOY-no-docker.md

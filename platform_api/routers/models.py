@@ -6,12 +6,14 @@ import os
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Cookie, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from gateway.web.platform.models import Workspace
 from gateway.web.platform.store import PlatformStore
+from gateway.web.upstream_key import normalize_new_api_base_url
+from gateway.web.users import InvalidCredentialsError
 from platform_api.deps import get_current_user_id, get_store, get_vault
 
 router = APIRouter(prefix="/workspaces", tags=["models"])
@@ -37,10 +39,33 @@ def _normalize_favorites(raw: Any) -> list[str]:
     return out
 
 
+def _resolve_upstream_key_enc(
+    store: PlatformStore,
+    user_id: str,
+    hermes_session: Optional[str],
+) -> Optional[str]:
+    """Prefer user.upstream_api_key_enc; fall back to session.api_key_enc.
+
+    API-key login historically only wrote the session row.  Falling back
+    keeps already-issued cookies working after upgrades.
+    """
+    enc = store.get_user_upstream_key_enc(user_id)
+    if enc:
+        return enc
+    if not hermes_session:
+        return None
+    try:
+        sess = store.verify_web_session(hermes_session)
+    except InvalidCredentialsError:
+        return None
+    return (sess.get("api_key_enc") or "").strip() or None
+
+
 @router.get("/{workspace_id}/models")
 def list_models(
     workspace_id: str,
     user_id: str = Depends(get_current_user_id),
+    hermes_session: Optional[str] = Cookie(default=None, alias="hermes_session"),
 ) -> dict[str, Any]:
     """Proxy new-api /v1/models using the caller's upstream key."""
     ws = _get_workspace(workspace_id, user_id)
@@ -48,12 +73,13 @@ def list_models(
     if not isinstance(store, PlatformStore):
         raise HTTPException(status_code=503, detail="platform store required")
 
-    enc = store.get_user_upstream_key_enc(user_id)
+    enc = _resolve_upstream_key_enc(store, user_id, hermes_session)
     if not enc:
         raise HTTPException(status_code=403, detail="upstream key not bound")
 
     api_key = get_vault().decrypt(enc)
-    base = os.environ.get("NEW_API_BASE_URL", "").strip().rstrip("/")
+    # Strip trailing /v1 so we never request /v1/v1/models.
+    base = normalize_new_api_base_url(os.environ.get("NEW_API_BASE_URL", ""))
     if not base:
         raise HTTPException(status_code=503, detail="NEW_API_BASE_URL not configured")
 

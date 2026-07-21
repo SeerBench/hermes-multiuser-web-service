@@ -156,6 +156,14 @@ class PlatformStore:
         encrypted_api_key: str,
         ttl_seconds: int = _DEFAULT_WEB_SESSION_TTL_SECONDS,
     ) -> str:
+        """Create a web session cookie token and sync the upstream key to the user.
+
+        Legacy ``POST /api/auth/login`` only used to persist the encrypted key
+        on ``PlatformSession``.  Platform endpoints such as
+        ``GET /workspaces/{id}/models`` read ``User.upstream_api_key_enc``, so
+        API-key logins produced an empty model picker (403 upstream key not
+        bound).  Mirror bind-key: keep both session + user rows in sync.
+        """
         if not self.get_user(user_id):
             raise UserStoreError(f"unknown user_id: {user_id}")
         plaintext = _new_web_session_token()
@@ -169,6 +177,15 @@ class PlatformStore:
                     expires_at=expires,
                 )
             )
+            # Sync encrypted upstream key onto the user row so control-plane
+            # APIs (models, etc.) work after API-key login without a separate
+            # bind-key step.
+            if encrypted_api_key:
+                user = db.get(User, user_id)
+                if user is not None:
+                    user.upstream_api_key_enc = encrypted_api_key
+                    user.upstream_status = "ready"
+                    user.last_seen_at = datetime.now(timezone.utc)
         return plaintext
 
     def verify_web_session(self, plaintext: str) -> Dict[str, Any]:
