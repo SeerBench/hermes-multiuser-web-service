@@ -130,6 +130,39 @@ def _emit_agent_create_trace(
         logger.debug("web_chat debug trace failed: %r", trace_exc)
 
 
+# Registry toolsets registered by ``gateway/web/tools`` at import time.  They are
+# part of the ``hermes-web-chat`` composite but absent from static ``TOOLSETS``,
+# so ``_get_platform_tools(config, "web_chat")`` drops them unless we merge back.
+_FORK_WEB_CHAT_SANDBOX_TOOLSETS: frozenset[str] = frozenset({
+    "web_file",
+    "web_skill",
+    "web_memory",
+    "web_knowledge",
+})
+
+
+def _resolve_web_chat_enabled_toolsets(user_config: dict) -> list[str]:
+    """Return enabled toolset names for web_chat, including fork sandbox sets.
+
+    Generic ``_get_platform_tools`` reverse-maps only static CONFIGURABLE
+    toolsets and misses dynamic registry toolsets such as ``web_file``.  Without
+    this merge, ``web_file_read`` is registered but never exposed to the model.
+    """
+    from hermes_cli.tools_config import _get_platform_tools
+    from toolsets import resolve_toolset
+    from tools.registry import registry
+
+    enabled = set(_get_platform_tools(user_config, "web_chat"))
+    composite_tools = set(resolve_toolset("hermes-web-chat"))
+
+    for ts_name in _FORK_WEB_CHAT_SANDBOX_TOOLSETS:
+        ts_tools = set(registry.get_tool_names_for_toolset(ts_name))
+        if ts_tools and ts_tools.issubset(composite_tools):
+            enabled.add(ts_name)
+
+    return sorted(enabled)
+
+
 # Platform-level system-prompt addendum.  Appended ahead of any SPA-supplied
 # ``system_prompt`` so the agent always knows what surface it is running on,
 # what fork-specific tools exist, and how Brave / secrets are handled.
@@ -192,7 +225,11 @@ Attachments:  When the user uploads files, they are saved into this user's
 private workspace under ``uploads/`` and the chat message lists them by their
 workspace-relative path (e.g. ``uploads/data.csv``).  Read them on demand with
 ``web_file_read`` (or search them with ``web_file_search``) using that relative
-path — do not ask the user to paste file contents into chat.
+path — do not ask the user to paste file contents into chat.  Supported read
+formats include plain text (``.txt``, ``.md``), PDF, Word (``.docx``), Excel
+(``.xlsx``), and PowerPoint (``.pptx``).  When attachments are listed in the
+user message, call ``web_file_read`` on those paths before answering questions
+about their contents.
 
 Web search:  The ``web_search`` tool is already wired up.  If the operator
 has configured ``BRAVE_SEARCH_API_KEY`` server-side, ``web_search`` already
@@ -234,8 +271,10 @@ def _workspace_runtime_prompt(*, workspace: Any, model: str) -> str:
                 "workspace via ``web_file_read`` / ``web_file_write`` / "
                 "``web_file_patch`` / ``web_file_search``.  Relative paths "
                 "resolve from the workspace root (e.g. ``uploads/data.csv``, "
-                "``files/notes.md``).  Never claim the gateway process CWD "
-                "or the hermes-agent checkout is the user's directory.",
+                "``files/notes.md``).  ``web_file_read`` extracts text from "
+                "PDF and Office documents (``.pdf``, ``.docx``, ``.xlsx``, "
+                "``.pptx``) after sandbox confinement.  Never claim the gateway "
+                "process CWD or the hermes-agent checkout is the user's directory.",
             ]
         )
     return "\n".join(lines)
@@ -302,7 +341,6 @@ class WebChatAgentRunner:
             _resolve_runtime_agent_kwargs,
         )
         from gateway.web.upstream_key import get_upstream_key
-        from hermes_cli.tools_config import _get_platform_tools
 
         runtime_kwargs = _resolve_runtime_agent_kwargs()
         # BYO-key mode: if the chat handler bound the end-user's upstream
@@ -322,7 +360,7 @@ class WebChatAgentRunner:
         )
 
         user_config = _load_gateway_config()
-        enabled_toolsets = sorted(_get_platform_tools(user_config, "web_chat"))
+        enabled_toolsets = _resolve_web_chat_enabled_toolsets(user_config)
 
         # Fork debug trace (necessary point) — one diagnostic line per turn
         # into ./logs, evaluated under this user's HERMES_HOME context.  See
