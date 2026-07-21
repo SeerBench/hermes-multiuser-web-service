@@ -82,3 +82,6 @@ docs/superpowers/*
 
 # Local deploy notes (site-specific; keep out of git)
 docs/user-guide/DEPLOY-no-docker.md
+
+# Cursor agent plans — local only, do not push to GitHub
+.cursor/plans/
