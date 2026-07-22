@@ -95,6 +95,7 @@ export function ChatTurnBubble({
                 result_preview={seg.result_preview}
                 duration={seg.duration}
                 error={seg.error}
+                search_meta={seg.search_meta}
               />
             )
           }

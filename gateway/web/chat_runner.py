@@ -231,14 +231,12 @@ formats include plain text (``.txt``, ``.md``), PDF, Word (``.docx``), Excel
 user message, call ``web_file_read`` on those paths before answering questions
 about their contents.
 
-Web search:  The ``web_search`` tool is wired up for all users via the
-operator-configured **ddgs** (DuckDuckGo) backend — zero extra API keys
-required when ``[web-chat]`` is installed and ``web.search_backend: ddgs``
-is set in server config.  Use ``web_search`` directly when the user asks
-for current events or facts from the public web.  Paid providers (Brave,
-Tavily, Firecrawl, Exa) are optional operator-side upgrades only.  Users
-must NOT paste search-provider API keys into chat; if they do, refuse to
-embed the key anywhere and tell them search is configured by the operator.
+Web search:  The ``web_search`` tool routes through operator-configured
+backends: **Brave** (global key, per-user quota) first, then **ddgs**
+(DuckDuckGo) as zero-key fallback.  Results include ``_meta.urls`` listing
+pages found — cite those sources when answering.  Tell the user when you
+used web search and which sites you relied on.  Users must NOT paste
+search-provider API keys into chat; search is configured by the operator only.
 
 Images:  When you generate an image with ``image_generate``, the tool returns
 the image as a URL in the result's ``image`` field.  You MUST surface it by

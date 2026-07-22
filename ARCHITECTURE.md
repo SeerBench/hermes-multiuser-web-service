@@ -17,26 +17,24 @@ Browser SPA (web-chat/)
 - **Control plane DB:** SQLite (default) or PostgreSQL via `PLATFORM_DATABASE_URL`.
 - **Upstream LLM key:** per-user, encrypted; bound per request with `enter_upstream_key`.
 
-## Web research (this change)
+## Web research (Brave + ddgs hybrid)
 
-- **Search (`web_search`):** global zero-key **`ddgs`** (DuckDuckGo via `ddgs` package shipped in `[web-chat]` extra). Operator configures `web.search_backend: ddgs` in `config.yaml`; no per-user search API keys.
-- **Extract (`web_extract`):** global zero-key **`http-fetch`** fallback when no paid extract backend is configured.
-- **Tool exposure:** `hermes-web-chat` lists both tools; registry `check_fn` gates on resolved backend availability (`check_web_search_available` / `check_web_extract_available`).
-- **Startup probe:** `gateway/web/web_research_status.py` logs INFO/WARNING at gateway connect time so operators see misconfiguration before users report missing tools.
-- **LLM billing:** remains per-user via new-api; web search cost is operator-side (ddgs is free; VPS must reach DuckDuckGo).
+- **Routing:** `gateway/web/web_search_router.py` picks backend per user per call:
+  - `brave-free` when global `BRAVE_SEARCH_API_KEY` is set and user has remaining Brave quota.
+  - `ddgs` fallback when Brave quota exhausted, no key, or Brave unavailable.
+- **Quota:** Operator-only via `.env` (`WEB_SEARCH_BRAVE_MAX_PER_USER`, `WEB_SEARCH_BRAVE_WINDOW_SECONDS`). Counts stored in `usage_records` (`type=tool`, `metadata.backend=brave-free`). Users cannot change limits or keys in UI.
+- **Tool surface:** `gateway/web/tools/sandboxed_web_search.py` overrides upstream `web_search` at gateway import (`override=True`); `hermes-web-chat` toolset name unchanged.
+- **Feedback:** Tool JSON includes `_meta` (backend, urls, brave_remaining); SSE `status` + enriched `tool_end.search_meta` for SPA ActivityLog and ToolEvent URL list.
+- **LLM billing:** remains per-user via new-api; Brave/ddgs search cost is operator-side.
 
-## Web chat tools (prior slice)
+## Web chat tools (prior slices)
 
 - Composite toolset `hermes-web-chat` lists sandboxed fork tools (`web_file_*`, `web_skill_*`, …).
-- Dynamic registry toolsets (`web_file`, `web_skill`, `web_memory`, `web_knowledge`) are registered at import time in `gateway/web/tools/`.
-- `WebChatAgentRunner` must merge those dynamic toolsets into `enabled_toolsets`; generic `_get_platform_tools()` only knows static `TOOLSETS`.
-- File reads: `web_file_read` confines paths then reads text or extracts PDF/Office via `platform_api.services.extract`.
+- Dynamic registry toolsets registered at import in `gateway/web/tools/`.
+- File reads: `web_file_read` confines paths then reads text or extracts PDF/Office.
 
-## Out of scope (this MVP slice)
+## Out of scope
 
-- Per-user search rate limits / QPS.
-- Brave / Firecrawl / Tavily global key provisioning and billing.
-- Changing upstream `DEFAULT_CONFIG["web"]` defaults in `hermes_cli/config.py`.
-- MinIO `s3://` object reads in `web_file_read`.
-- Unifying Files `DocumentChunk` ingest with Agent `web_knowledge_search`.
-- Cross-turn attachment reference persistence in SPA history.
+- Per-user Brave API keys; parallel merge of Brave + ddgs results in one call.
+- Changing upstream `DEFAULT_CONFIG["web"]` or `tools/web_tools.py` dispatch.
+- Global Brave monthly cap enforcement (upstream 429 only).

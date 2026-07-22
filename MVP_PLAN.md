@@ -1,34 +1,26 @@
-# MVP Plan — Multi-user web_search default ddgs
+# MVP Plan — web_search Brave + ddgs hybrid
 
 ## Goal
 
-After installing `[web-chat]`, every authenticated web user can use `web_search` via the global zero-key **ddgs** backend without per-user search API keys.
+Multi-user web chat uses global Brave when the user has quota, falls back to ddgs, shows usage notifications and searched URLs in the UI. Users cannot configure keys or limits.
 
 ## Deliverables
 
-1. **Recommended config:** Operator `config.yaml` documents `web.search_backend: ddgs` (+ `http-fetch` extract fallback).
-2. **Startup probe:** Gateway logs search/extract backend availability at connect time with actionable fix steps when unavailable.
-3. **Tests:** Gateway web-research status helper + ddgs happy/edge paths; existing capability gating tests stay green.
-4. **Deploy docs:** `DEPLOY-no-docker.md` covers install, config, self-check, and restart.
+1. **Router:** `web_search_router` + `web_search_limits` + `sandboxed_web_search` override.
+2. **Env limits:** `WEB_SEARCH_BRAVE_MAX_PER_USER`, `WEB_SEARCH_BRAVE_WINDOW_SECONDS`, global `BRAVE_SEARCH_API_KEY`.
+3. **SSE feedback:** `status` message after each search; `tool_end.search_meta` for structured UI.
+4. **SPA:** ToolEvent shows backend label + URL list; i18n zh/en.
+5. **Tests:** Gateway sandbox routing, isolation, status message helper; frontend `extractWebSearchSummary`.
 
 ## Acceptance
 
 ```bash
-uv pip install -e ".[web-chat,platform]"
-scripts/run_tests.sh tests/gateway/test_web_chat_web_research.py tests/tools/test_web_capability_gating.py
+scripts/run_tests.sh tests/gateway/test_web_sandboxed_web_search.py tests/gateway/test_web_chat_web_research.py
+cd web-chat && npm test
 ```
 
-Runtime self-check (venv):
-
-```python
-import tools.web_tools as w
-assert w._ddgs_package_importable()
-assert w._get_search_backend() == "ddgs"  # with recommended config
-assert w.check_web_search_available()
-```
-
-Manual: gateway startup log shows `web_search=ddgs available=True`; chat turn exposes `web_search` to the model and returns DuckDuckGo results (VPS outbound to DuckDuckGo required).
+Manual: user A exhausts Brave quota → auto ddgs; ActivityLog shows remaining count; ToolEvent lists URLs.
 
 ## Not in this slice
 
-Per-user search rate limits, Brave/Firecrawl global keys, upstream `DEFAULT_CONFIG` changes.
+Brave+ddgs parallel merge, per-user Brave keys, SPA settings for search.

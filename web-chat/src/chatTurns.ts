@@ -13,6 +13,7 @@ export type ToolSegment = {
   result_preview?: string
   duration?: number
   error?: boolean
+  search_meta?: Record<string, unknown> | null
 }
 
 export type Segment =

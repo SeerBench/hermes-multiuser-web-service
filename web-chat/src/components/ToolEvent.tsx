@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { useT } from '../i18n'
-import { extractImageUrl, prettyJson } from '../toolEventUtils'
+import {
+  extractImageUrl,
+  extractWebSearchSummary,
+  prettyJson,
+  type WebSearchSummary,
+} from '../toolEventUtils'
 
 type Props = {
   tool: string
@@ -9,6 +14,7 @@ type Props = {
   result_preview?: string
   duration?: number
   error?: boolean
+  search_meta?: Record<string, unknown> | null
 }
 
 /**
@@ -17,7 +23,15 @@ type Props = {
  * args preview + status. Click to expand for full arguments and the
  * tool's result.
  */
-export function ToolEvent({ tool, preview, args, result_preview, duration, error }: Props) {
+export function ToolEvent({
+  tool,
+  preview,
+  args,
+  result_preview,
+  duration,
+  error,
+  search_meta,
+}: Props) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const finished = duration != null
@@ -27,14 +41,26 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
       : `${(duration ?? 0).toFixed(2)}s`
     : t('tool.status.running')
 
-  const canToggle = finished && (Boolean(args) || Boolean(result_preview))
+  const searchSummary: WebSearchSummary | null =
+    !error && finished
+      ? extractWebSearchSummary(tool, result_preview, search_meta)
+      : null
 
-  // Fallback image rendering: image_generate returns its picture only as a URL
-  // inside the tool result. Surface it as an actual <img> so the user sees the
-  // image even when the model forgets to inline ![](url) in its prose reply.
-  // (The primary path is the agent embedding the Markdown — see the web
-  // platform prompt addendum — but this guards against non-compliance.)
+  const canToggle =
+    finished &&
+    (Boolean(args) || Boolean(result_preview) || Boolean(searchSummary?.urls.length))
+
   const imageUrl = !error && finished ? extractImageUrl(tool, result_preview) : null
+
+  const inlineHint =
+    searchSummary && searchSummary.resultCount > 0
+      ? t('tool.webSearch.inline', {
+          backend: searchSummary.backendLabel,
+          count: searchSummary.resultCount,
+        })
+      : searchSummary
+        ? t('tool.webSearch.inlineEmpty', { backend: searchSummary.backendLabel })
+        : null
 
   return (
     <div className={`tool-event ${error ? 'tool-error' : ''}${open ? ' tool-open' : ''}`}>
@@ -47,7 +73,11 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
         title={canToggle ? (open ? t('tool.hide.details') : t('tool.show.details')) : undefined}
       >
         <span className="tool-name">{tool}</span>
-        {preview && <span className="tool-preview">{preview}</span>}
+        {inlineHint ? (
+          <span className="tool-preview">{inlineHint}</span>
+        ) : (
+          preview && <span className="tool-preview">{preview}</span>
+        )}
         <span className="tool-status">{status}</span>
         {canToggle && (
           <span className="tool-event-caret" aria-hidden>
@@ -67,6 +97,31 @@ export function ToolEvent({ tool, preview, args, result_preview, duration, error
       )}
       {open && (
         <div className="tool-event-details">
+          {searchSummary && (
+            <div className="tool-event-section tool-web-search-summary">
+              <div className="tool-web-search-backend">
+                {t('tool.webSearch.backend', { backend: searchSummary.backendLabel })}
+                {searchSummary.braveRemaining != null &&
+                  searchSummary.backend === 'brave-free' &&
+                  t('tool.webSearch.braveRemaining', {
+                    count: searchSummary.braveRemaining,
+                  })}
+              </div>
+              {searchSummary.urls.length > 0 ? (
+                <ul className="tool-web-search-urls">
+                  {searchSummary.urls.map((hit) => (
+                    <li key={hit.url}>
+                      <a href={hit.url} target="_blank" rel="noopener noreferrer">
+                        {hit.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="tool-web-search-empty">{t('tool.webSearch.noUrls')}</p>
+              )}
+            </div>
+          )}
           {args ? (
             <details open className="tool-event-section">
               <summary>{t('tool.args.heading')}</summary>

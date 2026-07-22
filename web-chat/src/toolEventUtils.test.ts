@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractImageUrl, prettyJson } from './toolEventUtils'
+import { extractImageUrl, extractWebSearchSummary, prettyJson } from './toolEventUtils'
 
 describe('prettyJson', () => {
   it('pretty-prints valid JSON', () => {
@@ -39,5 +39,42 @@ describe('extractImageUrl', () => {
   it('rejects non-http URLs', () => {
     const result = JSON.stringify({ success: true, image: 'javascript:alert(1)' })
     expect(extractImageUrl('image_generate', result)).toBeNull()
+  })
+})
+
+describe('extractWebSearchSummary', () => {
+  it('returns null for non-web_search tools', () => {
+    expect(extractWebSearchSummary('web_file_read', '{}')).toBeNull()
+  })
+
+  it('extracts backend and urls from result json', () => {
+    const result = JSON.stringify({
+      success: true,
+      data: {
+        web: [{ title: 'A', url: 'https://a.example', description: 'd' }],
+      },
+      _meta: {
+        backend: 'brave-free',
+        brave_remaining: 4,
+        urls: ['https://a.example'],
+        url_count: 1,
+      },
+    })
+    const summary = extractWebSearchSummary('web_search', result)
+    expect(summary?.backend).toBe('brave-free')
+    expect(summary?.backendLabel).toBe('Brave')
+    expect(summary?.resultCount).toBe(1)
+    expect(summary?.urls[0]?.url).toBe('https://a.example')
+    expect(summary?.braveRemaining).toBe(4)
+  })
+
+  it('prefers search_meta from sse when provided', () => {
+    const summary = extractWebSearchSummary('web_search', undefined, {
+      backend: 'ddgs',
+      urls: ['https://b.example'],
+      url_count: 1,
+    })
+    expect(summary?.backendLabel).toBe('DuckDuckGo')
+    expect(summary?.urls[0]?.url).toBe('https://b.example')
   })
 })

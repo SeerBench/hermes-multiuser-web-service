@@ -137,6 +137,11 @@
   "tool.result.heading": "Result",
   "tool.result.empty": "(no output)",
   "tool.image.alt": "Generated image",
+  "tool.webSearch.inline": "{backend} · {count} results",
+  "tool.webSearch.inlineEmpty": "{backend} · no results",
+  "tool.webSearch.backend": "Search engine: {backend}",
+  "tool.webSearch.braveRemaining": " (Brave remaining: {count})",
+  "tool.webSearch.noUrls": "No page URLs returned",
 
   "command.popover.heading": "Commands",
   "command.popover.empty": "No matching commands",

@@ -21,6 +21,7 @@ export type ChatEvent =
       duration: number
       error: boolean
       result_preview: string
+      search_meta?: Record<string, unknown> | null
     }
   | { type: 'reasoning'; text: string }
   | { type: 'status'; kind: 'lifecycle' | 'warn'; message: string }

@@ -627,6 +627,7 @@ export function ChatPage({
                     duration: ev.duration,
                     error: ev.error,
                     result_preview: ev.result_preview,
+                    search_meta: ev.search_meta,
                   }
                 }),
               })),

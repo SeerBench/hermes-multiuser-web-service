@@ -137,6 +137,11 @@
   "tool.result.heading": "结果",
   "tool.result.empty": "(无输出)",
   "tool.image.alt": "生成的图片",
+  "tool.webSearch.inline": "{backend} · {count} 条结果",
+  "tool.webSearch.inlineEmpty": "{backend} · 无结果",
+  "tool.webSearch.backend": "搜索引擎：{backend}",
+  "tool.webSearch.braveRemaining": "（Brave 剩余 {count} 次）",
+  "tool.webSearch.noUrls": "未返回网页链接",
 
   "command.popover.heading": "命令",
   "command.popover.empty": "无匹配命令",

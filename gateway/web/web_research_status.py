@@ -23,6 +23,9 @@ web:
 _FIX_PREFIX = (
     "Install the [web-chat] extra (ships ddgs): "
     "uv pip install -e \".[web-chat,platform]\"\n"
+    "Optional Brave: set BRAVE_SEARCH_API_KEY in ~/.hermes/.env\n"
+    "Per-user Brave limits: WEB_SEARCH_BRAVE_MAX_PER_USER, "
+    "WEB_SEARCH_BRAVE_WINDOW_SECONDS\n"
     "Then set in ~/.hermes/config.yaml:\n"
     f"{_RECOMMENDED_WEB_CONFIG}"
 )
@@ -45,15 +48,28 @@ class WebResearchStatus:
 
 def probe_web_research_status() -> WebResearchStatus:
     """Resolve search/extract backends without triggering gate WARNING logs."""
+    try:
+        from gateway.web.tools.sandboxed_web_search import (
+            check_sandboxed_web_search_available,
+        )
+
+        search_ok = check_sandboxed_web_search_available()
+        search_backend = "brave-free+ddgs" if search_ok else "none"
+    except Exception:
+        from tools.web_tools import (
+            _get_search_backend,
+            _is_backend_available,
+        )
+
+        search_backend = _get_search_backend()
+        search_ok = bool(_is_backend_available(search_backend))
+
     from tools.web_tools import (
         _get_extract_backend,
-        _get_search_backend,
         _is_backend_available,
     )
 
-    search_backend = _get_search_backend()
     extract_backend = _get_extract_backend()
-    search_ok = bool(_is_backend_available(search_backend))
     extract_ok = bool(_is_backend_available(extract_backend))
 
     fix_hint: Optional[str] = None
