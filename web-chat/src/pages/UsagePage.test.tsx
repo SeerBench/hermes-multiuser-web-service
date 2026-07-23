@@ -46,7 +46,7 @@ describe('Usage Center', () => {
       items: [],
     })
     vi.mocked(platform.getUsageLogs).mockResolvedValue({
-      total: 1,
+      total: 2,
       limit: 50,
       offset: 0,
       items: [
@@ -59,6 +59,21 @@ describe('Usage Center', () => {
           total_tokens: 30,
           cost: 0,
           created_at: '2026-07-18T00:00:00Z',
+        },
+        {
+          id: 'u2',
+          type: 'tool',
+          tool_name: 'web_search',
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+          cost: 0,
+          created_at: '2026-07-18T01:00:00Z',
+          metadata: {
+            backend: 'brave-free',
+            query: 'openai news',
+            url_count: 3,
+          },
         },
       ],
     })
@@ -74,6 +89,10 @@ describe('Usage Center', () => {
 
     expect(
       await screen.findByRole('heading', { name: /usage center/i }),
+    ).toBeInTheDocument()
+
+    expect(
+      screen.getByRole('button', { name: /back to chat/i }),
     ).toBeInTheDocument()
 
     await waitFor(() => {
@@ -92,5 +111,7 @@ describe('Usage Center', () => {
       expect(platform.getUsageLogs).toHaveBeenCalled()
     })
     expect(await screen.findByText(/Σ30/)).toBeInTheDocument()
+    expect(await screen.findByText(/Engine Brave/i)).toBeInTheDocument()
+    expect(screen.getByText(/openai news/i)).toBeInTheDocument()
   })
 })

@@ -2,15 +2,16 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Copy, Pencil, RotateCcw, Share2 } from 'lucide-react'
 import { useT } from '../i18n'
-import { shareOrCopyText } from '../conversationShare'
 import { cn } from '@/lib/utils'
 
 type Props = {
   copyText: string
   onRetry?: () => void
   onEdit?: () => void
-  /** Assistant: share this reply. User turns omit. */
+  /** Assistant: share this reply (opens confirm → static link). */
   shareable?: boolean
+  /** Called when the user clicks Share (parent owns confirm dialog). */
+  onShare?: () => void
 }
 
 type ActionBtnProps = {
@@ -45,12 +46,10 @@ export function MessageActions({
   onRetry,
   onEdit,
   shareable = false,
+  onShare,
 }: Props) {
   const t = useT()
   const [copied, setCopied] = useState(false)
-  const [shareState, setShareState] = useState<'idle' | 'shared' | 'copied'>(
-    'idle',
-  )
 
   const copy = async () => {
     try {
@@ -73,18 +72,6 @@ export function MessageActions({
     }
   }
 
-  const share = async () => {
-    try {
-      const mode = await shareOrCopyText(copyText, {
-        title: t('actions.share.title'),
-      })
-      setShareState(mode)
-      window.setTimeout(() => setShareState('idle'), 1500)
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-    }
-  }
-
   return (
     <div className="msg-actions" role="group">
       <ActionBtn
@@ -95,18 +82,8 @@ export function MessageActions({
         <Copy className="size-3.5" aria-hidden />
       </ActionBtn>
 
-      {shareable && (
-        <ActionBtn
-          label={
-            shareState === 'shared'
-              ? t('actions.shared')
-              : shareState === 'copied'
-                ? t('actions.copied')
-                : t('actions.share')
-          }
-          onClick={() => void share()}
-          active={shareState !== 'idle'}
-        >
+      {shareable && onShare && (
+        <ActionBtn label={t('actions.share')} onClick={onShare}>
           <Share2 className="size-3.5" aria-hidden />
         </ActionBtn>
       )}

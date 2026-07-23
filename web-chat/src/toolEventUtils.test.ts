@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractImageUrl, extractWebSearchSummary, prettyJson } from './toolEventUtils'
+import {
+  collectTurnSearchHits,
+  extractImageUrl,
+  extractWebSearchSummary,
+  faviconUrlForSite,
+  formatSearchStatusMessage,
+  prettyJson,
+  summarizeTurnWebSearchConsumption,
+} from './toolEventUtils'
 
 describe('prettyJson', () => {
   it('pretty-prints valid JSON', () => {
@@ -76,5 +84,122 @@ describe('extractWebSearchSummary', () => {
     })
     expect(summary?.backendLabel).toBe('DuckDuckGo')
     expect(summary?.urls[0]?.url).toBe('https://b.example')
+  })
+})
+
+describe('formatSearchStatusMessage', () => {
+  it('formats Brave remaining quota', () => {
+    expect(
+      formatSearchStatusMessage({
+        backend: 'brave-free',
+        brave_remaining: 3,
+      }),
+    ).toBe('使用 Brave 搜索，Brave 用量还剩 3 次')
+  })
+
+  it('formats ddgs after Brave quota exhausted', () => {
+    expect(
+      formatSearchStatusMessage({
+        backend: 'ddgs',
+        fallback_reason: 'brave_quota_exhausted',
+      }),
+    ).toContain('Brave 额度已用完')
+  })
+})
+
+describe('collectTurnSearchHits + favicon', () => {
+  it('dedupes urls across web_search segments', () => {
+    const hits = collectTurnSearchHits([
+      {
+        kind: 'tool',
+        tool: 'web_search',
+        search_meta: {
+          backend: 'brave-free',
+          urls: ['https://a.example/1', 'https://b.example/2'],
+        },
+      },
+      {
+        kind: 'tool',
+        tool: 'web_search',
+        search_meta: {
+          backend: 'ddgs',
+          urls: ['https://b.example/2', 'https://c.example/3'],
+        },
+      },
+      { kind: 'text' },
+    ])
+    expect(hits.map((h) => h.url)).toEqual([
+      'https://a.example/1',
+      'https://b.example/2',
+      'https://c.example/3',
+    ])
+  })
+
+  it('builds favicon url from page host', () => {
+    expect(faviconUrlForSite('https://news.example.com/path')).toContain(
+      'domain=news.example.com',
+    )
+  })
+})
+
+describe('summarizeTurnWebSearchConsumption', () => {
+  it('returns null when no web_search', () => {
+    expect(
+      summarizeTurnWebSearchConsumption([
+        { kind: 'text', text: 'hi' },
+        { kind: 'tool', tool: 'web_file_read', preview: '', args: '' },
+      ]),
+    ).toBeNull()
+  })
+
+  it('counts brave and ddgs searches once per tool segment', () => {
+    const summary = summarizeTurnWebSearchConsumption([
+      {
+        kind: 'tool',
+        tool: 'web_search',
+        preview: '',
+        args: '',
+        duration: 1,
+        search_meta: {
+          backend: 'brave-free',
+          brave_remaining: 2,
+          urls: ['https://a.example'],
+        },
+      },
+      {
+        kind: 'tool',
+        tool: 'web_search',
+        preview: '',
+        args: '',
+        duration: 1,
+        search_meta: {
+          backend: 'ddgs',
+          urls: ['https://b.example'],
+        },
+      },
+      { kind: 'text', text: 'answer' },
+    ])
+    expect(summary).toEqual({
+      total: 2,
+      brave: 1,
+      ddgs: 1,
+      braveRemaining: 2,
+    })
+  })
+
+  it('skips errored web_search segments', () => {
+    expect(
+      summarizeTurnWebSearchConsumption([
+        {
+          kind: 'tool',
+          tool: 'web_search',
+          preview: '',
+          args: '',
+          duration: 1,
+          error: true,
+          search_meta: { backend: 'brave-free', urls: [] },
+        },
+      ]),
+    ).toBeNull()
   })
 })

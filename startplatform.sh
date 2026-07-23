@@ -181,6 +181,23 @@ else
     ok "control plane DB — $PLATFORM_DATABASE_URL"
 fi
 
+# Fail fast if SQLite URL points at a non-existent parent (common when
+# ~/.hermes/.env was copied from a Linux VPS like /home/hermes/...).
+if [[ "${PLATFORM_DATABASE_URL}" == sqlite:* ]]; then
+    _sqlite_path="${PLATFORM_DATABASE_URL#sqlite:///}"
+    if [[ "$_sqlite_path" == /* ]]; then
+        _sqlite_parent="$(dirname "$_sqlite_path")"
+        if [[ ! -d "$_sqlite_parent" ]]; then
+            err "SQLite parent directory missing: $_sqlite_parent"
+            err "PLATFORM_DATABASE_URL=$PLATFORM_DATABASE_URL"
+            err "On this machine use: sqlite:///$HERMES_HOME/platform.db"
+            err "Edit $ENV_FILE and retry."
+            exit 1
+        fi
+    fi
+    unset _sqlite_path _sqlite_parent
+fi
+
 export UPSTREAM_PROVISIONER="${UPSTREAM_PROVISIONER:-manual}"
 export PLATFORM_API_PORT="$PLATFORM_PORT"
 # Gateway proxies SPA /api/v1/* → platform-api (no nginx required locally).

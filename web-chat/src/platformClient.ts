@@ -832,6 +832,30 @@ export const platform = {
   /** Probe whether platform-api is available (does not require auth). */
   healthz: () => platformRequest<{ status: string }>('/healthz'),
 
+  createShare: (body: {
+    kind: 'reply' | 'conversation'
+    turns: { role: 'user' | 'assistant'; text: string }[]
+    title?: string | null
+    source_session_id?: string | null
+  }) =>
+    platformRequest<{
+      token: string
+      url_path: string
+      kind: string
+      created_at?: string | null
+    }>('/shares', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getShare: (token: string) =>
+    platformRequest<{
+      kind: string
+      title?: string | null
+      turns: { role: string; text: string }[]
+      created_at?: string | null
+    }>(`/shares/${encodeURIComponent(token)}`),
+
   searchKnowledge: (
     workspaceId: string,
     query: string,

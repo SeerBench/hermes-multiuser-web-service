@@ -11,6 +11,7 @@ import { SkillsPage } from './pages/SkillsPage'
 import { UsagePage } from './pages/UsagePage'
 import { AdminPage } from './pages/AdminPage'
 import { AdminAuditPage } from './pages/AdminAuditPage'
+import { SharePage } from './pages/SharePage'
 import { AccountMenu } from './components/AccountMenu'
 import { MainNavMenu } from './components/MainNavMenu'
 import { OnboardingModal } from './components/OnboardingModal'
@@ -177,8 +178,10 @@ function AppShell() {
 
   const shellTab = workspaceShellTab(pageRoute)
 
-  // 登录门禁 / 加载中不渲染工作台顶栏（仅已登录用户可见）
-  const showChrome = Boolean(user) && !showAuthGate && !authLoading
+  // 登录门禁 / 加载中 / 公开分享页不渲染工作台顶栏
+  const showChrome =
+    Boolean(user) && !showAuthGate && !authLoading && route !== 'share'
+  const isPublicShare = route === 'share'
 
   return (
     <div className={cn('app', route === 'settings' && 'app--settings-open')}>
@@ -237,11 +240,13 @@ function AppShell() {
           </div>
         </header>
       )}
-      {needsBindKey && (
+      {needsBindKey && !isPublicShare && (
         <PendingBindBanner onGoSettings={() => goto('settings')} />
       )}
       <main id="main-content" className="app-main" tabIndex={-1}>
-        {authLoading ? (
+        {isPublicShare ? (
+          <SharePage />
+        ) : authLoading ? (
           <p className="page-hint">{t('common.loading')}</p>
         ) : showAuthGate ? (
           <AuthPage
@@ -316,7 +321,7 @@ function AppShell() {
           </>
         )}
       </main>
-      {onboardingOpen && user && (
+      {onboardingOpen && user && !isPublicShare && (
         <OnboardingModal
           user={user}
           onUserUpdated={setUser}

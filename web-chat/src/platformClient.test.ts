@@ -57,6 +57,38 @@ describe('platform API', () => {
       PlatformApiError,
     )
   })
+
+  it('createShare posts snapshot and getShare reads by token', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          token: 'tok_1',
+          url_path: '#/share/tok_1',
+          kind: 'reply',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          kind: 'reply',
+          title: null,
+          turns: [{ role: 'assistant', text: 'hi' }],
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const created = await platform.createShare({
+      kind: 'reply',
+      turns: [{ role: 'assistant', text: 'hi' }],
+    })
+    expect(created.token).toBe('tok_1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/shares')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+
+    const got = await platform.getShare('tok_1')
+    expect(got.turns[0].text).toBe('hi')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/shares/tok_1')
+  })
 })
 
 describe('tryPlatformSession', () => {

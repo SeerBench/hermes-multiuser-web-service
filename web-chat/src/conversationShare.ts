@@ -1,6 +1,11 @@
 import type { Turn } from './chatTurns'
 import { turnToCopyText } from './chatTurns'
 
+export type ShareTurnPayload = {
+  role: 'user' | 'assistant'
+  text: string
+}
+
 /** Build a Markdown document from chat turns for copy / share / download. */
 export function conversationToMarkdown(
   turns: Turn[],
@@ -19,6 +24,27 @@ export function conversationToMarkdown(
     lines.push(`## ${role}`, '', body, '')
   }
   return lines.join('\n').trimEnd() + (lines.length ? '\n' : '')
+}
+
+/** Sanitize turns for immutable public share snapshots (text only). */
+export function turnsToSharePayload(turns: Turn[]): ShareTurnPayload[] {
+  const out: ShareTurnPayload[] = []
+  for (const turn of turns) {
+    if (turn.role !== 'user' && turn.role !== 'assistant') continue
+    const text = turnToCopyText(turn).trim()
+    if (!text) continue
+    out.push({ role: turn.role, text })
+  }
+  return out
+}
+
+/** Absolute browser URL for a share hash path (`#/share/…`). */
+export function absoluteShareUrl(urlPath: string): string {
+  const path = urlPath.startsWith('#')
+    ? urlPath
+    : `#/share/${urlPath.replace(/^\/+/, '')}`
+  const { origin, pathname, search } = window.location
+  return `${origin}${pathname}${search}${path}`
 }
 
 /** Trigger a browser download of Markdown text. */

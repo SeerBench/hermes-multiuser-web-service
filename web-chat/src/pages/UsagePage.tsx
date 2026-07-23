@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PageShell } from '../components/PageShell'
 import { useT } from '../i18n'
+import type { Translator } from '../i18n'
+import { routeHref } from '../routing'
 import {
   PlatformApiError,
   platform,
@@ -25,6 +27,30 @@ function formatWhen(iso?: string | null): string {
   } catch {
     return iso
   }
+}
+
+/** 工具用量行：展示 backend / query 等 metadata（Token 常为 0）。 */
+function formatToolConsumption(row: UsageLogItem, t: Translator): string {
+  const meta = row.metadata ?? {}
+  const parts: string[] = []
+  if (typeof meta.backend === 'string' && meta.backend) {
+    parts.push(
+      t('usage.logs.backend', {
+        backend: meta.backend === 'brave-free' ? 'Brave' : String(meta.backend),
+      }),
+    )
+  }
+  if (typeof meta.query === 'string' && meta.query.trim()) {
+    parts.push(t('usage.logs.query', { q: meta.query.trim().slice(0, 80) }))
+  }
+  if (typeof meta.url_count === 'number') {
+    parts.push(t('usage.logs.urls', { n: meta.url_count }))
+  }
+  if (parts.length > 0) return parts.join(' · ')
+  if (row.total_tokens > 0) {
+    return `↑${row.input_tokens} ↓${row.output_tokens} Σ${row.total_tokens}`
+  }
+  return t('usage.logs.noTokenCost')
 }
 
 function StatCard({
@@ -161,9 +187,20 @@ export function UsagePage() {
       density="reading"
       constrainWidth={false}
       actions={
-        <Button type="button" variant="outline" disabled={busy} onClick={() => void refresh()}>
-          {t('usage.refresh')}
-        </Button>
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              window.location.hash = routeHref('chat')
+            }}
+          >
+            {t('usage.backToChat')}
+          </Button>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => void refresh()}>
+            {t('usage.refresh')}
+          </Button>
+        </>
       }
     >
       {summary ? (
@@ -291,8 +328,10 @@ export function UsagePage() {
                       {row.tool_name ? <span>{row.tool_name}</span> : null}
                     </div>
                     <p className="page-hint">
-                      ↑{row.input_tokens} ↓{row.output_tokens} Σ{row.total_tokens} ·{' '}
-                      {formatWhen(row.created_at)}
+                      {row.type === 'tool'
+                        ? formatToolConsumption(row, t)
+                        : `↑${row.input_tokens} ↓${row.output_tokens} Σ${row.total_tokens}`}{' '}
+                      · {formatWhen(row.created_at)}
                     </p>
                   </div>
                 </li>

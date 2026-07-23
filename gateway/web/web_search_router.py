@@ -154,6 +154,25 @@ def search_for_user(user_id: str, query: str, limit: int = 5) -> Dict[str, Any]:
 
     if enriched.get("success") and backend == _BACKEND_BRAVE:
         record_brave_use(user_id, query=query, urls=_extract_urls(enriched))
+    elif enriched.get("success") and backend == _BACKEND_DDGS:
+        # ddgs 也写入 Usage Center，便于日志展示「消耗」明细（无 Token）。
+        try:
+            from gateway.web.usage_tracker import track
+
+            track(
+                user_id,
+                "tool",
+                tool_name="web_search",
+                metadata={
+                    "backend": _BACKEND_DDGS,
+                    "query": (query or "")[:256],
+                    "url_count": len(_extract_urls(enriched)),
+                    "urls": _extract_urls(enriched)[:10],
+                    "fallback_reason": fallback_reason,
+                },
+            )
+        except Exception:
+            logger.debug("record ddgs use failed user=%s", user_id, exc_info=True)
 
     return enriched
 

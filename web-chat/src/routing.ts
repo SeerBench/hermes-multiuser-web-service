@@ -12,6 +12,7 @@ export type Route =
   | 'admin'
   | 'admin-audit'
   | 'reset-password'
+  | 'share'
 
 /** Top-level chrome tabs (settings lives in AccountMenu). */
 export type MainTab = 'chat' | 'workspace'
@@ -29,6 +30,7 @@ const ROUTES: Route[] = [
   'admin-audit',
   'admin',
   'reset-password',
+  'share',
   'chat',
 ]
 
@@ -47,6 +49,8 @@ export function parseRoute(hash: string): Route {
   const path = hashPath(hash)
   // Nested admin audit uses slash form in the URL (`#/admin/audit`).
   if (path === 'admin/audit') return 'admin-audit'
+  // Public share: `#/share/<token>`
+  if (path === 'share' || path.startsWith('share/')) return 'share'
   return ROUTES.find((r) => path === r) ?? 'chat'
 }
 
@@ -60,8 +64,17 @@ export function parseResetToken(hash: string): string | null {
   return token?.trim() || null
 }
 
-export function routeHref(route: Route): string {
+/** Read share token from ``#/share/<token>``. */
+export function parseShareToken(hash: string): string | null {
+  const path = hashPath(hash)
+  if (!path.startsWith('share/')) return null
+  const token = path.slice('share/'.length).split('/')[0] ?? ''
+  return token.trim() || null
+}
+
+export function routeHref(route: Route, shareToken?: string): string {
   if (route === 'admin-audit') return '#/admin/audit'
+  if (route === 'share' && shareToken) return `#/share/${shareToken}`
   return `#/${route}`
 }
 

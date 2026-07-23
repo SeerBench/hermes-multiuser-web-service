@@ -546,7 +546,7 @@ flowchart TD
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
 | ★★★ | ~~**Markdown 代码块高亮 + 复制**~~ | `MarkdownContent` + hljs + 「复制代码」 |
-| ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
+| ★★☆ | ~~**导出 / 静态分享对话**~~ | 标题菜单：只读公开链接 + 导出 Markdown；助手气泡可分享单条回复 |
 | ★★☆ | ~~**用量 / 配额展示**~~ | new-api 钱包：Settings 账户侧 `/billing/*`；平台账本：**Usage Center** `#/usage`（已完成） |
 | ★★☆ | ~~**Composer 拖拽/粘贴上传**~~ | Composer：`onDrop` / `onPaste` → 现有 `uploads.create` |
 | ★★☆ | ~~**手动深色/浅色主题**~~ | Account 下拉与 Settings 均支持 system / light / dark |
@@ -554,7 +554,8 @@ flowchart TD
 | ★☆☆ | ~~**模型选择器**~~ | Composer 已提供可搜索模型下拉，并支持常用模型筛选 |
 
 - [x] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
-- [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
+- [x] Chat 菜单：「分享对话」→ 确认后生成只读 `#/share/{token}`；「导出 Markdown」本地下载
+- [x] 助手气泡「分享」→ 单条回复快照；`GET /api/v1/shares/{token}` 匿名只读
 - [x] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
 - [x] `POST /api/v1/auth/change-password` + Settings 表单

@@ -82,6 +82,55 @@ describe('messagesToTurns', () => {
     })
   })
 
+  it('restores Brave search_meta and activity from tool _meta', () => {
+    const toolBody = JSON.stringify({
+      success: true,
+      data: { web: [{ title: 'X', url: 'https://x.example' }] },
+      _meta: {
+        backend: 'brave-free',
+        brave_remaining: 1,
+        urls: ['https://x.example'],
+        url_count: 1,
+      },
+    })
+    const msgs: ServerMessage[] = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: 'done',
+        reasoning: null,
+        tool_calls: [
+          {
+            id: 'tc1',
+            function: { name: 'web_search', arguments: '{}' },
+          },
+        ],
+        tool_call_id: null,
+        tool_name: null,
+        timestamp: null,
+      },
+      {
+        id: 2,
+        role: 'tool',
+        content: toolBody,
+        tool_call_id: 'tc1',
+        tool_calls: [],
+        tool_name: 'web_search',
+        reasoning: null,
+        timestamp: null,
+      },
+    ]
+    const turns = messagesToTurns(msgs)
+    const toolSeg = turns[0].segments.find((s) => s.kind === 'tool')
+    expect(toolSeg && toolSeg.kind === 'tool' && toolSeg.search_meta).toMatchObject({
+      backend: 'brave-free',
+      brave_remaining: 1,
+    })
+    expect(turns[0].activity.some((a) => a.kind === 'status' && a.text.includes('Brave'))).toBe(
+      true,
+    )
+  })
+
   it('splits consecutive user messages into separate turns', () => {
     const mkUser = (content: string): ServerMessage => ({
       id: null,
