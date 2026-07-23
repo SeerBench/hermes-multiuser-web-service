@@ -194,6 +194,8 @@ cd web-chat && npm install && npm run build && cd ..
 hermes gateway run
 ```
 
+> **Windows note:** the upstream single-user agent installs natively on Windows via `powershell -ExecutionPolicy Bypass -File scripts/install.ps1`. The multi-user web service itself targets Linux/macOS servers — on Windows, run it under WSL2.
+
 Open `http://127.0.0.1:8643/` in a browser. The chat UI is already visible — type a message and hit Send. A modal will pop up asking for the API key. Paste the one the admin gave you. The cookie that comes back is good for 7 days; subsequent visits go straight to chat.
 
 For production deployment: front the gateway with TLS (Caddy / nginx / Traefik), set `cookie_secure: true`, only then change `host: 0.0.0.0` — the adapter **refuses to start** if you skip TLS on a non-loopback bind. Full checklist in [`docs/user-guide/web-chat.md`](docs/user-guide/web-chat.md).

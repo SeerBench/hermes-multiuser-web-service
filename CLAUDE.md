@@ -59,7 +59,10 @@ backward-compatible — these are the named patches the rebase loop has to resol
 - `gateway/config.py` — `Platform.WEB_CHAT = "web_chat"` in the enum plus
   one validator entry.
 - `hermes_cli/platforms.py` — one `PlatformInfo` registration line.
-- `toolsets.py` — `hermes-web-chat` toolset definition.
+- `toolsets.py` — `hermes-web-chat` toolset definition, plus its name
+  appended to the upstream `hermes-gateway` union toolset's `includes`
+  (required by upstream's platform↔toolset consistency test once the
+  `web_chat` platform is registered in `hermes_cli/platforms.py`).
 - `hermes_state.py` — `user_id` parameter added to `list_sessions_rich` and
   `search_messages` (purely additive — default `None` preserves old behavior).
 - `pyproject.toml` — `[web-chat]` extra (cryptography + ddgs).
@@ -95,6 +98,13 @@ backward-compatible — these are the named patches the rebase loop has to resol
   `http-fetch` provider from the registry snapshot.  The upstream expected
   list (`brave-free`…`xai`) is left byte-identical, so upstream edits to that
   list never conflict with this filter on rebase.
+- `.github/workflows/tests.yml` — the test job's install line adds the
+  fork-only `platform` extra (`.[all,dev]` → `.[all,dev,platform]`) so
+  `tests/platform/*` (SaaS control plane; sqlalchemy et al.) import in CI.
+  The extra deliberately stays out of pyproject's `[all]` — it contains
+  opt-in backends (redis, boto3) that `[all]`'s lazy-install policy
+  excludes.  The e2e job's install line is untouched (no platform_api
+  imports there).
 
 **Upstream sync workflow**: `git fetch upstream && git rebase upstream/main`.
 If a conflict lands in one of the named patches above, resolve it by hand
