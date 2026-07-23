@@ -8,7 +8,7 @@
 >
 > **规模目标**：50 用户；控制面默认 **SQLite**（可选 PostgreSQL）；**无 pgvector**（进程内 cosine）；Redis / MinIO 可选。
 
-**执行状态（2026-07-19）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 已补 **深度 healthz**、**k6 10 VU 基线**、**SECURITY_REVIEW checklist**；50 并发正式压测与 Compose CI 仍待。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
+**执行状态（2026-07-19）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 已补 **深度 healthz**、**k6 10 VU 基线**、**SECURITY_REVIEW checklist**；50 并发正式压测与 Compose CI 仍待。GitHub Actions 已装 `.[web-chat,platform]` 并增加 `platform-saas` job。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
@@ -481,6 +481,8 @@ flowchart TD
 ### 6.5 CI
 
 - [x] `tests/platform/` 纳入 `scripts/run_tests.sh`
+- [x] GitHub Actions 安装 `.[web-chat,platform]`；`platform-saas` job 跑 `tests/platform` + `test_web_*` + user_id 隔离
+- [x] `web-chat-verify.yml`（`npm run verify`）
 - [ ] Docker Compose 集成测试 job（GitHub Actions）
 
 ---

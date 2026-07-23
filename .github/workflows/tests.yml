@@ -63,7 +63,9 @@ jobs:
         run: |
           uv venv .venv --python 3.11
           source .venv/bin/activate
-          uv pip install -e ".[all,dev]"
+          # Fork SaaS extras: platform_api + web_chat tests need [platform]/web-chat]
+          # beyond upstream [all] (sqlalchemy, argon2, ddgs, cryptography, …).
+          uv pip install -e ".[all,dev,web-chat,platform]"
 
       - name: Run tests (slice ${{ matrix.slice }}/6)
         # Per-file isolation via scripts/run_tests_parallel.py: discovers
@@ -169,12 +171,61 @@ jobs:
         run: |
           uv venv .venv --python 3.11
           source .venv/bin/activate
-          uv pip install -e ".[all,dev]"
+          uv pip install -e ".[all,dev,web-chat,platform]"
 
       - name: Run e2e tests
         run: |
           source .venv/bin/activate
           python -m pytest tests/e2e/ -v --tb=short
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+
+  # Focused fork SaaS gate: platform control plane + web_chat gateway isolation.
+  # Runs in parallel with the full matrix so regressions surface without waiting
+  # for all six upstream slices.
+  platform-saas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install ripgrep (prebuilt binary)
+        run: |
+          set -euo pipefail
+          RG_VERSION=15.1.0
+          RG_SHA256=1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599
+          RG_TARBALL=ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl.tar.gz
+          curl -sSfL -o "$RG_TARBALL" \
+            "https://github.com/BurntSushi/ripgrep/releases/download/${RG_VERSION}/${RG_TARBALL}"
+          echo "${RG_SHA256}  ${RG_TARBALL}" | sha256sum -c -
+          tar -xzf "$RG_TARBALL"
+          sudo mv "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl/rg" /usr/local/bin/rg
+          rm -rf "$RG_TARBALL" "ripgrep-${RG_VERSION}-x86_64-unknown-linux-musl"
+          rg --version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev,web-chat,platform]"
+
+      - name: Run platform + web_chat suite
+        run: |
+          source .venv/bin/activate
+          # shell expands test_web_*.py; keep hermes_state user_id isolation in gate
+          python scripts/run_tests_parallel.py \
+            tests/platform \
+            tests/hermes_state/test_user_id_filtering.py \
+            tests/gateway/test_web_*.py
         env:
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
