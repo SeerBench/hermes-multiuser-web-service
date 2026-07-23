@@ -1,0 +1,43 @@
+---
+description: Strategy 2 — keep Hermes mergeable; where platform code may live
+alwaysApply: true
+---
+
+# STRATEGY 2 — KEEP HERMES MERGEABLE
+
+> **Pay code duplication if it means upstream files stay untouched.**
+
+## NEVER modify (zero business coupling)
+
+```
+run_agent.py          cli.py              hermes_cli/main.py
+agent/memory_manager.py
+tools/file_operations.py    tools/file_tools.py    tools/terminal_tool.py
+gateway/platforms/api_server.py
+```
+
+Memory isolation: `HERMES_HOME` ContextVar via `enter_user_context` — **not** `MemoryManager` edits.
+
+## ALLOWED fork touchpoints (additive, ≤10 lines each)
+
+`run_agent.py` (user_id propagation), `gateway/run.py` (WEB_CHAT), `hermes_state.py` (user_id filters), `toolsets.py` (`hermes-web-chat`). Full list: `CLAUDE.md`.
+
+## Where new code goes
+
+| Kind | Location |
+|------|----------|
+| SaaS control plane | `platform-api/` |
+| Agent HTTP / sandbox | `gateway/web/`, `gateway/platforms/web_chat.py` |
+| Sandboxed tools | `gateway/web/tools/` — **wrap upstream, never copy** |
+| React UI | `web-chat/src/` |
+| Deploy | `deploy/` |
+| Platform tests | `tests/platform/` |
+| Gateway tests | `tests/gateway/test_web_*.py` |
+
+## Coding standards
+
+- Minimize scope — smallest correct diff.
+- Match surrounding style.
+- Dependencies: pinned with upper bounds; `uv lock` after `pyproject.toml` changes.
+- Paths: `get_hermes_home()` / `display_hermes_home()` — never hardcode `~/.hermes`.
+- Users never touch shell, Docker, or config files — Web UI only.

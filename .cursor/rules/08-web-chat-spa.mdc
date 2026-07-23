@@ -1,0 +1,44 @@
+---
+description: web-chat React SPA — minimal stack, dual API clients, auth UX
+globs: web-chat/**
+alwaysApply: false
+---
+
+# Web Chat SPA (`web-chat/`)
+
+Minimal React 19 + Vite — **no** UI framework router lib, no Redux.
+
+## Routing
+
+Hash-based: `#/chat`, `#/settings`, `#/auth`, `#/register`, `#/files`, `#/memory`, `#/skills`, `#/admin`.
+
+## API clients (`api.ts`)
+
+Split clients — do not mix:
+
+- `platformClient` → `/api/v1/*` (auth, workspaces, files, memory, skills, admin)
+- `agentClient` → `/api/chat`, `/api/conversations*`, `/api/uploads` (SSE + sessions)
+
+Always `credentials: 'include'` for cookies.
+
+## Auth UX
+
+- **Primary:** `AuthPage` — email register/login
+- **Legacy:** `KeyPromptModal` — collapsed "Advanced: API Key login"
+- **Pending bind:** block chat when `upstream_status=pending_bind`; guide to bind-key UI
+
+## SSE
+
+Parse via `api.ts` `streamChat` — events: `token`, `tool_start`, `tool_end`, `reasoning`, `status`, `step`, `activity`, `done`, `error`.
+
+## Build
+
+```bash
+cd web-chat && npm run build   # → gateway/web/_static/
+```
+
+## Constraints
+
+- Keep bundle small (~50-user VPS target).
+- i18n: `src/i18n/zh.json`, `en.json`.
+- No second chat surface — extend existing `ChatPage`, do not rebuild transcript/composer.

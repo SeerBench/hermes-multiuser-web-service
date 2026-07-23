@@ -294,3 +294,72 @@ def test_alice_can_read_her_own_file(alice_workspace):
         mocked.return_value = "1|alice's note"
         result = _call("web_file_read", {"path": str(target)})
     assert result == "1|alice's note"
+
+
+# ── document extraction (PDF / Office) ───────────────────────────────────
+
+
+def test_read_docx_extracts_text_with_pagination(alice_workspace, monkeypatch):
+    target = alice_workspace / "uploads" / "report.docx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"fake-docx-bytes")
+
+    def _fake_extract(path):
+        assert path == target
+        return "line one\nline two\nline three"
+
+    monkeypatch.setattr(
+        "platform_api.services.extract.extract_text",
+        _fake_extract,
+    )
+    result = _call("web_file_read", {"path": "uploads/report.docx", "offset": 2, "limit": 1})
+    data = json.loads(result)
+    assert data["success"] is True
+    assert data["extracted"] is True
+    assert "2|line two" in data["content"]
+    assert data["total_lines"] == 3
+
+
+def test_read_pdf_extract_empty_document(alice_workspace, monkeypatch):
+    target = alice_workspace / "uploads" / "empty.pdf"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"%PDF")
+
+    monkeypatch.setattr(
+        "platform_api.services.extract.extract_text",
+        lambda _path: "",
+    )
+    result = _call("web_file_read", {"path": "uploads/empty.pdf"})
+    data = json.loads(result)
+    assert data["success"] is True
+    assert data["content"] == ""
+    assert data["total_lines"] == 0
+
+
+def test_read_extractable_rejects_escape_before_extract(alice_workspace, monkeypatch):
+    monkeypatch.setattr(
+        "platform_api.services.extract.extract_text",
+        lambda _path: pytest.fail("extract must not run for escaped paths"),
+    )
+    with patch("gateway.web.tools.sandboxed_file_operations.read_file_tool") as mocked:
+        result = _call(
+            "web_file_read",
+            {"path": str(alice_workspace / ".." / "u_bob" / "secret.docx")},
+        )
+    assert _is_error_json(result)
+    mocked.assert_not_called()
+
+
+def test_read_extract_failure_returns_json_error(alice_workspace, monkeypatch):
+    target = alice_workspace / "uploads" / "bad.docx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"corrupt")
+
+    def _boom(_path):
+        raise ValueError("unsupported file type: .docx")
+
+    monkeypatch.setattr("platform_api.services.extract.extract_text", _boom)
+    result = _call("web_file_read", {"path": "uploads/bad.docx"})
+    data = json.loads(result)
+    assert data["success"] is False
+    assert "unsupported" in data["error"].lower()

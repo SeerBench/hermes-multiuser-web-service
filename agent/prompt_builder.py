@@ -12,7 +12,7 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
-from hermes_constants import get_hermes_home, get_skills_dir, is_wsl
+from hermes_constants import get_hermes_home, get_skills_dir, get_terminal_cwd, is_wsl
 from typing import Optional
 
 from agent.skill_utils import (
@@ -669,7 +669,7 @@ def _probe_remote_backend(env_type: str) -> str | None:
     per process. Used only for non-local backends where the agent's tools
     operate on a different machine than the host Hermes runs on.
     """
-    cwd_hint = os.getenv("TERMINAL_CWD", "")
+    cwd_hint = get_terminal_cwd() or ""
     cache_key = (env_type, cwd_hint)
     cached = _BACKEND_PROBE_CACHE.get(cache_key)
     if cached is not None:
@@ -781,7 +781,10 @@ def build_environment_hints() -> str:
 
         host_lines.append(f"User home directory: {os.path.expanduser('~')}")
         try:
-            host_lines.append(f"Current working directory: {os.getcwd()}")
+            # Prefer TERMINAL_CWD (env or web_chat ContextVar) so multi-user
+            # sessions report the per-user workspace, not the gateway process CWD.
+            _cwd = get_terminal_cwd() or os.getcwd()
+            host_lines.append(f"Current working directory: {_cwd}")
         except OSError:
             pass
 
@@ -1439,7 +1442,7 @@ def build_context_files_prompt(cwd: Optional[str] = None, skip_soul: bool = Fals
     loaded via ``load_soul_md()`` for the identity slot).
     """
     if cwd is None:
-        cwd = os.getcwd()
+        cwd = get_terminal_cwd() or os.getcwd()
 
     cwd_path = Path(cwd).resolve()
     sections = []

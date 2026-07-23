@@ -1,9 +1,10 @@
 """Sandboxed skill management tools for the ``web_chat`` platform.
 
-Adds four tools — ``web_skills_list``, ``web_skill_view``,
-``web_skill_install``, ``web_skill_delete`` — that let an authenticated
-web user manage skills inside their per-user workspace, without bleeding
-across tenants and without touching upstream ``tools/skills_tool.py``.
+Adds tools — ``web_skills_list``, ``web_skill_view``,
+``web_skill_install``, ``web_skill_delete``, ``web_skill_edit``,
+``web_skill_patch`` — that let an authenticated web user manage skills
+inside their per-user workspace, without bleeding across tenants and
+without touching upstream ``tools/skills_tool.py``.
 
 Why a separate, fork-native implementation
 ------------------------------------------
@@ -25,8 +26,9 @@ Per the design doc (``docs/plans/2026-05-26-per-user-skill-isolation.md``):
 - **List/view** merges global (``$HERMES_HOME/skills/``, operator-curated)
   with the user's workspace (``<ws>/skills/``) — on name collision the
   user version overlays the global.
-- **Install/delete** only ever touch ``<ws>/skills/``. The global library
-  is read-only for web users.
+- **Install/delete/edit/patch** only ever touch ``<ws>/skills/``. The
+  global library is read-only for web users. Editing a global-only skill
+  **forks** a private copy into the workspace first (copy-on-write).
 - User-installed skills are **not** auto-injected into the agent's system
   prompt (upstream's ``prompt_builder.py`` doesn't observe ContextVars).
   The agent discovers them on demand by calling ``web_skills_list``.
@@ -34,7 +36,7 @@ Per the design doc (``docs/plans/2026-05-26-per-user-skill-isolation.md``):
 Side-effect import
 ------------------
 ``gateway/web/tools/__init__.py`` imports this module so registration
-fires at gateway startup. The four tools are listed in
+fires at gateway startup. The tools are listed in
 ``toolsets.py::hermes-web-chat``, replacing upstream ``skills_list`` /
 ``skill_view`` for the web platform.
 """
@@ -43,7 +45,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
@@ -56,6 +57,7 @@ from gateway.web.sandbox import (
     confine_path,
     get_user_workspace,
 )
+from gateway.web.skill_filters import is_web_excluded_skill
 from tools.registry import registry
 
 logger = logging.getLogger("hermes.web.tools.sandboxed_skill_manage")
@@ -77,8 +79,10 @@ _SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # subdirectories under ``~/.hermes/skills/`` as of fork creation. The
 # allowlist keeps `web_skills_list` output tidy and stops users from
 # fragmenting the namespace with one-off categories.
+# ``apple`` deliberately omitted — macOS-only skills are filtered out of the
+# web surface (see ``gateway.web.skill_filters``).
 _ALLOWED_CATEGORIES: frozenset[str] = frozenset({
-    "apple", "autonomous-ai-agents", "creative", "data-science",
+    "autonomous-ai-agents", "creative", "data-science",
     "devops", "diagramming", "dogfood", "domain", "email", "gaming",
     "gifs", "github", "mcp", "media", "mlops", "note-taking",
     "productivity", "red-teaming", "research", "smart-home",
@@ -98,20 +102,13 @@ def _real_global_skills_dir() -> Path:
     """Global skills dir at the **process-wide** ``HERMES_HOME``, ignoring
     the per-user ContextVar override.
 
-    ``enter_user_context`` sets ``_HERMES_HOME_OVERRIDE`` (a ContextVar)
-    to redirect ``get_hermes_home()`` to the user's workspace.  We want
-    the *un-overridden* value here so the global skill library can be
-    read alongside the user's private one — so we go straight to the
-    underlying env var (the same source ``get_hermes_home()`` reads from
-    before the override path).  The ContextVar override never mutates
-    ``os.environ``, so ``os.environ["HERMES_HOME"]`` is exactly the
-    operator-configured global path.  Falls back to ``~/.hermes`` to
-    match upstream's default.
+    See :func:`gateway.web.sandbox.process_hermes_home` — same anchor used
+    for ``web_workspaces/<uid>/`` layout so nested user contexts cannot
+    nest global/skill paths under another user's workspace.
     """
-    env_home = os.environ.get("HERMES_HOME", "").strip()
-    if env_home:
-        return Path(env_home) / "skills"
-    return Path.home() / ".hermes" / "skills"
+    from gateway.web.sandbox import process_hermes_home
+
+    return process_hermes_home() / "skills"
 
 
 def _user_skills_dir() -> Optional[Path]:
@@ -172,7 +169,13 @@ def _scan_skills_dir(root: Path) -> Iterator[Tuple[str, str, str]]:
             desc = meta.get("description", "")
             if not isinstance(name, str) or not name.strip():
                 continue
-            yield name.strip(), category, str(desc).strip()
+            name = name.strip()
+            # Hide Apple / macOS-only skills from the web agent surface.
+            if is_web_excluded_skill(
+                category=category, name=name, frontmatter=meta,
+            ):
+                continue
+            yield name, category, str(desc).strip()
 
 
 def _validate_skill_md(
@@ -252,6 +255,145 @@ def _find_skill(name: str) -> Optional[Tuple[Path, str]]:
     return None
 
 
+def _skill_total_bytes(skill_dir: Path) -> int:
+    return sum(p.stat().st_size for p in skill_dir.rglob("*") if p.is_file())
+
+
+def _copy_skill_tree(src: Path, dest: Path) -> Tuple[bool, str]:
+    """Copy a skill directory with size caps. Returns ``(ok, error_or_empty)``."""
+    total = 0
+    for path in src.rglob("*"):
+        if not path.is_file():
+            continue
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            return False, f"file {path.relative_to(src)} exceeds the {MAX_FILE_BYTES}-byte per-file limit"
+        total += size
+        if total > MAX_SKILL_BYTES:
+            return False, f"skill total size exceeds the {MAX_SKILL_BYTES}-byte cap"
+
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dest)
+    return True, ""
+
+
+def install_skill_from_catalog(
+    name: str,
+    *,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """Copy a global catalog skill into the active user's workspace.
+
+    Must be called inside :func:`enter_user_context`. Returns a result
+    dict (not JSON) for reuse by the Platform API and agent tools.
+    """
+    ws = get_user_workspace()
+    if ws is None:
+        return {"success": False, "error": "internal sandbox not initialised"}
+
+    if not isinstance(name, str) or not _SKILL_NAME_RE.match(name):
+        return {"success": False, "error": f"invalid skill name {name!r}"}
+
+    located = _find_skill(name)
+    if not located:
+        return {"success": False, "error": f"skill {name!r} not found in catalog", "code": "not_found"}
+
+    skill_dir, source = located
+    try:
+        meta = _parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8")) or {}
+    except OSError:
+        meta = {}
+    if is_web_excluded_skill(
+        category=skill_dir.parent.name, name=name, frontmatter=meta,
+    ):
+        return {
+            "success": False,
+            "error": f"skill {name!r} is not available on web-chat (macOS-only)",
+            "code": "web_excluded",
+        }
+
+    if source == "user" and not overwrite:
+        return {
+            "success": False,
+            "error": (
+                f"skill {name!r} is already in your workspace; "
+                "pass overwrite=true to reinstall from the global catalog"
+            ),
+            "code": "already_installed",
+        }
+
+    # Prefer the global catalog as the copy source so overwrite reinstalls
+    # a fresh operator-curated copy rather than cloning the private one.
+    global_dir = _real_global_skills_dir()
+    global_located: Optional[Path] = None
+    category = skill_dir.parent.name
+    if global_dir.exists():
+        for category_dir in global_dir.iterdir():
+            if not category_dir.is_dir():
+                continue
+            candidate = category_dir / name
+            if (candidate / "SKILL.md").is_file():
+                global_located = candidate
+                category = category_dir.name
+                break
+
+    if global_located is None:
+        return {
+            "success": False,
+            "error": f"skill {name!r} is not in the global catalog (user-only skills cannot be reinstalled from catalog)",
+            "code": "not_in_catalog",
+        }
+
+    if category not in _ALLOWED_CATEGORIES:
+        # Still allow copy of operator-curated categories even if allowlist drifts.
+        pass
+
+    dest = ws / "skills" / category / name
+    try:
+        confine_path(dest)
+    except PathSandboxViolation as exc:
+        return {"success": False, "error": f"target dir outside workspace: {exc}"}
+    except RuntimeError:
+        return {"success": False, "error": "internal sandbox not initialised"}
+
+    ok, err = _copy_skill_tree(global_located, dest)
+    if not ok:
+        return {"success": False, "error": err}
+
+    return {
+        "success": True,
+        "name": name,
+        "category": category,
+        "source": "user",
+        "bytes_written": _skill_total_bytes(dest),
+        "overwritten": source == "user",
+    }
+
+
+def _ensure_user_skill(name: str) -> Tuple[Optional[Path], bool, Optional[str]]:
+    """Return a writable user skill dir, forking from global if needed.
+
+    Returns ``(skill_dir, forked, error_message)``.
+    """
+    located = _find_skill(name)
+    if not located:
+        return None, False, f"skill {name!r} not found"
+    skill_dir, source = located
+    if source == "user":
+        return skill_dir, False, None
+
+    # Fork global → user before mutating.
+    result = install_skill_from_catalog(name, overwrite=False)
+    if not result.get("success"):
+        return None, False, str(result.get("error") or "fork failed")
+    forked = _find_skill(name)
+    if not forked or forked[1] != "user":
+        return None, False, "fork completed but skill not found in workspace"
+    return forked[0], True, None
+
+
 # ── Handlers ───────────────────────────────────────────────────────────
 
 
@@ -328,6 +470,18 @@ def _handle_web_skill_view(args: Dict[str, Any], **kw: Any) -> str:
     if not located:
         return _json({"success": False, "error": f"skill {name!r} not found", "name": name})
     skill_dir, source = located
+    try:
+        view_meta = _parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8")) or {}
+    except OSError:
+        view_meta = {}
+    if is_web_excluded_skill(
+        category=skill_dir.parent.name, name=name, frontmatter=view_meta,
+    ):
+        return _json({
+            "success": False,
+            "error": f"skill {name!r} is not available on web-chat (macOS-only)",
+            "name": name,
+        })
 
     file_path = args.get("file_path")
     if file_path:
@@ -356,6 +510,20 @@ def _handle_web_skill_view(args: Dict[str, Any], **kw: Any) -> str:
         content = target.read_text(encoding="utf-8")
     except OSError as exc:
         return _json({"success": False, "error": f"could not read skill file: {exc}"})
+
+    # Usage Center: skill view (representative skill tool hook)
+    try:
+        from gateway.web.usage_tracker import track
+
+        track(
+            ws.name,
+            "skill",
+            skill_name=name,
+            tool_name="web_skill_view",
+            metadata={"source": source},
+        )
+    except Exception:
+        pass
 
     return _json({
         "success": True,
@@ -485,6 +653,19 @@ def _handle_web_skill_install(args: Dict[str, Any], **kw: Any) -> str:
     # per-skill MAX_SKILL_BYTES caps above bound the per-tenant disk
     # footprint without any local accounting.
 
+    try:
+        from gateway.web.usage_tracker import track
+
+        track(
+            ws.name,
+            "skill",
+            skill_name=name,
+            tool_name="web_skill_install",
+            metadata={"category": category},
+        )
+    except Exception:
+        pass
+
     return _json({
         "success": True,
         "name": name,
@@ -535,6 +716,189 @@ def _handle_web_skill_delete(args: Dict[str, Any], **kw: Any) -> str:
         "success": True,
         "name": name,
         "deleted_bytes": deleted_bytes,
+    })
+
+
+def _handle_web_skill_edit(args: Dict[str, Any], **kw: Any) -> str:
+    """Full rewrite of SKILL.md; forks global skills into the workspace."""
+    ws = get_user_workspace()
+    if ws is None:
+        return _error_no_context()
+
+    name = args.get("name")
+    skill_md = args.get("skill_md")
+    if not isinstance(name, str) or not name.strip():
+        return _json({"success": False, "error": "web_skill_edit: missing required 'name'"})
+    name = name.strip()
+    if not _SKILL_NAME_RE.match(name):
+        return _json({"success": False, "error": f"invalid skill name {name!r}"})
+    if not isinstance(skill_md, str) or not skill_md.strip():
+        return _json({"success": False, "error": "web_skill_edit: missing required 'skill_md'"})
+
+    ok, meta_or_err = _validate_skill_md(skill_md, name)
+    if not ok:
+        return _json({"success": False, "error": meta_or_err})
+
+    skill_md_bytes = skill_md.encode("utf-8")
+    if len(skill_md_bytes) > MAX_FILE_BYTES:
+        return _json({
+            "success": False,
+            "error": f"SKILL.md exceeds the {MAX_FILE_BYTES}-byte per-file limit",
+        })
+
+    skill_dir, forked, err = _ensure_user_skill(name)
+    if err or skill_dir is None:
+        return _json({"success": False, "error": err or "skill not found"})
+
+    try:
+        confine_path(skill_dir)
+    except PathSandboxViolation:
+        return _json({"success": False, "error": "skill directory resolved outside your workspace"})
+    except RuntimeError:
+        return _error_no_context()
+
+    target = skill_dir / "SKILL.md"
+    # Size after rewrite (other files unchanged).
+    other = sum(
+        p.stat().st_size
+        for p in skill_dir.rglob("*")
+        if p.is_file() and p.name != "SKILL.md"
+    )
+    if other + len(skill_md_bytes) > MAX_SKILL_BYTES:
+        return _json({
+            "success": False,
+            "error": f"skill total size exceeds the {MAX_SKILL_BYTES}-byte cap",
+        })
+
+    target.write_bytes(skill_md_bytes)
+    return _json({
+        "success": True,
+        "name": name,
+        "source": "user",
+        "forked": forked,
+        "bytes_written": len(skill_md_bytes),
+    })
+
+
+def _handle_web_skill_patch(args: Dict[str, Any], **kw: Any) -> str:
+    """Targeted find-and-replace; forks global skills into the workspace."""
+    ws = get_user_workspace()
+    if ws is None:
+        return _error_no_context()
+
+    name = args.get("name")
+    old_string = args.get("old_string")
+    new_string = args.get("new_string")
+    file_path = args.get("file_path")
+    replace_all = bool(args.get("replace_all", False))
+
+    if not isinstance(name, str) or not name.strip():
+        return _json({"success": False, "error": "web_skill_patch: missing required 'name'"})
+    name = name.strip()
+    if not _SKILL_NAME_RE.match(name):
+        return _json({"success": False, "error": f"invalid skill name {name!r}"})
+    if not isinstance(old_string, str) or not old_string:
+        return _json({"success": False, "error": "old_string is required for patch"})
+    if new_string is None or not isinstance(new_string, str):
+        return _json({
+            "success": False,
+            "error": "new_string is required for patch (use empty string to delete matched text)",
+        })
+
+    skill_dir, forked, err = _ensure_user_skill(name)
+    if err or skill_dir is None:
+        return _json({"success": False, "error": err or "skill not found"})
+
+    try:
+        confine_path(skill_dir)
+    except PathSandboxViolation:
+        return _json({"success": False, "error": "skill directory resolved outside your workspace"})
+    except RuntimeError:
+        return _error_no_context()
+
+    if file_path:
+        if not isinstance(file_path, str):
+            return _json({"success": False, "error": "file_path must be a string"})
+        rel = Path(file_path)
+        if rel.is_absolute() or ".." in rel.parts:
+            return _json({
+                "success": False,
+                "error": "file_path must be relative and must not contain '..'",
+            })
+        target = (skill_dir / rel).resolve(strict=False)
+        try:
+            target.relative_to(skill_dir.resolve(strict=False))
+        except ValueError:
+            return _json({"success": False, "error": "file_path escapes the skill directory"})
+        if not target.is_file():
+            return _json({
+                "success": False,
+                "error": f"file {file_path!r} not found under skill {name!r}",
+            })
+        rel_label = file_path
+    else:
+        target = skill_dir / "SKILL.md"
+        rel_label = "SKILL.md"
+
+    try:
+        original = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        return _json({"success": False, "error": f"could not read skill file: {exc}"})
+
+    count = original.count(old_string)
+    if count == 0:
+        return _json({
+            "success": False,
+            "error": f"old_string not found in {rel_label}",
+        })
+    if count > 1 and not replace_all:
+        return _json({
+            "success": False,
+            "error": (
+                f"old_string matched {count} times in {rel_label}; "
+                "pass replace_all=true or provide a more unique old_string"
+            ),
+        })
+
+    if replace_all:
+        updated = original.replace(old_string, new_string)
+        replacements = count
+    else:
+        updated = original.replace(old_string, new_string, 1)
+        replacements = 1
+
+    # If patching SKILL.md, re-validate frontmatter + name.
+    if rel_label == "SKILL.md":
+        ok, meta_or_err = _validate_skill_md(updated, name)
+        if not ok:
+            return _json({"success": False, "error": meta_or_err})
+
+    updated_bytes = updated.encode("utf-8")
+    if len(updated_bytes) > MAX_FILE_BYTES:
+        return _json({
+            "success": False,
+            "error": f"{rel_label} would exceed the {MAX_FILE_BYTES}-byte per-file limit",
+        })
+
+    other = sum(
+        p.stat().st_size
+        for p in skill_dir.rglob("*")
+        if p.is_file() and p.resolve(strict=False) != target.resolve(strict=False)
+    )
+    if other + len(updated_bytes) > MAX_SKILL_BYTES:
+        return _json({
+            "success": False,
+            "error": f"skill total size exceeds the {MAX_SKILL_BYTES}-byte cap",
+        })
+
+    target.write_bytes(updated_bytes)
+    return _json({
+        "success": True,
+        "name": name,
+        "source": "user",
+        "forked": forked,
+        "file_path": rel_label,
+        "replacements": replacements,
     })
 
 
@@ -655,6 +1019,144 @@ _WEB_SKILL_DELETE_SCHEMA = {
 }
 
 
+_WEB_SKILL_EDIT_SCHEMA = {
+    "name": "web_skill_edit",
+    "description": (
+        "Rewrite a personal skill's SKILL.md (full content). Prefer "
+        "web_skill_patch for small habit-driven tweaks. If the skill "
+        "exists only in the global catalog, it is forked into the "
+        "user workspace first — the global library is never modified."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "Skill name — must match SKILL.md frontmatter name",
+            },
+            "skill_md": {
+                "type": "string",
+                "description": "Full updated SKILL.md including YAML frontmatter",
+            },
+        },
+        "required": ["name", "skill_md"],
+    },
+}
+
+
+_WEB_SKILL_PATCH_SCHEMA = {
+    "name": "web_skill_patch",
+    "description": (
+        "Apply a targeted find-and-replace to a skill file (default "
+        "SKILL.md). Preferred way to evolve a skill based on user "
+        "habits. Global-only skills are forked into the workspace "
+        "before patching. old_string must match exactly once unless "
+        "replace_all=true."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "old_string": {
+                "type": "string",
+                "description": "Exact text to find",
+            },
+            "new_string": {
+                "type": "string",
+                "description": "Replacement text (empty string deletes the match)",
+            },
+            "file_path": {
+                "type": "string",
+                "description": (
+                    "Optional relative path under the skill dir "
+                    "(default: SKILL.md)"
+                ),
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace every match of old_string",
+                "default": False,
+            },
+        },
+        "required": ["name", "old_string", "new_string"],
+    },
+}
+
+
+# ── Platform API helpers (dict results, no JSON string) ────────────────
+
+
+def create_user_skill(
+    name: str,
+    skill_md: str,
+    *,
+    category: str = "productivity",
+) -> Dict[str, Any]:
+    """Create a brand-new skill under the active user's workspace."""
+    ws = get_user_workspace()
+    if ws is None:
+        return {"success": False, "error": "outside user context"}
+
+    if not _SKILL_NAME_RE.match(name):
+        return {"success": False, "error": f"invalid skill name {name!r}"}
+    if category not in _ALLOWED_CATEGORIES:
+        return {"success": False, "error": f"category {category!r} is not allowed"}
+
+    if _find_skill(name):
+        return {"success": False, "error": "skill already exists", "code": "already_installed"}
+
+    ok, meta_or_err = _validate_skill_md(skill_md, expected_name=name)
+    if not ok:
+        return {"success": False, "error": meta_or_err}
+
+    skill_md_bytes = skill_md.encode("utf-8")
+    if len(skill_md_bytes) > MAX_FILE_BYTES:
+        return {
+            "success": False,
+            "error": f"SKILL.md exceeds the {MAX_FILE_BYTES}-byte per-file limit",
+        }
+
+    target_dir = ws / "skills" / category / name
+    try:
+        confined_target = confine_path(target_dir)
+    except PathSandboxViolation as exc:
+        return {"success": False, "error": f"target dir outside workspace: {exc}"}
+    except RuntimeError:
+        return {"success": False, "error": "outside user context"}
+
+    confined_target.mkdir(parents=True, exist_ok=True)
+    (confined_target / "SKILL.md").write_bytes(skill_md_bytes)
+    return {
+        "success": True,
+        "name": name,
+        "category": category,
+        "source": "user",
+        "bytes_written": len(skill_md_bytes),
+    }
+
+
+def write_user_skill(name: str, skill_md: str) -> Dict[str, Any]:
+    """Full SKILL.md rewrite; forks global skills into the workspace."""
+    import json as _json
+
+    raw = _handle_web_skill_edit({"name": name, "skill_md": skill_md})
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return {"success": False, "error": "internal skill edit failure"}
+
+
+def delete_user_skill(name: str) -> Dict[str, Any]:
+    """Delete a user-owned skill; refuses global skills."""
+    import json as _json
+
+    raw = _handle_web_skill_delete({"name": name})
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return {"success": False, "error": "internal skill delete failure"}
+
+
 # ── Registration ───────────────────────────────────────────────────────
 
 
@@ -663,6 +1165,8 @@ _REGISTRATIONS: tuple[tuple[str, Dict[str, Any], Callable], ...] = (
     ("web_skill_view", _WEB_SKILL_VIEW_SCHEMA, _handle_web_skill_view),
     ("web_skill_install", _WEB_SKILL_INSTALL_SCHEMA, _handle_web_skill_install),
     ("web_skill_delete", _WEB_SKILL_DELETE_SCHEMA, _handle_web_skill_delete),
+    ("web_skill_edit", _WEB_SKILL_EDIT_SCHEMA, _handle_web_skill_edit),
+    ("web_skill_patch", _WEB_SKILL_PATCH_SCHEMA, _handle_web_skill_patch),
 )
 
 

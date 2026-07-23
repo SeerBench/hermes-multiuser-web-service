@@ -34,9 +34,11 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, Callable, Dict
 
 from gateway.web.sandbox import PathSandboxViolation, confine_path
+from tools.file_operations import normalize_read_pagination
 from tools.file_tools import (
     patch_tool,
     read_file_tool,
@@ -48,6 +50,10 @@ from tools.registry import registry
 logger = logging.getLogger("hermes.web.tools.sandboxed_file_operations")
 
 _TOOLSET = "web_file"
+
+# Office/PDF: upstream read_file_tool rejects these as binary; extract text instead.
+_EXTRACTABLE_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
+_MAX_EXTRACT_CHARS = 100_000
 
 
 def _confine_or_error(path: str) -> "str | Dict[str, Any]":
@@ -91,6 +97,86 @@ def _json_or_passthrough(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _format_line_window(
+    lines: list[str],
+    offset: int,
+    limit: int,
+) -> tuple[str, int, int, int]:
+    """Return numbered content window, total lines, normalized offset/limit."""
+    norm_offset, norm_limit = normalize_read_pagination(offset, limit)
+    total = len(lines)
+    start = max(0, norm_offset - 1)
+    end = min(total, start + norm_limit)
+    numbered = [f"{idx}|{line}" for idx, line in enumerate(lines[start:end], start=start + 1)]
+    return "\n".join(numbered), total, norm_offset, norm_limit
+
+
+def _read_extractable_document(confined_path: str, offset: int, limit: int) -> str:
+    """Extract text from PDF/Office and paginate like ``read_file_tool``."""
+    from platform_api.services.extract import extract_text
+
+    path = Path(confined_path)
+    if not path.is_file():
+        return json.dumps(
+            {"success": False, "error": f"file not found: {path.name}"},
+            ensure_ascii=False,
+        )
+    try:
+        text = extract_text(path)
+    except ValueError as exc:
+        return json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("web_file_read extract failed for %s: %s", path.name, exc)
+        return json.dumps(
+            {"success": False, "error": f"failed to extract text: {exc}"},
+            ensure_ascii=False,
+        )
+
+    lines = text.splitlines()
+    if not lines and text:
+        lines = [text]
+    if not lines:
+        return json.dumps(
+            {
+                "success": True,
+                "path": path.name,
+                "content": "",
+                "total_lines": 0,
+                "offset": 1,
+                "limit": limit,
+                "extracted": True,
+            },
+            ensure_ascii=False,
+        )
+
+    content, total_lines, norm_offset, norm_limit = _format_line_window(lines, offset, limit)
+    if len(content) > _MAX_EXTRACT_CHARS:
+        return json.dumps(
+            {
+                "success": False,
+                "error": (
+                    f"Extracted content exceeds safety limit ({_MAX_EXTRACT_CHARS:,} chars). "
+                    "Use offset and limit to read a smaller range."
+                ),
+                "total_lines": total_lines,
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "success": True,
+            "path": path.name,
+            "content": content,
+            "total_lines": total_lines,
+            "offset": norm_offset,
+            "limit": norm_limit,
+            "extracted": True,
+        },
+        ensure_ascii=False,
+    )
+
+
 # ── Handlers ───────────────────────────────────────────────────────────────
 
 
@@ -98,6 +184,13 @@ def _handle_web_file_read(args: Dict[str, Any], **kw: Any) -> str:
     confined = _confine_or_error(args.get("path", ""))
     if isinstance(confined, dict):
         return _json_or_passthrough(confined)
+    suffix = Path(confined).suffix.lower()
+    if suffix in _EXTRACTABLE_SUFFIXES:
+        return _read_extractable_document(
+            confined,
+            args.get("offset", 1),
+            args.get("limit", 500),
+        )
     return read_file_tool(
         path=confined,
         offset=args.get("offset", 1),
@@ -229,8 +322,10 @@ _SANDBOX_NOTE = (
 _WEB_FILE_READ_SCHEMA = {
     "name": "web_file_read",
     "description": (
-        "Read a text file in your workspace with line numbers and "
-        "pagination. Mirrors `read_file` but sandboxed." + _SANDBOX_NOTE
+        "Read a file in your workspace with line numbers and pagination. "
+        "Plain text (``.txt``, ``.md``) is read directly; PDF and Office "
+        "documents (``.pdf``, ``.docx``, ``.xlsx``, ``.pptx``) are text-"
+        "extracted first. Mirrors `read_file` but sandboxed." + _SANDBOX_NOTE
     ),
     "parameters": {
         "type": "object",

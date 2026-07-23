@@ -51,6 +51,8 @@ cli-config.yaml
 # Skills Hub state (lives in ~/.hermes/skills/.hub/ at runtime, but just in case)
 skills/.hub/
 ignored/
+# Local scratch / personal notes — never commit
+dev_local/
 .worktrees/
 environments/benchmarks/evals/
 
@@ -79,3 +81,9 @@ hermes_cli/tui_dist/*
 hermes_cli/scripts/
 docs/superpowers/*
 .gstack/
+
+# Local deploy notes (site-specific; keep out of git)
+docs/user-guide/DEPLOY-no-docker.md
+
+# Cursor agent plans — local only, do not push to GitHub
+.cursor/plans/

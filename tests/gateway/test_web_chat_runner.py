@@ -13,9 +13,11 @@ import pytest
 
 from gateway.web.chat_runner import (
     WebChatAgentRunner,
+    _resolve_web_chat_enabled_toolsets,
     collect_usage,
     derive_session_id_from_history,
 )
+from gateway.web.sandbox import enter_user_context
 
 
 # ── Shared mocks for the gateway.run helpers ───────────────────────────────
@@ -61,6 +63,35 @@ def _patch_gateway_runtime(monkeypatch, *, toolsets=("file", "web_search", "memo
     )
 
     return list(toolsets)
+
+
+def _patch_gateway_runtime_minimal(monkeypatch):
+    """Patch runtime helpers but keep real ``_get_platform_tools`` resolution."""
+    fake_runtime = {
+        "api_key": "fake-key",
+        "base_url": "https://fake.example/v1",
+        "provider": "fake",
+        "api_mode": "chat_completions",
+        "command": None,
+        "args": [],
+        "credential_pool": None,
+    }
+
+    monkeypatch.setattr(
+        "gateway.run._resolve_runtime_agent_kwargs", lambda: dict(fake_runtime)
+    )
+    monkeypatch.setattr(
+        "gateway.run._resolve_gateway_model", lambda config=None: "fake-model"
+    )
+    monkeypatch.setattr("gateway.run._load_gateway_config", lambda: {})
+    monkeypatch.setattr(
+        "gateway.run.GatewayRunner._load_reasoning_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "gateway.run.GatewayRunner._load_fallback_model",
+        lambda: None,
+    )
 
 
 # ── _create_agent ────────────────────────────────────────────────────────
@@ -250,12 +281,8 @@ def test_create_agent_always_prepends_platform_addendum(monkeypatch):
     assert eph.index("web_skills_list") < eph.index("Be terse.")
 
 
-def test_create_agent_supports_model_name_override(monkeypatch):
-    """If the runner is constructed with a custom model_name, that takes
-    precedence over `_resolve_gateway_model()`.  Lets the platform expose
-    a vanity name (e.g. "Hermes Agent") to clients while using a
-    different actual model under the hood.
-    """
+def test_create_agent_passes_per_request_model_override(monkeypatch):
+    """SPA-selected model must win over gateway default / vanity name."""
     _patch_gateway_runtime(monkeypatch)
     captured = {}
     monkeypatch.setattr(
@@ -264,8 +291,35 @@ def test_create_agent_supports_model_name_override(monkeypatch):
     )
 
     runner = WebChatAgentRunner(model_name="vanity/name")
-    runner._create_agent(user_id="u_alice")
-    assert captured["model"] == "vanity/name"
+    with patch("gateway.web.sandbox.get_user_workspace") as mock_ws:
+        mock_ws.return_value = None
+        runner._create_agent(
+            user_id="u_alice",
+            model_override="gpt-5.6-luna",
+        )
+    assert captured["model"] == "gpt-5.6-luna"
+    assert "gpt-5.6-luna" in (captured.get("ephemeral_system_prompt") or "")
+
+
+def test_create_agent_binds_workspace_in_prompt(monkeypatch, tmp_path):
+    """Ephemeral prompt must state the per-user workspace root."""
+    _patch_gateway_runtime(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(
+        "run_agent.AIAgent",
+        lambda **kw: (captured.update(kw), MagicMock())[1],
+    )
+    ws = tmp_path / "web_workspaces" / "u_alice"
+    ws.mkdir(parents=True)
+
+    with patch("gateway.web.sandbox.get_user_workspace", return_value=ws):
+        WebChatAgentRunner()._create_agent(user_id="u_alice")
+
+    eph = captured.get("ephemeral_system_prompt") or ""
+    assert str(ws) in eph
+    assert "web_file_read" in eph
+    assert captured.get("skip_context_files") is False
+
 
 
 # ── run() ─────────────────────────────────────────────────────────────────
@@ -524,3 +578,75 @@ def test_collect_usage_extracts_total_tokens():
 
 def test_collect_usage_defaults_to_zero():
     assert collect_usage({}, {}) == 0
+
+
+# ── web_chat sandbox toolset exposure (regression) ─────────────────────────
+
+
+def test_resolve_web_chat_enabled_toolsets_includes_fork_sandbox_sets():
+    """Dynamic registry toolsets must merge back from hermes-web-chat."""
+    import gateway.web.tools  # noqa: F401 — register web_file_* handlers
+
+    enabled = _resolve_web_chat_enabled_toolsets({})
+    assert "web_file" in enabled
+    assert "web_skill" in enabled
+
+
+def test_create_agent_exposes_web_file_tools_without_mocking_tool_config(
+    monkeypatch, tmp_path,
+):
+    """Regression: web_file_read was registered but not in model schemas."""
+    import gateway.web.tools  # noqa: F401
+    from model_tools import get_tool_definitions
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    _patch_gateway_runtime_minimal(monkeypatch)
+    captured: dict = {}
+
+    def fake_aiagent(**kwargs):
+        captured.update(kwargs)
+        return MagicMock(name="agent")
+
+    monkeypatch.setattr("run_agent.AIAgent", fake_aiagent)
+
+    with enter_user_context("u_toolset01"):
+        WebChatAgentRunner()._create_agent(user_id="u_toolset01", session_id="s1")
+
+    enabled = captured["enabled_toolsets"]
+    assert "web_file" in enabled
+
+    defs = get_tool_definitions(enabled_toolsets=enabled)
+    names = {d["function"]["name"] for d in defs}
+    assert "web_file_read" in names
+    assert "web_file_search" in names
+    assert "terminal" not in names
+    assert "read_file" not in names
+    assert "delegate_task" not in names
+    assert "execute_code" not in names
+
+
+def test_web_file_read_dispatch_returns_workspace_file_content(
+    monkeypatch, tmp_path,
+):
+    """Upload path → confine → read returns content (tenant-local)."""
+    import gateway.web.tools  # noqa: F401
+    from tools.registry import registry
+
+    home = tmp_path / ".hermes"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    with enter_user_context("u_read01") as ws:
+        target = ws / "uploads" / "note.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("workspace secret line", encoding="utf-8")
+
+        handler = registry.get_entry("web_file_read").handler
+        raw = handler({"path": "uploads/note.txt"}, task_id="t1")
+        assert "workspace secret line" in raw
+
+    with enter_user_context("u_read02"):
+        handler = registry.get_entry("web_file_read").handler
+        blocked = handler({"path": str(ws / "uploads" / "note.txt")}, task_id="t1")
+        assert "outside your workspace" in blocked
+        assert "workspace secret line" not in blocked
+

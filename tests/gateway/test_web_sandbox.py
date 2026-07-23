@@ -77,6 +77,24 @@ def test_enter_user_context_sets_both_contextvars(hermes_home):
     assert get_hermes_home() == hermes_home
 
 
+def test_enter_user_context_sets_terminal_cwd_override(hermes_home):
+    """Web chat must not discover context files from the process CWD
+    (the hermes-agent checkout). Bind TERMINAL_CWD to the user workspace.
+    """
+    from hermes_constants import get_terminal_cwd
+
+    assert get_terminal_cwd() is None
+    with enter_user_context("u_alice") as ws:
+        assert get_terminal_cwd() == str(ws)
+    assert get_terminal_cwd() is None
+
+
+def test_ensure_workspace_includes_uploads(hermes_home):
+    ws = ensure_workspace("u_alice")
+    assert (ws / "uploads").is_dir()
+    assert (ws / "skills").is_dir()
+
+
 def test_enter_user_context_is_reentrant(hermes_home):
     """Nested entry (e.g. spawn subagent for a different user) works
     correctly — outer context restored on inner exit.
@@ -88,9 +106,39 @@ def test_enter_user_context_is_reentrant(hermes_home):
         with enter_user_context("u_bob") as bob_ws:
             assert get_user_workspace() == bob_ws
             assert get_hermes_home() == bob_ws
+            # Nested Bob must still land under process HERMES_HOME, not
+            # under Alice's overridden home (which would nest layouts).
+            assert bob_ws == hermes_home / "web_workspaces" / "u_bob"
+            assert alice_ws == hermes_home / "web_workspaces" / "u_alice"
         # Back to Alice
         assert get_user_workspace() == alice_ws
         assert get_hermes_home() == alice_ws
+
+
+def test_workspaces_root_ignores_user_home_override(hermes_home):
+    """workspaces_root must use process HERMES_HOME, never the per-user override."""
+    with enter_user_context("u_alice") as alice_ws:
+        assert get_hermes_home() == alice_ws
+        assert workspaces_root() == hermes_home / "web_workspaces"
+        assert workspaces_root() != alice_ws / "web_workspaces"
+
+
+def test_confine_path_rejects_symlink_escape(hermes_home):
+    """Symlink whose target is outside the workspace must be rejected."""
+    outside = hermes_home / "outside_secret.txt"
+    outside.write_text("leak", encoding="utf-8")
+    with enter_user_context("u_alice") as ws:
+        link = ws / "files" / "escape.txt"
+        link.symlink_to(outside)
+        with pytest.raises(PathSandboxViolation):
+            confine_path(link)
+
+
+def test_ensure_workspace_rejects_path_traversal_user_id(hermes_home):
+    with pytest.raises(ValueError, match="invalid user_id"):
+        ensure_workspace("../etc")
+    with pytest.raises(ValueError, match="invalid user_id"):
+        ensure_workspace("alice/bob")
 
 
 def test_enter_user_context_resets_on_exception(hermes_home):
@@ -195,4 +243,32 @@ async def test_concurrent_asyncio_tasks_have_independent_contexts(hermes_home):
     assert seen["u_alice"].name == "u_alice"
     assert seen["u_bob"].name == "u_bob"
     # Parent task sees neither workspace.
+    assert get_user_workspace() is None
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_dont_swap_user_contexts(hermes_home):
+    """UUID-style user ids must not swap ContextVars under concurrent load.
+
+    Named to match the TODOLIST / test-first checklist contract. Same
+    ContextVar semantics as the ``u_*`` case above, but with platform
+    register-shaped identifiers.
+    """
+    del hermes_home  # fixture only redirects HERMES_HOME
+    alice = "550e8400-e29b-41d4-a716-446655440000"
+    bob = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    barrier = asyncio.Barrier(2)
+    seen: dict[str, Path] = {}
+
+    async def user_task(user_id: str) -> None:
+        with enter_user_context(user_id) as ws:
+            seen[user_id] = ws
+            await barrier.wait()
+            # Peer has entered its own context; ours must be unchanged.
+            assert get_user_workspace() == ws
+            assert get_hermes_home() == ws
+            assert ws.name == user_id
+
+    await asyncio.gather(user_task(alice), user_task(bob))
+    assert seen[alice] != seen[bob]
     assert get_user_workspace() is None

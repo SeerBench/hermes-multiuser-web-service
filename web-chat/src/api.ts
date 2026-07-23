@@ -1,21 +1,14 @@
 // API client for the web_chat gateway adapter.
-//
-// One-page summary:
-// - All requests go to `/api/*`; in dev they're proxied to `:8643`,
-//   in production the SPA is served by the gateway so it's same-origin.
-// - Cookie auth is the default — `credentials: 'include'` on every
-//   request.  The server sets / clears the `hermes_session` cookie.
-// - The cookie is issued by POST /api/auth/login when the user pastes
-//   their new-api key; the server validates it against the upstream
-//   gateway before signing.
-// - For chat streaming we use `fetch` + `ReadableStream` rather than
-//   EventSource, because EventSource only supports GET and can't carry
-//   cookies cross-origin in some browsers.
+import { parseSseFrame } from './sse'
+import type { ChatEvent, ChatMessage } from './chatEvents'
+export type { ChatEvent, ChatMessage } from './chatEvents'
 
 export type User = {
   user_id: string
   created_at: number
   last_seen_at: number
+  email?: string
+  upstream_status?: string
 }
 
 export type ConversationSummary = {
@@ -36,35 +29,6 @@ export type UploadedFile = {
   path: string
   size: number
 }
-
-export type ChatMessage = {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-}
-
-export type ChatEvent =
-  | { type: 'token'; text: string }
-  | {
-      type: 'tool_start'
-      id: string | null
-      tool: string
-      preview: string
-      args: string
-    }
-  | {
-      type: 'tool_end'
-      id: string | null
-      tool: string
-      duration: number
-      error: boolean
-      result_preview: string
-    }
-  | { type: 'reasoning'; text: string }
-  | { type: 'status'; kind: 'lifecycle' | 'warn'; message: string }
-  | { type: 'step'; step: number; tools: string[] }
-  | { type: 'activity'; kind: string; text: string }
-  | { type: 'done'; session_id: string; usage: Record<string, number> }
-  | { type: 'error'; message: string; code?: string }
 
 // ── Stored messages (returned by GET /api/conversations/:id) ────────────
 
@@ -239,6 +203,7 @@ export type ChatRequest = {
   session_id?: string
   session_key?: string
   system_prompt?: string
+  model?: string
   conversation_history?: ChatMessage[]
 }
 
@@ -324,76 +289,3 @@ export async function* streamChat(
   }
 }
 
-function parseSseFrame(frame: string): ChatEvent | null {
-  let eventType = 'message'
-  let dataLine = ''
-  for (const line of frame.split('\n')) {
-    if (line.startsWith('event:')) eventType = line.slice(6).trim()
-    else if (line.startsWith('data:')) dataLine += line.slice(5).trim()
-    else if (line.startsWith(':')) continue // SSE comment
-  }
-  if (!dataLine) return null
-  let data: Record<string, unknown>
-  try {
-    data = JSON.parse(dataLine)
-  } catch {
-    return null
-  }
-  // Narrow to the typed union by event name.  Unknown event names are
-  // dropped — server and client must agree on the set.
-  switch (eventType) {
-    case 'token':
-      return { type: 'token', text: String(data.text ?? '') }
-    case 'tool_start':
-      return {
-        type: 'tool_start',
-        id: data.id == null ? null : String(data.id),
-        tool: String(data.tool ?? ''),
-        preview: String(data.preview ?? ''),
-        args: String(data.args ?? ''),
-      }
-    case 'tool_end':
-      return {
-        type: 'tool_end',
-        id: data.id == null ? null : String(data.id),
-        tool: String(data.tool ?? ''),
-        duration: Number(data.duration ?? 0),
-        error: Boolean(data.error),
-        result_preview: String(data.result_preview ?? ''),
-      }
-    case 'reasoning':
-      return { type: 'reasoning', text: String(data.text ?? '') }
-    case 'status':
-      return {
-        type: 'status',
-        kind: data.kind === 'warn' ? 'warn' : 'lifecycle',
-        message: String(data.message ?? ''),
-      }
-    case 'step':
-      return {
-        type: 'step',
-        step: Number(data.step ?? 0),
-        tools: Array.isArray(data.tools) ? data.tools.map(String) : [],
-      }
-    case 'activity':
-      return {
-        type: 'activity',
-        kind: String(data.kind ?? 'thinking'),
-        text: String(data.text ?? ''),
-      }
-    case 'done':
-      return {
-        type: 'done',
-        session_id: String(data.session_id ?? ''),
-        usage: (data.usage as Record<string, number>) ?? {},
-      }
-    case 'error':
-      return {
-        type: 'error',
-        message: String(data.message ?? 'unknown error'),
-        code: data.code ? String(data.code) : undefined,
-      }
-    default:
-      return null
-  }
-}

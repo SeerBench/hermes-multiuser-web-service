@@ -1,43 +1,57 @@
 import { useLocale, useT } from '../i18n'
-import type { Locale } from '../i18n'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 type Props = {
   className?: string
+  /** Slightly smaller for the app header. */
   compact?: boolean
+  /**
+   * `current` — label is the active locale (中文 / English).
+   * `target` — label is the locale you switch *to* (legacy Settings helper).
+   */
+  variant?: 'current' | 'target'
 }
 
-const OPTIONS: { value: Locale; key: string }[] = [
-  { value: 'en', key: 'lang.option.en' },
-  { value: 'zh', key: 'lang.option.zh' },
-]
-
 /**
- * Two-state segmented control for switching the UI language.
- * Used both in the app header (compact) and in Settings (labelled).
+ * Single toggle for ZH ↔ EN.
+ * Default (`current`) shows the active language so the control matches the UI.
  */
-export function LanguageToggle({ className, compact }: Props) {
+export function LanguageToggle({
+  className,
+  compact,
+  variant = 'current',
+}: Props) {
   const { locale, setLocale } = useLocale()
   const t = useT()
 
+  const label =
+    variant === 'target'
+      ? locale === 'zh'
+        ? 'English'
+        : '中文'
+      : locale === 'zh'
+        ? '中文'
+        : 'English'
+
+  const tip =
+    variant === 'target'
+      ? locale === 'zh'
+        ? 'Use English'
+        : '使用中文'
+      : t('lang.toggle.tip')
+
   return (
-    <div
-      className={`lang-toggle${compact ? ' lang-toggle-compact' : ''}${
-        className ? ` ${className}` : ''
-      }`}
-      role="group"
-      aria-label={t('lang.toggle.label')}
+    <Button
+      type="button"
+      size={compact ? 'xs' : 'sm'}
+      variant="outline"
+      className={cn(className)}
+      title={tip}
+      aria-label={tip}
+      onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
     >
-      {OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          className={locale === opt.value ? 'lang-toggle-active' : ''}
-          aria-pressed={locale === opt.value}
-          onClick={() => setLocale(opt.value)}
-        >
-          {t(opt.key)}
-        </button>
-      ))}
-    </div>
+      {label}
+    </Button>
   )
 }

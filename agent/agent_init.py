@@ -51,7 +51,7 @@ from agent.tool_guardrails import (
 )
 from hermes_cli.config import cfg_get
 from hermes_cli.timeouts import get_provider_request_timeout
-from hermes_constants import get_hermes_home
+from hermes_constants import get_hermes_home, get_terminal_cwd
 from model_tools import check_toolset_requirements, get_tool_definitions
 from utils import base_url_host_matches
 
@@ -1516,7 +1516,7 @@ def init_agent(
             _ra().logger.debug("Context engine on_session_start: %s", _ce_err)
 
     agent._subdirectory_hints = SubdirectoryHintTracker(
-        working_dir=os.getenv("TERMINAL_CWD") or None,
+        working_dir=get_terminal_cwd() or None,
     )
     agent._user_turn_count = 0
 

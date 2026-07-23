@@ -107,6 +107,8 @@ from gateway.web.users import (
     UserStore,
     UserStoreError,
 )
+from gateway.web.user_store_factory import create_user_store
+from gateway.web.platform_api_proxy import install_platform_api_proxy
 
 logger = logging.getLogger("hermes.gateway.web_chat")
 
@@ -155,17 +157,26 @@ def _sanitize_upload_name(raw: str) -> str:
     """Reduce a client-supplied filename to a safe basename.
 
     Strips any directory components (``/``, ``\\``), drops leading dots so a
-    file can't masquerade as a dotfile or ``..``, keeps only a conservative
-    character set, and bounds the length.  The result is always a non-empty
-    basename; ``confine_path`` is still the authoritative sandbox guard, this
-    is just defence-in-depth + a tidy name.
+    file can't masquerade as a dotfile or ``..``, removes control chars and
+    path separators, and bounds the length.  Unicode display names (e.g.
+    Chinese) are preserved; only shell-hostile punctuation is collapsed.
+    ``confine_path`` is still the authoritative sandbox guard.
+
+    Multipart stacks (aiohttp) may deliver ``filename`` percent-encoded
+    (``%E6%B5%8B...``) — decode before sanitizing so we don't mangle names.
     """
     import re
+    from urllib.parse import unquote
 
-    base = str(raw or "").replace("\\", "/").split("/")[-1].strip()
+    base = str(raw or "")
+    if "%" in base:
+        base = unquote(base, encoding="utf-8", errors="replace")
+    base = base.replace("\\", "/").split("/")[-1].strip()
     base = base.lstrip(".") or "file"
-    # Allow letters, digits, dash, underscore, dot, space; collapse the rest.
-    base = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)
+    # NUL + path separators must never reach the filesystem layer.
+    base = re.sub(r"[\x00-\x1f/\\]+", "_", base)
+    # Keep letters/digits (incl. CJK), dot, dash, underscore, space.
+    base = re.sub(r"[^\w.\- ]+", "_", base, flags=re.UNICODE)
     base = base.strip(" .") or "file"
     if len(base) > _UPLOAD_MAX_FILENAME_LEN:
         # Preserve the extension when truncating an over-long name.
@@ -323,13 +334,14 @@ class WebChatAdapter(BasePlatformAdapter):
             from gateway.web.aux_byo_router import install_aux_byo_router
             install_aux_byo_router()
 
-            self._user_store = UserStore()
+            self._user_store = create_user_store()
             self._key_vault = KeyVault()
             self._session_db = self._ensure_session_db()
             self._runner = WebChatAgentRunner(session_db=self._session_db)
             self._agent_semaphore = asyncio.Semaphore(self._max_concurrent_agents)
 
             self._log_global_skills_visibility()
+            self._log_web_research_status()
         except Exception as exc:
             logger.error("[%s] failed to initialise subsystems: %s", self.name, exc)
             return False
@@ -465,6 +477,9 @@ class WebChatAdapter(BasePlatformAdapter):
         app.router.add_post("/api/command", self._handle_run_command)
         app.router.add_post("/api/uploads", self._handle_upload)
         app.router.add_post("/api/chat", self._handle_chat)
+        # Local sidecar: forward control-plane routes to platform-api so the
+        # SPA on :8643 can reach /api/v1 without a separate nginx.
+        install_platform_api_proxy(app)
         # SPA shell + static assets.
         from pathlib import Path as _Path
         static_dir = _Path(__file__).resolve().parent.parent / "web" / "_static"
@@ -473,10 +488,20 @@ class WebChatAdapter(BasePlatformAdapter):
             assets_dir = static_dir / "assets"
             if assets_dir.is_dir():
                 app.router.add_static("/assets/", path=str(assets_dir), name="spa_assets")
+            # Vite ``public/`` files land at _static root (logo, favicon…).
+            self._spa_static_dir = static_dir
+            for name in ("logo.svg", "logo.png", "favicon.png", "favicon.ico"):
+                path = static_dir / name
+                if path.is_file():
+                    app.router.add_get(
+                        f"/{name}",
+                        self._make_spa_public_file_handler(path),
+                    )
             self._spa_index_path = index_html
             app.router.add_get("/", self._handle_spa_index)
         else:
             self._spa_index_path = None
+            self._spa_static_dir = None
             app.router.add_get("/", self._handle_spa_shell)
 
     # ── Helpers ────────────────────────────────────────────────────────
@@ -562,6 +587,22 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.info(
                 "[%s] global skills: %d found under %s (%s)",
                 self.name, skill_count, skills_dir, source,
+            )
+
+    def _log_web_research_status(self) -> None:
+        """One-shot startup probe for web_search / web_extract backend gates."""
+        try:
+            from gateway.web.web_research_status import (
+                log_web_research_status,
+                probe_web_research_status,
+            )
+
+            log_web_research_status(probe_web_research_status())
+        except Exception as exc:
+            logger.warning(
+                "[%s] web research startup probe failed: %s",
+                self.name,
+                exc,
             )
 
     @staticmethod
@@ -687,7 +728,28 @@ class WebChatAdapter(BasePlatformAdapter):
             "user_id": user["user_id"],
             "created_at": user["created_at"],
             "last_seen_at": user["last_seen_at"],
+            **({"email": user["email"]} if user.get("email") else {}),
+            **({"upstream_status": user["upstream_status"]} if user.get("upstream_status") else {}),
         })
+
+    def _build_skill_hint(self, user_id: str) -> Optional[str]:
+        """Ephemeral system hint listing enabled skills for this user."""
+        try:
+            from gateway.web.platform.store import PlatformStore
+        except ImportError:
+            return None
+        if not isinstance(self._user_store, PlatformStore):
+            return None
+        names = self._user_store.list_enabled_skill_names(user_id)
+        if not names:
+            return None
+        lines = ["## Enabled skills for this session"]
+        for name in names:
+            lines.append(f"- `{name}`")
+        lines.append(
+            "Use `web_skill_view` (or `web_skills_list`) when a skill's procedure is needed."
+        )
+        return "\n".join(lines)
 
     # ── /api/conversations ─────────────────────────────────────────────
 
@@ -1094,8 +1156,62 @@ class WebChatAdapter(BasePlatformAdapter):
                     "path": f"{_UPLOAD_DIR_NAME}/{dest.name}",
                     "size": size,
                 })
+                self._maybe_register_chat_upload(
+                    user_id=user_id,
+                    storage_key=f"{_UPLOAD_DIR_NAME}/{dest.name}",
+                    filename=dest.name,
+                    size=size,
+                )
 
         return web.json_response({"files": saved})
+
+    def _maybe_register_chat_upload(
+        self,
+        *,
+        user_id: str,
+        storage_key: str,
+        filename: str,
+        size: int,
+    ) -> None:
+        """Bridge chat uploads into platform FileRecord when store supports it."""
+        store = getattr(self, "_user_store", None)
+        if store is None or not hasattr(store, "get_default_workspace"):
+            return
+        ws = store.get_default_workspace(user_id)
+        if not ws:
+            return
+        try:
+            from platform_api.services.file_registry import register_sandbox_file
+
+            register_sandbox_file(
+                workspace_id=ws["id"],
+                storage_key=storage_key,
+                filename=filename,
+                size_bytes=size,
+                origin="chat",
+                auto_ingest=False,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[%s] chat upload registry failed user=%s: %s",
+                self.name,
+                user_id,
+                exc,
+            )
+
+    def _resolve_user_preferred_model(self, user_id: str) -> Optional[str]:
+        store = getattr(self, "_user_store", None)
+        if store is None or not hasattr(store, "get_default_workspace"):
+            return None
+        ws = store.get_default_workspace(user_id)
+        if not ws:
+            return None
+        try:
+            from platform_api.routers.models import resolve_workspace_model
+
+            return resolve_workspace_model(ws["id"], user_id)
+        except Exception:
+            return None
 
     @staticmethod
     def _dedupe_upload_path(dest: "Any", uploads_dir: "Any"):
@@ -1117,6 +1233,13 @@ class WebChatAdapter(BasePlatformAdapter):
     async def _handle_chat(self, request: "web.Request") -> "web.StreamResponse":
         user_id = get_request_user_id(request)
         upstream_key = get_request_upstream_key(request)
+        user_row = self._user_store.get_user(user_id) if user_id else None
+        if user_row and user_row.get("upstream_status") == "pending_bind" and not upstream_key:
+            return self._json_error(
+                "upstream API key required — bind your key in Settings",
+                status=403,
+                code="upstream_key_required",
+            )
         if not upstream_key:
             # Cookie is good but the encrypted key didn't decrypt — the
             # master key was rotated, or the row is corrupt.  Force a
@@ -1135,10 +1258,18 @@ class WebChatAdapter(BasePlatformAdapter):
             return self._json_error("message required")
         session_id = body.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
         ephemeral_system_prompt = body.get("system_prompt") or None
+        skill_hint = self._build_skill_hint(user_id)
+        if skill_hint:
+            ephemeral_system_prompt = (
+                (ephemeral_system_prompt + "\n\n") if ephemeral_system_prompt else ""
+            ) + skill_hint
         conversation_history = body.get("conversation_history") or []
         if not isinstance(conversation_history, list):
             return self._json_error("conversation_history must be a list")
         gateway_session_key = body.get("session_key") or f"web::{user_id}"
+        request_model = (body.get("model") or "").strip() or None
+        if not request_model:
+            request_model = self._resolve_user_preferred_model(user_id)
 
         if self._agent_semaphore is None:
             return self._json_error("server not ready", status=503)
@@ -1220,13 +1351,44 @@ class WebChatAdapter(BasePlatformAdapter):
                     result_str = json.dumps(function_result, ensure_ascii=False, default=str)
             except Exception:
                 result_str = str(function_result)
-            _push("tool_end", {
+            # JSON tool payloads often encode failure as success:false.
+            if not error and result_str:
+                try:
+                    parsed = json.loads(result_str)
+                    if isinstance(parsed, dict):
+                        if parsed.get("success") is False or parsed.get("error"):
+                            error = True
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+
+            tool_end_payload: Dict[str, Any] = {
                 "id": str(tool_call_id) if tool_call_id is not None else None,
                 "tool": name,
                 "duration": duration,
                 "error": error,
                 "result_preview": _truncate_for_sse(result_str),
-            })
+            }
+            if name == "web_search":
+                try:
+                    from gateway.web.web_search_limits import (
+                        format_search_status_message,
+                        parse_search_meta_from_result,
+                    )
+
+                    search_meta = parse_search_meta_from_result(result_str)
+                    if search_meta:
+                        tool_end_payload["search_meta"] = search_meta
+                        if not error:
+                            _push(
+                                "status",
+                                {
+                                    "kind": "lifecycle",
+                                    "message": format_search_status_message(search_meta),
+                                },
+                            )
+                except Exception:
+                    pass
+            _push("tool_end", tool_end_payload)
 
         def reasoning_cb(text: str, **_kwargs) -> None:
             # AIAgent calls ``self.reasoning_callback(text)`` — see
@@ -1302,6 +1464,7 @@ class WebChatAdapter(BasePlatformAdapter):
                         conversation_history=conversation_history,
                         ephemeral_system_prompt=ephemeral_system_prompt,
                         session_id=session_id,
+                        model_override=request_model,
                         stream_delta_callback=stream_delta_cb,
                         tool_start_callback=tool_start_cb,
                         tool_complete_callback=tool_complete_cb,
@@ -1363,6 +1526,75 @@ class WebChatAdapter(BasePlatformAdapter):
                             "usage": usage,
                         },
                     })
+                    # Usage Center: ledger chat turn (tokens + model); best-effort.
+                    try:
+                        from gateway.web.usage_tracker import track_chat_turn
+
+                        ws = None
+                        if hasattr(self.user_store, "get_default_workspace"):
+                            ws = self.user_store.get_default_workspace(user_id)
+                        track_chat_turn(
+                            user_id=user_id,
+                            session_id=str(effective_session_id),
+                            model=request_model,
+                            usage=usage if isinstance(usage, dict) else {},
+                            workspace_id=ws["id"] if ws else None,
+                            tenant_id=ws.get("tenant_id") if ws else None,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[%s] usage tracker hook skipped",
+                            self.name,
+                            exc_info=True,
+                        )
+                    # Memory Center: optional post-turn extraction (feature-flagged
+                    # stub — never writes permanent memory; see memory_extractor).
+                    try:
+                        from platform_api.services.memory_extractor import (
+                            maybe_enqueue_memory_extraction,
+                        )
+
+                        ws = None
+                        if hasattr(self.user_store, "get_default_workspace"):
+                            ws = self.user_store.get_default_workspace(user_id)
+                        if ws:
+                            maybe_enqueue_memory_extraction(
+                                user_id=user_id,
+                                workspace_id=ws["id"],
+                                session_id=str(effective_session_id),
+                            )
+                    except Exception:
+                        logger.debug(
+                            "[%s] memory extraction hook skipped",
+                            self.name,
+                            exc_info=True,
+                        )
+                    # Auto-title first exchanges (background). Client refreshes
+                    # the conversation list to pick up the new title.
+                    try:
+                        from agent.title_generator import maybe_auto_title
+
+                        assistant_text = (
+                            result.get("final_response")
+                            or result.get("response")
+                            or ""
+                        )
+                        if isinstance(assistant_text, str) and assistant_text.strip():
+                            history_for_title = list(conversation_history or []) + [
+                                {"role": "user", "content": user_message},
+                                {"role": "assistant", "content": assistant_text},
+                            ]
+                            maybe_auto_title(
+                                self._session_db,
+                                effective_session_id,
+                                user_message,
+                                assistant_text,
+                                history_for_title,
+                            )
+                    except Exception:
+                        logger.debug(
+                            "[%s] maybe_auto_title failed", self.name, exc_info=True,
+                        )
 
                 await event_queue.put(None)
                 try:
@@ -1396,6 +1628,29 @@ class WebChatAdapter(BasePlatformAdapter):
             return
 
     # ── SPA shell ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_spa_public_file_handler(path: "Path"):
+        """Serve a single file from ``_static`` (logo / favicon) anonymously."""
+        from pathlib import Path as _Path
+
+        file_path = _Path(path)
+        suffix = file_path.suffix.lower()
+        content_type = {
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".ico": "image/x-icon",
+            ".webp": "image/webp",
+        }.get(suffix, "application/octet-stream")
+
+        async def _handler(_: "web.Request") -> "web.Response":
+            return web.Response(
+                body=file_path.read_bytes(),
+                content_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+
+        return _handler
 
     async def _handle_spa_index(self, request: "web.Request") -> "web.Response":
         if self._spa_index_path is None or not self._spa_index_path.is_file():

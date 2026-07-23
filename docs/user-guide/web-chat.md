@@ -95,27 +95,41 @@ on any machine lands the user in the same conversation history.
 
 ---
 
-## Web research out of the box (no API keys)
+## Web research (Brave + ddgs hybrid)
 
-Every web user shares one tool surface, and the two web-research tools in
-the `hermes-web-chat` toolset work with **zero extra configuration** —
-no Firecrawl / Tavily / Exa / Parallel account required:
+Multi-user `web_search` uses a **global Brave key** with **per-user quotas**,
+falling back to zero-key **ddgs** (DuckDuckGo). Users cannot configure search
+keys or limits in the UI — operators set everything in `~/.hermes/.env`:
 
-| Tool | Default backend | Notes |
+```bash
+BRAVE_SEARCH_API_KEY=...                 # global Brave Search key (optional)
+WEB_SEARCH_BRAVE_MAX_PER_USER=20         # per-user Brave searches per window
+WEB_SEARCH_BRAVE_WINDOW_SECONDS=86400    # rolling window (default 24h)
+```
+
+Routing per call (`gateway/web/web_search_router.py`):
+
+| Condition | Backend |
+|---|---|
+| Brave key set and user has remaining quota | `brave-free` |
+| Otherwise and `ddgs` installed | `ddgs` |
+| Neither available | tool hidden / error JSON |
+
+Brave usage is counted in **Usage Center** (`usage_records`, `type=tool`,
+`metadata.backend=brave-free`). Requires `PLATFORM_DATABASE_URL`.
+
+After each search the SPA shows an activity-log status (e.g. “使用 Brave 搜索，
+Brave 用量还剩 N 次”) and the tool card lists URLs found.
+
+`web_extract` still defaults to **`http-fetch`** when no paid extract backend is
+configured — see `plugins/web/http_fetch/`.
+
+| Tool | Default | Notes |
 |---|---|---|
-| `web_search` | `ddgs` (DuckDuckGo) | Shipped in the `[web-chat]` extra so search works on a fresh install. |
-| `web_extract` | `http-fetch` (fork-bundled) | Plain `httpx` GET + stdlib HTML→text. Auto-selected when no paid extract backend is configured — see `plugins/web/http_fetch/`. |
+| `web_search` | Brave → ddgs | `[web-chat]` extra ships `ddgs`. |
+| `web_extract` | `http-fetch` | Plain `httpx` GET + stdlib HTML→text. |
 
-`http-fetch` is **extract-only** and deliberately lightweight: no
-JavaScript rendering, no readability heuristics. It's the "fetch this
-article / docs page / RSS item" fallback, not a scraper. The downstream
-LLM summarizer compresses whatever it returns. Server-Side Request
-Forgery is blocked by `web_extract_tool`'s `is_safe_url` gate *before*
-the provider sees a URL — private / link-local / metadata-endpoint
-targets never get fetched.
-
-**To upgrade quality**, point `web.extract_backend` at a paid provider in
-`~/.hermes/config.yaml` and set its key in `~/.hermes/.env`:
+**To upgrade extract quality**, point `web.extract_backend` at a paid provider:
 
 ```yaml
 web:

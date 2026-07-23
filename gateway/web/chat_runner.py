@@ -130,6 +130,39 @@ def _emit_agent_create_trace(
         logger.debug("web_chat debug trace failed: %r", trace_exc)
 
 
+# Registry toolsets registered by ``gateway/web/tools`` at import time.  They are
+# part of the ``hermes-web-chat`` composite but absent from static ``TOOLSETS``,
+# so ``_get_platform_tools(config, "web_chat")`` drops them unless we merge back.
+_FORK_WEB_CHAT_SANDBOX_TOOLSETS: frozenset[str] = frozenset({
+    "web_file",
+    "web_skill",
+    "web_memory",
+    "web_knowledge",
+})
+
+
+def _resolve_web_chat_enabled_toolsets(user_config: dict) -> list[str]:
+    """Return enabled toolset names for web_chat, including fork sandbox sets.
+
+    Generic ``_get_platform_tools`` reverse-maps only static CONFIGURABLE
+    toolsets and misses dynamic registry toolsets such as ``web_file``.  Without
+    this merge, ``web_file_read`` is registered but never exposed to the model.
+    """
+    from hermes_cli.tools_config import _get_platform_tools
+    from toolsets import resolve_toolset
+    from tools.registry import registry
+
+    enabled = set(_get_platform_tools(user_config, "web_chat"))
+    composite_tools = set(resolve_toolset("hermes-web-chat"))
+
+    for ts_name in _FORK_WEB_CHAT_SANDBOX_TOOLSETS:
+        ts_tools = set(registry.get_tool_names_for_toolset(ts_name))
+        if ts_tools and ts_tools.issubset(composite_tools):
+            enabled.add(ts_name)
+
+    return sorted(enabled)
+
+
 # Platform-level system-prompt addendum.  Appended ahead of any SPA-supplied
 # ``system_prompt`` so the agent always knows what surface it is running on,
 # what fork-specific tools exist, and how Brave / secrets are handled.
@@ -156,6 +189,10 @@ are intentionally absent here):
   files) into the user's private skills dir.
 - ``web_skill_delete`` — delete a user-private skill (global skills cannot
   be deleted from chat).
+- ``web_skill_edit`` — rewrite a personal skill's ``SKILL.md``. Global-only
+  skills are forked into the workspace first.
+- ``web_skill_patch`` — targeted find-and-replace (preferred for habit-driven
+  evolution). Also forks global-only skills before mutating.
 
 Skill-install protocol (strict — these rules exist because a previous agent
 violated them and the user lost trust):
@@ -188,14 +225,18 @@ Attachments:  When the user uploads files, they are saved into this user's
 private workspace under ``uploads/`` and the chat message lists them by their
 workspace-relative path (e.g. ``uploads/data.csv``).  Read them on demand with
 ``web_file_read`` (or search them with ``web_file_search``) using that relative
-path — do not ask the user to paste file contents into chat.
+path — do not ask the user to paste file contents into chat.  Supported read
+formats include plain text (``.txt``, ``.md``), PDF, Word (``.docx``), Excel
+(``.xlsx``), and PowerPoint (``.pptx``).  When attachments are listed in the
+user message, call ``web_file_read`` on those paths before answering questions
+about their contents.
 
-Web search:  The ``web_search`` tool is already wired up.  If the operator
-has configured ``BRAVE_SEARCH_API_KEY`` server-side, ``web_search`` already
-routes through Brave's free index — no skill install is needed to "use
-Brave".  Likewise for Tavily / Firecrawl / Exa.  The user should NOT paste
-search-provider API keys into chat; if they do, refuse to embed the key
-anywhere and tell them where to configure it (operator-side environment).
+Web search:  The ``web_search`` tool routes through operator-configured
+backends: **Brave** (global key, per-user quota) first, then **ddgs**
+(DuckDuckGo) as zero-key fallback.  Results include ``_meta.urls`` listing
+pages found — cite those sources when answering.  Tell the user when you
+used web search and which sites you relied on.  Users must NOT paste
+search-provider API keys into chat; search is configured by the operator only.
 
 Images:  When you generate an image with ``image_generate``, the tool returns
 the image as a URL in the result's ``image`` field.  You MUST surface it by
@@ -206,6 +247,37 @@ describing the picture in prose shows them nothing.  Always paste the actual
 ``![...](<url>)`` (in addition to any caption), and never claim you "created"
 or "attached" an image without including its Markdown link.
 """
+
+
+def _workspace_runtime_prompt(*, workspace: Any, model: str) -> str:
+    """Per-request facts the model must not invent from MEMORY.md / SOUL.md.
+
+    ``workspace`` is the absolute path of the active user sandbox (bound by
+    ``enter_user_context``).  File tools (``web_file_*``) are confined there;
+    the process CWD of the gateway is never the user's working directory.
+    """
+    lines = [
+        "[hermes-multiuser-web-service runtime]",
+        f"Active model for this turn: {model}",
+        "When asked which model you are using, report that id exactly — "
+        "do not invent a different model from memory or identity files.",
+    ]
+    if workspace is not None:
+        ws = str(workspace)
+        lines.extend(
+            [
+                f"User workspace root (your only working directory): {ws}",
+                "All file reads/writes/searches must use paths under this "
+                "workspace via ``web_file_read`` / ``web_file_write`` / "
+                "``web_file_patch`` / ``web_file_search``.  Relative paths "
+                "resolve from the workspace root (e.g. ``uploads/data.csv``, "
+                "``files/notes.md``).  ``web_file_read`` extracts text from "
+                "PDF and Office documents (``.pdf``, ``.docx``, ``.xlsx``, "
+                "``.pptx``) after sandbox confinement.  Never claim the gateway "
+                "process CWD or the hermes-agent checkout is the user's directory.",
+            ]
+        )
+    return "\n".join(lines)
 
 
 class WebChatAgentRunner:
@@ -237,6 +309,7 @@ class WebChatAgentRunner:
         user_id: str,
         ephemeral_system_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
+        model_override: Optional[str] = None,
         stream_delta_callback: Optional[Callable] = None,
         tool_progress_callback: Optional[Callable] = None,
         tool_start_callback: Optional[Callable] = None,
@@ -268,7 +341,6 @@ class WebChatAgentRunner:
             _resolve_runtime_agent_kwargs,
         )
         from gateway.web.upstream_key import get_upstream_key
-        from hermes_cli.tools_config import _get_platform_tools
 
         runtime_kwargs = _resolve_runtime_agent_kwargs()
         # BYO-key mode: if the chat handler bound the end-user's upstream
@@ -281,10 +353,14 @@ class WebChatAgentRunner:
         if upstream_key:
             runtime_kwargs = {**runtime_kwargs, "api_key": upstream_key}
         reasoning_config = GatewayRunner._load_reasoning_config()
-        model = self._model_name_override or _resolve_gateway_model()
+        model = (
+            (model_override or "").strip()
+            or self._model_name_override
+            or _resolve_gateway_model()
+        )
 
         user_config = _load_gateway_config()
-        enabled_toolsets = sorted(_get_platform_tools(user_config, "web_chat"))
+        enabled_toolsets = _resolve_web_chat_enabled_toolsets(user_config)
 
         # Fork debug trace (necessary point) — one diagnostic line per turn
         # into ./logs, evaluated under this user's HERMES_HOME context.  See
@@ -299,12 +375,19 @@ class WebChatAgentRunner:
         # appended after so anything the user specifies overrides on conflict
         # (LLMs typically weight later instructions more heavily when they
         # disagree, and we want user intent to win).
+        from gateway.web.sandbox import get_user_workspace
+
+        workspace = get_user_workspace()
+        runtime_block = _workspace_runtime_prompt(workspace=workspace, model=model)
+        base_ephemeral = (
+            _WEB_PLATFORM_PROMPT_ADDENDUM.strip() + "\n\n" + runtime_block
+        )
         if ephemeral_system_prompt:
             effective_ephemeral = (
-                _WEB_PLATFORM_PROMPT_ADDENDUM + "\n\n" + ephemeral_system_prompt
+                base_ephemeral + "\n\n" + ephemeral_system_prompt
             ).strip()
         else:
-            effective_ephemeral = _WEB_PLATFORM_PROMPT_ADDENDUM.strip()
+            effective_ephemeral = base_ephemeral
 
         agent = AIAgent(
             model=model,
@@ -313,6 +396,9 @@ class WebChatAgentRunner:
             quiet_mode=True,
             verbose_logging=False,
             ephemeral_system_prompt=effective_ephemeral,
+            # Context files (AGENTS.md etc.) load from TERMINAL_CWD override
+            # bound by enter_user_context — the user workspace, not process CWD.
+            skip_context_files=False,
             enabled_toolsets=enabled_toolsets,
             session_id=session_id,
             platform="web_chat",
@@ -350,6 +436,7 @@ class WebChatAgentRunner:
         step_callback: Optional[Callable] = None,
         agent_ref: Optional[list] = None,
         gateway_session_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, int]]:
         """Create a fresh agent and drive one conversation turn.
 
@@ -383,6 +470,7 @@ class WebChatAgentRunner:
                 user_id=user_id,
                 ephemeral_system_prompt=ephemeral_system_prompt,
                 session_id=session_id,
+                model_override=model_override,
                 stream_delta_callback=stream_delta_callback,
                 tool_progress_callback=tool_progress_callback,
                 tool_start_callback=tool_start_callback,

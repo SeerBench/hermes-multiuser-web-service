@@ -875,6 +875,36 @@ class TestEnvironmentHints:
         assert "hostname" not in result
         assert "WSL" not in result
 
+    def test_build_environment_hints_uses_terminal_cwd_override(
+        self, monkeypatch, tmp_path
+    ):
+        """web_chat binds TERMINAL_CWD per user — hints must not report os.getcwd()."""
+        import agent.prompt_builder as _pb
+        import sys
+        import platform
+        from hermes_constants import reset_terminal_cwd_override, set_terminal_cwd_override
+
+        process_cwd = tmp_path / "gateway_process"
+        user_ws = tmp_path / "web_workspaces" / "u_alice"
+        process_cwd.mkdir()
+        user_ws.mkdir(parents=True)
+        monkeypatch.chdir(process_cwd)
+        monkeypatch.setattr(_pb, "is_wsl", lambda: False)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
+        monkeypatch.setattr(platform, "release", lambda: "6.8.0-generic")
+        monkeypatch.delenv("TERMINAL_ENV", raising=False)
+        _pb._clear_backend_probe_cache()
+
+        token = set_terminal_cwd_override(user_ws)
+        try:
+            result = _pb.build_environment_hints()
+        finally:
+            reset_terminal_cwd_override(token)
+
+        assert f"Current working directory: {user_ws}" in result
+        assert str(process_cwd) not in result
+
     def test_build_environment_hints_on_windows_local(self, monkeypatch):
         import agent.prompt_builder as _pb
         import sys
