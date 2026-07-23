@@ -4,6 +4,7 @@ import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { ReasoningPanel } from './ReasoningPanel'
 import { ToolEvent } from './ToolEvent'
+import { WebSearchSources } from './WebSearchSources'
 import { Avatar, AvatarImage } from '@/components/ui/avatar'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import {
@@ -22,11 +23,14 @@ export function ChatTurnBubble({
   turn,
   onRetry,
   onEdit,
+  onShare,
   userAvatarUrl,
 }: {
   turn: Turn
   onRetry?: () => void
   onEdit?: () => void
+  /** Assistant: open confirm → create immutable share link. */
+  onShare?: () => void
   /** Custom profile image; only shown on user turns when set. */
   userAvatarUrl?: string | null
 }) {
@@ -95,6 +99,7 @@ export function ChatTurnBubble({
                 result_preview={seg.result_preview}
                 duration={seg.duration}
                 error={seg.error}
+                search_meta={seg.search_meta}
               />
             )
           }
@@ -160,13 +165,17 @@ export function ChatTurnBubble({
         )}
 
         {turn.status === 'done' && (
-          <MessageFooter>
+          <MessageFooter className="flex flex-row flex-wrap items-center gap-1.5">
             <MessageActions
               copyText={turnToCopyText(turn)}
               onRetry={turn.role === 'assistant' ? onRetry : undefined}
               onEdit={turn.role === 'user' ? onEdit : undefined}
               shareable={turn.role === 'assistant'}
+              onShare={turn.role === 'assistant' ? onShare : undefined}
             />
+            {turn.role === 'assistant' && (
+              <WebSearchSources segments={turn.segments} />
+            )}
           </MessageFooter>
         )}
       </MessageContent>

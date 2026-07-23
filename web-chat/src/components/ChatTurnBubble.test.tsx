@@ -67,4 +67,35 @@ describe('ChatTurnBubble', () => {
       container.querySelector('[data-slot="message-content"]'),
     ).toHaveClass('turn-assistant-content')
   })
+
+  it('shows sources row after web_search hits on assistant turn', () => {
+    const turn: Turn = {
+      id: 'a2',
+      role: 'assistant',
+      status: 'done',
+      activity: [],
+      segments: [
+        { kind: 'text', text: '根据搜索' },
+        {
+          kind: 'tool',
+          id: 't1',
+          tool: 'web_search',
+          preview: '',
+          args: '{}',
+          duration: 1,
+          search_meta: {
+            backend: 'brave-free',
+            urls: [
+              'https://a.example/1',
+              'https://b.example/2',
+              'https://c.example/3',
+            ],
+            url_count: 3,
+          },
+        },
+      ],
+    }
+    wrap(<ChatTurnBubble turn={turn} onRetry={() => undefined} />)
+    expect(screen.getByRole('button', { name: /sources|来源/i })).toBeTruthy()
+  })
 })

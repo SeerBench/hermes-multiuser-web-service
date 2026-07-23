@@ -325,6 +325,26 @@ class UsageRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class ShareSnapshot(Base):
+    """Immutable public share of a reply or conversation (read-only links)."""
+
+    __tablename__ = "share_snapshots"
+    __table_args__ = (
+        Index("ix_share_snapshots_owner_created", "owner_user_id", "created_at"),
+        UniqueConstraint("token", name="uq_share_snapshots_token"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    source_session_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class MemoryItem(Base):
     """Structured per-user memory entry (Memory Center source of truth)."""
 

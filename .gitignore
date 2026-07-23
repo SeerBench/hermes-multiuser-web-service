@@ -51,6 +51,8 @@ cli-config.yaml
 # Skills Hub state (lives in ~/.hermes/skills/.hub/ at runtime, but just in case)
 skills/.hub/
 ignored/
+# Local scratch / personal notes — never commit
+dev_local/
 .worktrees/
 environments/benchmarks/evals/
 

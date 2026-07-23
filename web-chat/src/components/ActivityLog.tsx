@@ -14,11 +14,16 @@ type Props = {
   streaming: boolean
 }
 
+function isSearchStatus(item: ActivityItem): boolean {
+  if (item.kind !== 'status') return false
+  return /Brave|DuckDuckGo|联网搜索|web search/i.test(item.text)
+}
+
 /**
  * Collapsible activity timeline rendered above an assistant turn.  While
  * the turn is streaming it shows the latest line as a live ticker (with a
- * spinner) and can be expanded to the full feed; once done it collapses to
- * a "view execution (N steps)" summary so the transcript stays clean.
+ * spinner) and can be expanded to the full feed; once done it prefers the
+ * web_search status line (Brave/ddgs) so quota feedback stays visible.
  */
 export function ActivityLog({ items, streaming }: Props) {
   const t = useT()
@@ -26,11 +31,14 @@ export function ActivityLog({ items, streaming }: Props) {
   if (items.length === 0) return null
 
   const latest = items[items.length - 1]
+  const searchStatus = [...items].reverse().find(isSearchStatus)
   const summary = open
     ? t('activity.hide')
     : streaming
       ? activityItemLabel(t, latest)
-      : t('activity.summary', { n: items.length })
+      : searchStatus
+        ? activityItemLabel(t, searchStatus)
+        : t('activity.summary', { n: items.length })
 
   return (
     <div className={`activity-log${streaming ? ' activity-streaming' : ''}`}>

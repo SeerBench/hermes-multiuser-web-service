@@ -3,6 +3,10 @@ import type { ServerMessage, UploadedFile } from './api'
 import type { ActivityItem } from './components/ActivityLog'
 import { formatBytes } from './format'
 import type { Translator } from './i18n'
+import {
+  extractWebSearchSummary,
+  formatSearchStatusMessage,
+} from './toolEventUtils'
 
 export type ToolSegment = {
   kind: 'tool'
@@ -13,6 +17,7 @@ export type ToolSegment = {
   result_preview?: string
   duration?: number
   error?: boolean
+  search_meta?: Record<string, unknown> | null
 }
 
 export type Segment =
@@ -44,6 +49,29 @@ export function newTurnId(): string {
     return crypto.randomUUID()
   }
   return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function searchMetaFromToolResult(
+  tool: string,
+  result?: string,
+): Record<string, unknown> | null {
+  const summary = extractWebSearchSummary(tool, result)
+  if (!summary) return null
+  try {
+    const parsed = result ? (JSON.parse(result) as { _meta?: unknown }) : null
+    if (parsed?._meta && typeof parsed._meta === 'object') {
+      return parsed._meta as Record<string, unknown>
+    }
+  } catch {
+    // fall through to synthesized meta
+  }
+  return {
+    backend: summary.backend,
+    urls: summary.urls.map((u) => u.url),
+    url_count: summary.resultCount,
+    brave_remaining: summary.braveRemaining,
+    fallback_reason: summary.fallbackReason,
+  }
 }
 
 /** 服务端历史消息 → 可渲染 Turn[]。 */
@@ -104,6 +132,7 @@ export function messagesToTurns(messages: ServerMessage[]): Turn[] {
         argsStr = typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
       }
       const result = id ? toolResults.get(id) : undefined
+      const search_meta = searchMetaFromToolResult(fnName, result)
       assistantTurn.segments.push({
         kind: 'tool',
         id,
@@ -113,7 +142,19 @@ export function messagesToTurns(messages: ServerMessage[]): Turn[] {
         result_preview: result,
         duration: 0,
         error: false,
+        search_meta,
       })
+      // 历史重载时没有 SSE activity，从 _meta 补一条搜索状态。
+      if (search_meta) {
+        const statusText = formatSearchStatusMessage(search_meta)
+        if (statusText) {
+          assistantTurn.activity.push({
+            kind: 'status',
+            text: statusText,
+            ts: Date.now(),
+          })
+        }
+      }
     }
   }
   flushAssistant()

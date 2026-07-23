@@ -1,20 +1,26 @@
-# MVP Plan — Workspace file read fix
+# MVP Plan — web_search Brave + ddgs hybrid
 
 ## Goal
 
-Users can attach or upload files in their workspace and Hermes can read them during chat via `web_file_read`.
+Multi-user web chat uses global Brave when the user has quota, falls back to ddgs, shows usage notifications and searched URLs in the UI. Users cannot configure keys or limits.
 
 ## Deliverables
 
-1. **Tool exposure:** Default `web_chat` agent receives `web_file_read`, `web_file_search`, and other fork sandbox tools from `hermes-web-chat`.
-2. **Document formats:** Local TXT/Markdown/PDF/DOCX/XLSX/PPTX readable after sandbox confinement.
-3. **Tests:** Gateway runner toolset regression + sandboxed file tool coverage + tenant isolation preserved.
+1. **Router:** `web_search_router` + `web_search_limits` + `sandboxed_web_search` override.
+2. **Env limits:** `WEB_SEARCH_BRAVE_MAX_PER_USER`, `WEB_SEARCH_BRAVE_WINDOW_SECONDS`, global `BRAVE_SEARCH_API_KEY`.
+3. **SSE feedback:** `status` message after each search; `tool_end.search_meta` for structured UI.
+4. **SPA:** ToolEvent shows backend label + URL list; i18n zh/en.
+5. **Tests:** Gateway sandbox routing, isolation, status message helper; frontend `extractWebSearchSummary`.
 
 ## Acceptance
 
-- `scripts/run_tests.sh tests/gateway/test_web_chat_runner.py tests/gateway/test_web_sandboxed_file_tools.py tests/gateway/test_web_uploads.py` green.
-- Manual: attach `uploads/foo.txt` or platform file path → agent calls `web_file_read` → answer uses file content.
+```bash
+scripts/run_tests.sh tests/gateway/test_web_sandboxed_web_search.py tests/gateway/test_web_chat_web_research.py
+cd web-chat && npm test
+```
+
+Manual: user A exhausts Brave quota → auto ddgs; ActivityLog shows remaining count; ToolEvent lists URLs.
 
 ## Not in this slice
 
-MinIO paths, Knowledge Center RAG merge, multi-turn attachment persistence.
+Brave+ddgs parallel merge, per-user Brave keys, SPA settings for search.

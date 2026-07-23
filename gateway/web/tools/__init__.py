@@ -27,10 +27,12 @@ from gateway.web.tools import sandboxed_file_operations  # noqa: F401 — side e
 from gateway.web.tools import sandboxed_knowledge_search  # noqa: F401 — side effect
 from gateway.web.tools import sandboxed_memory  # noqa: F401 — side effect
 from gateway.web.tools import sandboxed_skill_manage  # noqa: F401 — side effect
+from gateway.web.tools import sandboxed_web_search  # noqa: F401 — side effect
 
 __all__ = [
     "sandboxed_file_operations",
     "sandboxed_knowledge_search",
     "sandboxed_memory",
     "sandboxed_skill_manage",
+    "sandboxed_web_search",
 ]

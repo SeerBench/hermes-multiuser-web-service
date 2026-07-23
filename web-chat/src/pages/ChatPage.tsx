@@ -53,6 +53,7 @@ import {
   type ToolSegment,
   type Turn,
 } from '../chatTurns'
+import { summarizeTurnWebSearchConsumption } from '../toolEventUtils'
 import { provisionalTitleFromMessage } from '../conversationTitle'
 import {
   getChatWidth,
@@ -72,8 +73,10 @@ import {
 import {
   conversationToMarkdown,
   downloadMarkdown,
-  shareOrCopyText,
+  turnsToSharePayload,
+  type ShareTurnPayload,
 } from '../conversationShare'
+import { ConfirmShareDialog } from '../components/ConfirmShareDialog'
 import { toast } from 'sonner'
 import { routeHref } from '../routing'
 import { useLocale, useT } from '../i18n'
@@ -123,6 +126,12 @@ export function ChatPage({
   const [chatWidth, setChatWidthState] = useState<LayoutWidth>(() => getChatWidth())
   const [previewFile, setPreviewFile] = useState<PreviewableFile | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareKind, setShareKind] = useState<'reply' | 'conversation'>(
+    'conversation',
+  )
+  const [shareTurns, setShareTurns] = useState<ShareTurnPayload[]>([])
+  const [shareTitle, setShareTitle] = useState<string | null>(null)
   const workspaceId = getStoredWorkspaceId()
   const abortRef = useRef<AbortController | null>(null)
 
@@ -379,18 +388,20 @@ export function ChatPage({
   const convoTitle =
     activeConvo?.title?.trim() || t('convo.untitled')
 
-  const handleShareConversation = useCallback(async () => {
-    const md = conversationToMarkdown(turns, { title: convoTitle })
-    if (!md.trim()) return
-    try {
-      const mode = await shareOrCopyText(md, { title: convoTitle })
-      toast.success(
-        mode === 'shared' ? t('chat.share.shared') : t('chat.share.ok'),
-      )
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-    }
-  }, [turns, convoTitle, t])
+  const openShareDialog = useCallback(
+    (kind: 'reply' | 'conversation', payloadTurns: ShareTurnPayload[]) => {
+      if (!payloadTurns.length) return
+      setShareKind(kind)
+      setShareTurns(payloadTurns)
+      setShareTitle(convoTitle)
+      setShareOpen(true)
+    },
+    [convoTitle],
+  )
+
+  const handleShareConversation = useCallback(() => {
+    openShareDialog('conversation', turnsToSharePayload(turns))
+  }, [openShareDialog, turns])
 
   const handleExportConversation = useCallback(() => {
     const md = conversationToMarkdown(turns, { title: convoTitle })
@@ -627,6 +638,7 @@ export function ChatPage({
                     duration: ev.duration,
                     error: ev.error,
                     result_preview: ev.result_preview,
+                    search_meta: ev.search_meta,
                   }
                 }),
               })),
@@ -640,13 +652,32 @@ export function ChatPage({
             )
           } else if (ev.type === 'done') {
             setSessionId(ev.session_id)
-            setTurns((prev) =>
-              updateAssistant(prev, (turn) => ({
+            setTurns((prev) => {
+              const next = updateAssistant(prev, (turn) => ({
                 ...turn,
-                status: 'done',
+                status: 'done' as const,
                 usage: ev.usage,
-              })),
-            )
+              }))
+              // 本轮若调过 web_search：Sonner 只提示一次合计消耗。
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant') {
+                const consumed = summarizeTurnWebSearchConsumption(last.segments)
+                if (consumed) {
+                  const msg =
+                    consumed.brave > 0 && consumed.braveRemaining != null
+                      ? t('chat.toast.webSearchConsumedBrave', {
+                          n: consumed.total,
+                          brave: consumed.brave,
+                          remaining: consumed.braveRemaining,
+                        })
+                      : t('chat.toast.webSearchConsumed', {
+                          n: consumed.total,
+                        })
+                  queueMicrotask(() => toast.message(msg))
+                }
+              }
+              return next
+            })
             void ensureProvisionalTitle(ev.session_id, message)
             void convosApi
               .list()
@@ -1097,8 +1128,8 @@ export function ChatPage({
               }
               onToggleChatWidth={toggleChatWidth}
               onShareConversation={
-                sessionId && turns.length > 0
-                  ? () => void handleShareConversation()
+                platformMode && sessionId && turns.length > 0
+                  ? handleShareConversation
                   : undefined
               }
               onExportConversation={
@@ -1161,6 +1192,15 @@ export function ChatPage({
                           onEdit={
                             turn.role === 'user'
                               ? () => handleEdit(turn)
+                              : undefined
+                          }
+                          onShare={
+                            platformMode && turn.role === 'assistant'
+                              ? () =>
+                                  openShareDialog(
+                                    'reply',
+                                    turnsToSharePayload([turn]),
+                                  )
                               : undefined
                           }
                         />
@@ -1230,6 +1270,15 @@ export function ChatPage({
           onCancel={onLoginCancel}
         />
       )}
+
+      <ConfirmShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        kind={shareKind}
+        title={shareTitle}
+        turns={shareTurns}
+        sourceSessionId={sessionId}
+      />
     </div>
   )
 }

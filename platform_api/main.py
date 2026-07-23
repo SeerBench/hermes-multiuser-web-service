@@ -14,6 +14,7 @@ from platform_api.routers import (
     knowledge,
     memory,
     models,
+    shares,
     skills,
     usage,
     workspaces,
@@ -39,6 +40,7 @@ app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(models.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
 app.include_router(skills.router, prefix="/api/v1")
+app.include_router(shares.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 

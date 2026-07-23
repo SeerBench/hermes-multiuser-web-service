@@ -1,21 +1,32 @@
-# Database Design — fork control plane (unchanged by file-read fix)
+# Database Design — web_search Brave quota (no new tables)
 
-This fix does **not** add migrations or schema changes.
+## Brave usage counting
 
-## Default (SQLite)
+Uses existing **`usage_records`** table (Usage Center):
+
+| Field | Value for Brave search |
+|-------|------------------------|
+| `type` | `tool` |
+| `tool_name` | `web_search` |
+| `user_id` | active web user |
+| `metadata_json.backend` | `brave-free` |
+| `metadata_json.query` | search query (truncated) |
+| `metadata_json.urls` | hit URLs (capped list) |
+
+Window count: `created_at >= now - WEB_SEARCH_BRAVE_WINDOW_SECONDS` filtered by `metadata.backend == "brave-free"`.
+
+## No schema migration
+
+No new columns or tables. Requires `PLATFORM_DATABASE_URL` for persistent Brave quota; without it, Brave quota check fails closed to ddgs.
+
+## Other stores (unchanged)
 
 | Store | Path | Contents |
 |-------|------|----------|
-| Platform control plane | `$HERMES_HOME/platform.db` | users, workspaces, files metadata, sessions, RAG rows |
-| Gateway legacy | `$HERMES_HOME/web_users.db` | API-key sessions (when not on platform DB) |
-| Agent sessions | `$HERMES_HOME/state.db` | conversation history (per profile) |
-
-## File content
-
-- **Bytes on disk:** `$HERMES_HOME/web_workspaces/<user_id>/uploads/...` (local mode).
-- **Platform metadata:** `files` table in `platform.db` (`storage_key`, `status`, …).
-- **RAG chunks:** `document_chunks` (Files ingest) vs `knowledge_chunks` (Knowledge Center) — separate; agent `web_knowledge_search` uses Knowledge Center only.
+| Platform | `$HERMES_HOME/platform.db` | users, workspaces, usage_records, RAG |
+| Gateway legacy | `$HERMES_HOME/web_users.db` | sessions |
+| Agent | `$HERMES_HOME/state.db` | conversations |
 
 ## Tenant rule
 
-All platform queries filter by `tenant_id` / `owner_id`; cross-tenant access returns 404.
+Usage queries always filter by `user_id`; cross-tenant access returns 404.

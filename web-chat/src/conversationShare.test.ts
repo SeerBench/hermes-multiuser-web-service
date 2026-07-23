@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { conversationToMarkdown } from './conversationShare'
+import {
+  absoluteShareUrl,
+  conversationToMarkdown,
+  turnsToSharePayload,
+} from './conversationShare'
 import type { Turn } from './chatTurns'
 
 describe('conversationToMarkdown', () => {
@@ -41,5 +45,47 @@ describe('conversationToMarkdown', () => {
       },
     ]
     expect(conversationToMarkdown(turns)).toBe('')
+  })
+})
+
+describe('turnsToSharePayload', () => {
+  it('keeps only user/assistant text', () => {
+    const turns: Turn[] = [
+      {
+        id: '1',
+        role: 'user',
+        status: 'done',
+        segments: [{ kind: 'text', text: 'Q' }],
+        activity: [],
+      },
+      {
+        id: '2',
+        role: 'assistant',
+        status: 'done',
+        segments: [
+          { kind: 'text', text: 'A' },
+          {
+            kind: 'tool',
+            id: 't1',
+            tool: 'web_search',
+            preview: 'secret path',
+            args: '{}',
+          },
+        ],
+        activity: [],
+      },
+    ]
+    expect(turnsToSharePayload(turns)).toEqual([
+      { role: 'user', text: 'Q' },
+      { role: 'assistant', text: 'A' },
+    ])
+  })
+})
+
+describe('absoluteShareUrl', () => {
+  it('joins origin with hash share path', () => {
+    const url = absoluteShareUrl('#/share/abc123')
+    expect(url).toContain('#/share/abc123')
+    expect(url.startsWith('http')).toBe(true)
   })
 })

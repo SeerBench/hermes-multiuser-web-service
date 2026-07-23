@@ -341,6 +341,7 @@ class WebChatAdapter(BasePlatformAdapter):
             self._agent_semaphore = asyncio.Semaphore(self._max_concurrent_agents)
 
             self._log_global_skills_visibility()
+            self._log_web_research_status()
         except Exception as exc:
             logger.error("[%s] failed to initialise subsystems: %s", self.name, exc)
             return False
@@ -586,6 +587,22 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.info(
                 "[%s] global skills: %d found under %s (%s)",
                 self.name, skill_count, skills_dir, source,
+            )
+
+    def _log_web_research_status(self) -> None:
+        """One-shot startup probe for web_search / web_extract backend gates."""
+        try:
+            from gateway.web.web_research_status import (
+                log_web_research_status,
+                probe_web_research_status,
+            )
+
+            log_web_research_status(probe_web_research_status())
+        except Exception as exc:
+            logger.warning(
+                "[%s] web research startup probe failed: %s",
+                self.name,
+                exc,
             )
 
     @staticmethod
@@ -1334,13 +1351,44 @@ class WebChatAdapter(BasePlatformAdapter):
                     result_str = json.dumps(function_result, ensure_ascii=False, default=str)
             except Exception:
                 result_str = str(function_result)
-            _push("tool_end", {
+            # JSON tool payloads often encode failure as success:false.
+            if not error and result_str:
+                try:
+                    parsed = json.loads(result_str)
+                    if isinstance(parsed, dict):
+                        if parsed.get("success") is False or parsed.get("error"):
+                            error = True
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    pass
+
+            tool_end_payload: Dict[str, Any] = {
                 "id": str(tool_call_id) if tool_call_id is not None else None,
                 "tool": name,
                 "duration": duration,
                 "error": error,
                 "result_preview": _truncate_for_sse(result_str),
-            })
+            }
+            if name == "web_search":
+                try:
+                    from gateway.web.web_search_limits import (
+                        format_search_status_message,
+                        parse_search_meta_from_result,
+                    )
+
+                    search_meta = parse_search_meta_from_result(result_str)
+                    if search_meta:
+                        tool_end_payload["search_meta"] = search_meta
+                        if not error:
+                            _push(
+                                "status",
+                                {
+                                    "kind": "lifecycle",
+                                    "message": format_search_status_message(search_meta),
+                                },
+                            )
+                except Exception:
+                    pass
+            _push("tool_end", tool_end_payload)
 
         def reasoning_cb(text: str, **_kwargs) -> None:
             # AIAgent calls ``self.reasoning_callback(text)`` — see

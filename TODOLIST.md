@@ -8,7 +8,7 @@
 >
 > **规模目标**：50 用户；控制面默认 **SQLite**（可选 PostgreSQL）；**无 pgvector**（进程内 cosine）；Redis / MinIO 可选。
 
-**执行状态（2026-07-19）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 已补 **深度 healthz**、**k6 10 VU 基线**、**SECURITY_REVIEW checklist**；50 并发正式压测与 Compose CI 仍待。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
+**执行状态（2026-07-19）**：Phase 0–5 **MVP 主链路与产品化 Web UI 已落地**（含 Memory / Skill / **Knowledge** / **Usage** Center）；Phase 6 已补 **深度 healthz**、**k6 10 VU 基线**、**SECURITY_REVIEW checklist**；50 并发正式压测与 Compose CI 仍待。GitHub Actions 已装 `.[web-chat,platform]` 并增加 `platform-saas` job。控制面包名为 **`platform_api/`**（下划线，可 `import`），非计划书中的 `platform-api/`。`startplatform.sh` 默认启用 SQLite 控制面，也可用 `--postgres` 切换 PostgreSQL；未启动 Platform API 时仍可回退 legacy key-only 模式。
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
@@ -481,6 +481,8 @@ flowchart TD
 ### 6.5 CI
 
 - [x] `tests/platform/` 纳入 `scripts/run_tests.sh`
+- [x] GitHub Actions 安装 `.[web-chat,platform]`；`platform-saas` job 跑 `tests/platform` + `test_web_*` + user_id 隔离
+- [x] `web-chat-verify.yml`（`npm run verify`）
 - [ ] Docker Compose 集成测试 job（GitHub Actions）
 
 ---
@@ -544,7 +546,7 @@ flowchart TD
 | 优先级 | 功能 | 说明 |
 |--------|------|------|
 | ★★★ | ~~**Markdown 代码块高亮 + 复制**~~ | `MarkdownContent` + hljs + 「复制代码」 |
-| ★★☆ | ~~**导出当前对话**~~ | 标题菜单：分享 / 导出 Markdown（已完成） |
+| ★★☆ | ~~**导出 / 静态分享对话**~~ | 标题菜单：只读公开链接 + 导出 Markdown；助手气泡可分享单条回复 |
 | ★★☆ | ~~**用量 / 配额展示**~~ | new-api 钱包：Settings 账户侧 `/billing/*`；平台账本：**Usage Center** `#/usage`（已完成） |
 | ★★☆ | ~~**Composer 拖拽/粘贴上传**~~ | Composer：`onDrop` / `onPaste` → 现有 `uploads.create` |
 | ★★☆ | ~~**手动深色/浅色主题**~~ | Account 下拉与 Settings 均支持 system / light / dark |
@@ -552,7 +554,8 @@ flowchart TD
 | ★☆☆ | ~~**模型选择器**~~ | Composer 已提供可搜索模型下拉，并支持常用模型筛选 |
 
 - [x] `MarkdownContent`：代码块 `hljs` 或轻量高亮 + 「复制代码」按钮
-- [x] Chat 菜单：「导出对话」→ `.md` 下载或剪贴板 / 系统分享
+- [x] Chat 菜单：「分享对话」→ 确认后生成只读 `#/share/{token}`；「导出 Markdown」本地下载
+- [x] 助手气泡「分享」→ 单条回复快照；`GET /api/v1/shares/{token}` 匿名只读
 - [x] `ChatPage` composer：`onDrop` / `onPaste` 走现有 `uploads.create` 流程
 - [x] Settings：主题 `system | light | dark`（`localStorage` + `.light` / `.dark`）
 - [x] `POST /api/v1/auth/change-password` + Settings 表单

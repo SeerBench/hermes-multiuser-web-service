@@ -7,6 +7,7 @@ import {
   mainTabFromRoute,
   parseResetToken,
   parseRoute,
+  parseShareToken,
   routeHref,
   setLastWorkspaceTab,
   workspaceEntryRoute,
@@ -31,11 +32,19 @@ describe('routing', () => {
     expect(parseRoute('#/reset-password')).toBe('reset-password')
     expect(parseRoute('#/reset-password?token=abc')).toBe('reset-password')
     expect(parseRoute('#/chat')).toBe('chat')
+    expect(parseRoute('#/share')).toBe('share')
+    expect(parseRoute('#/share/tok_xyz')).toBe('share')
   })
 
   it('parses reset token from hash query', () => {
     expect(parseResetToken('#/reset-password?token=abc123')).toBe('abc123')
     expect(parseResetToken('#/chat')).toBe(null)
+  })
+
+  it('parses share token from hash path', () => {
+    expect(parseShareToken('#/share/tok_xyz')).toBe('tok_xyz')
+    expect(parseShareToken('#/share/')).toBe(null)
+    expect(parseShareToken('#/chat')).toBe(null)
   })
 
   it('defaults unknown hashes to chat', () => {
@@ -48,6 +57,7 @@ describe('routing', () => {
     expect(routeHref('settings')).toBe('#/settings')
     expect(routeHref('file-tags')).toBe('#/file-tags')
     expect(routeHref('admin-audit')).toBe('#/admin/audit')
+    expect(routeHref('share', 'tok_1')).toBe('#/share/tok_1')
   })
 
   it('detects workspace routes and main tabs', () => {

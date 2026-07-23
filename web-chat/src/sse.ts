@@ -37,6 +37,10 @@ export function parseSseFrame(frame: string): ChatEvent | null {
         duration: Number(data.duration ?? 0),
         error: Boolean(data.error),
         result_preview: String(data.result_preview ?? ''),
+        search_meta:
+          data.search_meta && typeof data.search_meta === 'object'
+            ? (data.search_meta as Record<string, unknown>)
+            : undefined,
       }
     case 'reasoning':
       return { type: 'reasoning', text: String(data.text ?? '') }
